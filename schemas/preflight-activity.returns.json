@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:preflight-activity returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "activity",
+    "ready",
+    "gaps"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "activity": {
+      "enum": [
+        "brief.collecting",
+        "document.inquiry",
+        "document.core",
+        "document.pillar",
+        "blueprint.outline",
+        "characters.modeling",
+        "characters.previewing",
+        "scenes.modeling",
+        "scenes.previewing",
+        "rules.catalog",
+        "rules.binding",
+        "ui.authoring",
+        "game.finalizing",
+        "assets.character",
+        "assets.scene",
+        "video.presets.validating",
+        "playtest.validating"
+      ]
+    },
+    "ready": {
+      "type": "boolean",
+      "description": "false \u65f6\u4e0d\u8981\u6d3e\u53d1\uff0c\u5148\u6309 gaps \u8865\u524d\u7f6e\u3002"
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "detail",
+          "resolveWith"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "required-input",
+              "author-gate",
+              "group",
+              "write-scope"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "resolveWith": {
+            "type": "string",
+            "description": "author = \u7b49\u4f5c\u8005\u64cd\u4f5c\uff1b\u6d3b\u52a8 ID = \u91cd\u6d3e\u90a3\u4e2a\u6d3b\u52a8\u7684 owner\uff1bunknown = \u9700\u8981\u7f16\u6392\u8005\u5224\u65ad\u3002"
+          }
+        }
+      }
+    },
+    "dispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "activity",
+        "activityRevision",
+        "workflowRevision",
+        "objective",
+        "hardChecks",
+        "requiredInputs",
+        "stopConditions",
+        "writeScope"
+      ],
+      "description": "ready \u4e3a true \u65f6\u7ed9\u51fa\u6d3e\u53d1\u8f7d\u8377\u6240\u9700\u5b57\u6bb5\uff0c\u76f4\u63a5\u8f6c\u7ed9 dispatch_peer\uff0c\u4e0d\u8981\u81ea\u5df1\u62fc\u3002",
+      "properties": {
+        "activity": {
+          "enum": [
+            "brief.collecting",
+            "document.inquiry",
+            "document.core",
+            "document.pillar",
+            "blueprint.outline",
+            "characters.modeling",
+            "characters.previewing",
+            "scenes.modeling",
+            "scenes.previewing",
+            "rules.catalog",
+            "rules.binding",
+            "ui.authoring",
+            "game.finalizing",
+            "assets.character",
+            "assets.scene",
+            "video.presets.validating",
+            "playtest.validating"
+          ]
+        },
+        "activityRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "workflowRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "objective": {
+          "type": "string"
+        },
+        "hardChecks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiredInputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stopConditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "writeScope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

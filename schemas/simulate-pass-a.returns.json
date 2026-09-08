@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:simulate-pass-a blueprint logic simulation returns",
+  "description": "返回蓝图路径、运行时覆盖率和结构化审查证据，不代表真实视频试玩结果。",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schemaVersion", "ok", "evidence", "simulations"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "ok": { "type": "boolean" },
+    "evidence": { "type": "object" }, "simulations": { "type": "array" }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registryId",
+    "kinoResourceId",
+    "kinoGenerationId",
+    "productionType",
+    "prompt",
+    "model"
+  ],
+  "properties": {
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optimistic asset-manifest revision returned by get-graph.assetRevision."
+    },
+    "registryId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hostMediaAssetId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kinoResourceId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kinoGenerationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "productionType": {
+      "enum": [
+        "character_ref",
+        "scene_ref"
+      ]
+    },
+    "characterId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "size": {
+      "enum": [
+        "2560x1440",
+        "1440x2560",
+        "2496x1664",
+        "1664x2496"
+      ]
+    },
+    "visualStyleKey": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sceneId": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

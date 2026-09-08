@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:patch-graph returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "ok": { "type": "boolean" },
+    "replayed": { "type": "boolean", "description": "True when idempotencyKey replayed a previously accepted mutation without another write." },
+    "applied": { "type": "integer", "minimum": 0 },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Document revision after a successful write, or the current revision when the write was refused. Pass it as the next expectedRevision."
+    },
+    "errorCode": {
+      "type": "string",
+      "description": "Stable failure code. revision.conflict means re-read via get-graph and rebase; do not retry the same ops blindly."
+    },
+    "errors": { "type": "array", "items": { "type": "string" } },
+    "failedOpIndex": { "type": "integer", "minimum": 0 },
+    "data": {
+      "type": "object",
+      "properties": { "applied": { "type": "integer", "minimum": 0 } }
+    },
+    "artifactRef": {
+      "type": "object",
+      "required": ["kind", "id", "revision"],
+      "properties": {
+        "kind": { "const": "blueprint" },
+        "id": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "validation": { "type": "object", "description": "ValidationSummary for the accepted document revision." },
+    "failedDimension": {
+      "type": "string",
+      "enum": ["requestBytes", "ops", "nodesTouched", "edgesTouched", "diffBytes"]
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "requestBytes": { "type": "integer", "minimum": 0 },
+        "ops": { "type": "integer", "minimum": 0 },
+        "nodesTouched": { "type": "integer", "minimum": 0 },
+        "edgesTouched": { "type": "integer", "minimum": 0 },
+        "diffBytes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "maxRequestBytes": { "type": "integer", "minimum": 0 },
+        "maxOps": { "type": "integer", "minimum": 0 },
+        "maxNodesTouched": { "type": "integer", "minimum": 0 },
+        "maxEdgesTouched": { "type": "integer", "minimum": 0 },
+        "maxDiffBytes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "uiHint": { "type": "object", "description": "Semantic Extension location for the affected blueprint or node." },
+    "versions": { "type": "array", "maxItems": 0, "items": false },
+    "gameSlug": { "type": ["string", "null"] }
+  }
+}

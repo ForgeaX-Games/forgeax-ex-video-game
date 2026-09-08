@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:generate-video-clip returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assetId", "status"],
+  "properties": {
+    "assetId": { "type": "string", "description": "Registry id of the produced (or failed) video_clip asset. Written as a generating placeholder before provider submission, so callers can poll immediately." },
+    "status": { "type": "string", "enum": ["ready", "failed"], "description": "Final status when the blocking call returns." },
+    "error": { "type": "string", "description": "Present when status=failed." }
+  }
+}

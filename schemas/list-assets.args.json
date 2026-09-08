@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:list-assets args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "enum": ["image", "video"], "description": "Filter by media kind." },
+    "productionType": { "enum": ["character_ref", "scene_ref", "shot_image", "grid_storyboard", "video_clip", "audio_track"], "description": "Filter by production type." },
+    "sceneNodeId": { "type": "string", "description": "Filter by owning node id." }
+  }
+}

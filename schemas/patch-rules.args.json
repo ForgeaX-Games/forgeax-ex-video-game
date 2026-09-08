@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:patch-rules args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ops"
+  ],
+  "$defs": {
+    "attrMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Constraints for one entity attribute. There is no privileged hp field: hp is just an attr named hp that carries max/initial.",
+      "properties": {
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "initial": {
+          "type": "number",
+          "description": "Value used when a run restarts or globals reset."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name for HUD and editor."
+        }
+      }
+    }
+  },
+  "properties": {
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "\u53ef\u7701\u7565\uff1a\u5e42\u7b49\u5199\u4e0e\u53ea\u8bfb\u8c03\u7528\u7531 Host \u4ece\u5f53\u524d\u72b6\u6001\u53d6\u5f53\u524d\u6d3b\u52a8\u4fee\u8ba2\u53f7\u3002\u53ea\u6709\u9700\u8981\u8de8\u6d3b\u52a8\u4e16\u4ee3\u505a\u51b2\u7a81\u68c0\u6d4b\u65f6\u624d\u663e\u5f0f\u643a\u5e26\u3002"
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optimistic lock. Pass the revision returned by get-graph; the batch is refused with errorCode revision.conflict if the document moved on."
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Stable identity for one logical rule batch. Same key and ops replay the original accepted result; key reuse for different ops fails with idempotency.conflict."
+    },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Applied as one atomic batch against the author-time rule catalog in blueprint.json. Any failure leaves the document untouched. This is not a running play session: values here are the initial state a playthrough starts from.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "const": "upsert-entity"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "\u65b0\u5efa ID \u53ea\u5141\u8bb8\u5b57\u6bcd\u3001\u6570\u5b57\u4e0e\u4e0b\u5212\u7ebf\uff0c\u4e14\u4e0d\u80fd\u4ee5\u6570\u5b57\u5f00\u5934\uff08\u6b63\u5219 ^[A-Za-z_][A-Za-z0-9_]*$\uff09\u3002\u5408\u6cd5\uff1ahp\u3001wanted_level\u3001Boss2\u3002\u975e\u6cd5\uff1a\u901a\u7f09\u7b49\u7ea7\u3001wanted-level\u30012hp\u3002\u4e2d\u6587\u540d\u5b57\u653e name \u5b57\u6bb5\uff0c\u4e0d\u53d7\u9650\u5236\u3002\u66f4\u65b0\u6216\u5220\u9664\u5386\u53f2 ID \u4e0d\u53d7\u6b64\u9650\u5236\u3002"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "entityId"
+            ],
+            "properties": {
+              "op": {
+                "const": "remove-entity"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "entityId",
+              "attrId"
+            ],
+            "properties": {
+              "op": {
+                "const": "upsert-entity-attr"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "\u65b0\u5efa ID \u53ea\u5141\u8bb8\u5b57\u6bcd\u3001\u6570\u5b57\u4e0e\u4e0b\u5212\u7ebf\uff0c\u4e14\u4e0d\u80fd\u4ee5\u6570\u5b57\u5f00\u5934\uff08\u6b63\u5219 ^[A-Za-z_][A-Za-z0-9_]*$\uff09\u3002\u5408\u6cd5\uff1ahp\u3001wanted_level\u3001Boss2\u3002\u975e\u6cd5\uff1a\u901a\u7f09\u7b49\u7ea7\u3001wanted-level\u30012hp\u3002\u4e2d\u6587\u540d\u5b57\u653e name \u5b57\u6bb5\uff0c\u4e0d\u53d7\u9650\u5236\u3002\u66f4\u65b0\u6216\u5220\u9664\u5386\u53f2 ID \u4e0d\u53d7\u6b64\u9650\u5236\u3002"
+              },
+              "attrId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "\u65b0\u5efa ID \u53ea\u5141\u8bb8\u5b57\u6bcd\u3001\u6570\u5b57\u4e0e\u4e0b\u5212\u7ebf\uff0c\u4e14\u4e0d\u80fd\u4ee5\u6570\u5b57\u5f00\u5934\uff08\u6b63\u5219 ^[A-Za-z_][A-Za-z0-9_]*$\uff09\u3002\u5408\u6cd5\uff1ahp\u3001wanted_level\u3001Boss2\u3002\u975e\u6cd5\uff1a\u901a\u7f09\u7b49\u7ea7\u3001wanted-level\u30012hp\u3002\u4e2d\u6587\u540d\u5b57\u653e name \u5b57\u6bb5\uff0c\u4e0d\u53d7\u9650\u5236\u3002\u66f4\u65b0\u6216\u5220\u9664\u5386\u53f2 ID \u4e0d\u53d7\u6b64\u9650\u5236\u3002"
+              },
+              "value": {
+                "type": "number",
+                "description": "Author-time value. Defaults to meta.initial, then 0."
+              },
+              "meta": {
+                "$ref": "#/$defs/attrMeta"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "entityId",
+              "attrId"
+            ],
+            "properties": {
+              "op": {
+                "const": "remove-entity-attr"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "attrId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "const": "upsert-variable"
+              },
+              "variableId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "\u65b0\u5efa ID \u53ea\u5141\u8bb8\u5b57\u6bcd\u3001\u6570\u5b57\u4e0e\u4e0b\u5212\u7ebf\uff0c\u4e14\u4e0d\u80fd\u4ee5\u6570\u5b57\u5f00\u5934\uff08\u6b63\u5219 ^[A-Za-z_][A-Za-z0-9_]*$\uff09\u3002\u5408\u6cd5\uff1ahp\u3001wanted_level\u3001Boss2\u3002\u975e\u6cd5\uff1a\u901a\u7f09\u7b49\u7ea7\u3001wanted-level\u30012hp\u3002\u4e2d\u6587\u540d\u5b57\u653e name \u5b57\u6bb5\uff0c\u4e0d\u53d7\u9650\u5236\u3002\u66f4\u65b0\u6216\u5220\u9664\u5386\u53f2 ID \u4e0d\u53d7\u6b64\u9650\u5236\u3002"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "initial": {
+                "description": "Starting value for a playthrough. Numbers participate in formulas; strings are author-side state only.",
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "variableId"
+            ],
+            "properties": {
+              "op": {
+                "const": "remove-variable"
+              },
+              "variableId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "const": "upsert-formula"
+              },
+              "formulaId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "\u65b0\u5efa ID \u53ea\u5141\u8bb8\u5b57\u6bcd\u3001\u6570\u5b57\u4e0e\u4e0b\u5212\u7ebf\uff0c\u4e14\u4e0d\u80fd\u4ee5\u6570\u5b57\u5f00\u5934\uff08\u6b63\u5219 ^[A-Za-z_][A-Za-z0-9_]*$\uff09\u3002\u5408\u6cd5\uff1ahp\u3001wanted_level\u3001Boss2\u3002\u975e\u6cd5\uff1a\u901a\u7f09\u7b49\u7ea7\u3001wanted-level\u30012hp\u3002\u4e2d\u6587\u540d\u5b57\u653e name \u5b57\u6bb5\uff0c\u4e0d\u53d7\u9650\u5236\u3002\u66f4\u65b0\u6216\u5220\u9664\u5386\u53f2 ID \u4e0d\u53d7\u6b64\u9650\u5236\u3002"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "expressionText": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Author expression, e.g. \"var.var-clues + entity.ent-wukong.attr.insight\". The server parses it into the canonical authoring AST with the shared parser and validates every reference. Required when creating; omit to keep the existing expression. Objects created earlier in the same batch may be referenced. \u8868\u8fbe\u5f0f\u53ea\u80fd\u8c03\u7528\u8fd0\u884c\u65f6\u652f\u6301\u7684\u516b\u4e2a\u51fd\u6570\uff1aabs(x)\u3001floor(x)\u3001round(x)\u3001min(a,b)\u3001max(a,b)\u3001rand()\u3001randInt(a,b)\u3001chance(p)\u3002\u5176\u4ed6\u51fd\u6570\u540d\u6216\u9519\u8bef\u7684\u53c2\u6570\u4e2a\u6570\u4f1a\u88ab\u76f4\u63a5\u62d2\u7edd\u3002"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "formulaId"
+            ],
+            "properties": {
+              "op": {
+                "const": "remove-formula"
+              },
+              "formulaId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

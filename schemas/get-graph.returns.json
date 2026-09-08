@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:get-graph returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["project", "assetEntities", "revision", "assetRevision"],
+  "properties": {
+    "project": {
+      "description": "Full GraphLibraryDocument when no selector is supplied, or a bounded graph shard {blueprintId,title,entry,graph} when snapshot selectors are supplied. Character and scene production definitions are not embedded; nodes reference their manifest entities by id. null if no disk data.",
+      "type": ["object", "null"]
+    },
+    "assetEntities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["characters", "scenes", "videos"],
+      "description": "Read projection of assets/manifest.json assetCatalog entities. Prompts, descriptions and current preview asset ids live here, outside blueprint.json.",
+      "properties": {
+        "characters": { "type": "object", "additionalProperties": { "type": "object" } },
+        "scenes": { "type": "object", "additionalProperties": { "type": "object" } },
+        "videos": { "type": "object", "additionalProperties": { "type": "object" } }
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Server-authoritative blueprint revision. Pass it back as expectedRevision only for graph/rules writes."
+    },
+    "assetRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Server-authoritative assets/manifest.json revision. Missing legacy stamps read as 0; pass it as expectedRevision for character, scene, and preview asset writes."
+    },
+    "snapshot": {
+      "type": "object",
+      "required": ["token", "revision", "blueprintId", "nodeIds", "fields"],
+      "properties": {
+        "token": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "blueprintId": { "type": "string", "minLength": 1 },
+        "nodeIds": { "type": "array", "items": { "type": "string" } },
+        "fields": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "gameSlug": { "type": ["string", "null"] }
+  }
+}

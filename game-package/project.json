@@ -1,0 +1,10 @@
+{
+  "id": "ad0e4ae7-04a3-4ad1-81b1-e7b81253b623",
+  "title": "ad0e4ae7-04a3-4ad1-81b1-e7b81253b623",
+  "platform": "game-video",
+  "platformVersion": "1",
+  "entry": {
+    "blueprint": "blueprint.json",
+    "components": "dist/components"
+  }
+}

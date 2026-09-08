@@ -1,0 +1,40 @@
+{
+  "version": "game-video.graph.v1",
+  "graph": {
+    "nodes": [
+      {
+        "id": "entry",
+        "type": "perf",
+        "position": { "x": 80, "y": 80 },
+        "inputs": [],
+        "outputs": [],
+        "data": { "name": "新演出节点" }
+      }
+    ],
+    "edges": []
+  },
+  "manifest": {
+    "version": "game-video.blueprint-manifest.v1",
+    "mainPackId": "bp-main",
+    "packs": {
+      "bp-main": {
+        "id": "bp-main",
+        "title": "主蓝图",
+        "entry": "entry",
+        "graph": {
+          "nodes": [
+            {
+              "id": "entry",
+              "type": "perf",
+              "position": { "x": 80, "y": 80 },
+              "inputs": [],
+              "outputs": [],
+              "data": { "name": "新演出节点" }
+            }
+          ],
+          "edges": []
+        }
+      }
+    }
+  }
+}

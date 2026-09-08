@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:validate-project returns",
+  "type": "object",
+  "required": ["schemaVersion", "ok", "summary", "evidence"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "ok": { "type": "boolean" },
+    "alreadyComplete": {
+      "type": "boolean",
+      "description": "Host 已交付过该活动。这次校验是幂等重放，不要据此重做写入。"
+    },
+    "summary": { "type": "object" },
+    "evidence": {
+      "type": "array",
+      "description": "每项对应一个 checkId。status 为 warn 时是质量提示，不阻塞完成。",
+      "items": {
+        "type": "object",
+        "properties": {
+          "checkId": { "type": "string" },
+          "status": { "enum": ["pass", "fail", "warn", "not-required"] },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": { "type": "string" },
+                "message": { "type": "string" },
+                "location": { "type": "object", "description": "问题所在对象（蓝图节点 / 规则条目 / 文档 / 素材），可直接用于 focus_extension。" },
+                "owner": { "type": "string", "description": "该由哪个活动返工。只读活动（如 playtest.validating）没有写域，report_blocker 时直接引用这个值说明返工哪一步，不要自行判断。" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

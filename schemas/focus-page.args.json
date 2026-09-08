@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:focus-page args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["activityRevision", "location"],
+  "properties": {
+    "activityRevision": { "type": "integer", "minimum": 1 },
+    "reason": { "type": "string", "enum": ["activity-started", "artifact-created", "user-action-required", "validation-failed"] },
+    "location": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "enum": ["document", "blueprint", "rule", "ui", "asset", "play"] }, "documentType": { "type": "string", "enum": ["intake", "core", "inquiry", "pillar"] }, "blueprintId": { "type": "string" }, "nodeId": { "type": "string" }, "section": { "type": "string", "enum": ["entities", "variables", "formulas"] }, "itemId": { "type": "string" }, "treeNodeId": { "type": "string" }, "overlayId": { "type": "string" }, "root": { "type": "string", "enum": ["character",
+              "scene",
+              "image", "video", "audio", "font"] }, "folderId": { "type": "string" }, "entryId": { "type": "string" } }, "additionalProperties": false }
+  }
+}

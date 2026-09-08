@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:get-graph args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "blueprintId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional pack id. Omit for the main blueprint."
+    },
+    "nodeIds": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Optional node shard selector."
+    },
+    "fields": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["summary", "interaction", "storyText", "overlays", "edges"]
+      },
+      "description": "Optional node fields to project. Omitting fields returns the selected nodes in full."
+    }
+  }
+}

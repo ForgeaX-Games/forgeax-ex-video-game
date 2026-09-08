@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:get-node-production-context returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "nodeRef",
+    "node",
+    "video",
+    "readiness"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "nodeRef": {
+      "type": "object"
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "interaction": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "本节拍的玩法契约（总脉络声明）：beat 类型、观众能做的动作（元件+事件+意图+结算目标+出口）、终局条件。整装照它接线，完成门 finalization.plan-wired 会逐条核对。"
+        }
+      }
+    },
+    "video": {
+      "type": "object",
+      "required": ["binding"],
+      "properties": {
+        "binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "bound", "ready"],
+          "properties": {
+            "state": {
+              "enum": ["unconfigured", "processing", "ready", "failed", "missing", "invalid"],
+              "description": "节点当前视频绑定的派生状态；同时适用于 AI 生成、上传和导入视频。"
+            },
+            "bound": { "type": "boolean" },
+            "ready": { "type": "boolean" },
+            "assetId": { "type": "string" },
+            "assetStatus": { "type": "string" },
+            "source": { "enum": ["upload", "generation", "import", "derived", "unknown"] }
+          }
+        }
+      }
+    },
+    "readiness": {
+      "type": "object"
+    }
+  }
+}

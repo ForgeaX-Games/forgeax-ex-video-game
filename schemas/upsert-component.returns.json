@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:upsert-component returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok"],
+  "properties": {
+    "ok": { "const": true },
+    "componentId": { "type": "string" },
+    "created": { "type": "boolean" },
+    "componentCount": { "type": "integer", "minimum": 1 },
+    "definitionPath": { "type": "string" },
+    "modulePath": { "const": "components/index.js" },
+    "revision": { "type": "string" },
+    "overlayId": {
+      "type": "string",
+      "description": "Template overlay id written to ui.overlays when compose was provided. Omitted for single-control authoring."
+    },
+    "overlayTitle": {
+      "type": "string",
+      "description": "Template display name written when compose was provided."
+    }
+  }
+}

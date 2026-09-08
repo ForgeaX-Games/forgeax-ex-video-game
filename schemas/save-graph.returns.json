@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:save-graph returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "ok": { "type": "boolean" },
+    "replayed": { "type": "boolean" },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Document revision after a successful save, or the current revision when the save was refused."
+    },
+    "errorCode": {
+      "type": "string",
+      "description": "Stable failure code. revision.conflict means the document moved on since it was read; re-read before saving again."
+    },
+    "errors": { "type": "array", "items": { "type": "string" }, "description": "Error messages when the save could not be performed, e.g. invalid game root/slug or missing project; non-empty ⇒ ok=false, nothing written." },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "artifactRef": {
+      "type": "object",
+      "required": ["kind", "id", "revision"],
+      "properties": {
+        "kind": { "const": "blueprint" },
+        "id": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "validation": { "type": "object", "description": "ValidationSummary for the accepted document revision." },
+    "versions": {
+      "type": "array",
+      "description": "Reserved compatibility field. Successful saves currently return an empty array.",
+      "maxItems": 0,
+      "items": false
+    },
+    "gameSlug": { "type": ["string", "null"] }
+  }
+}

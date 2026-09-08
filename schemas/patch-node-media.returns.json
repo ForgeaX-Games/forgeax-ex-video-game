@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "wb-game-video:patch-node-media returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "ok"],
+  "$defs": {
+    "nodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blueprintId", "nodeId"],
+      "properties": {
+        "blueprintId": { "type": "string", "minLength": 1 },
+        "nodeId": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "ok": { "type": "boolean" },
+    "graphRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Accepted blueprint revision, or the current revision on a stale request."
+    },
+    "assetRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Accepted manifest revision, or the current revision on a stale request."
+    },
+    "nodeRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nodeRef" }
+    },
+    "replayed": { "type": "boolean" },
+    "idempotency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "replayed"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "replayed": { "type": "boolean" }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "revision",
+        "assetRevision",
+        "nodeRefs",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "kind": { "const": "node-media-bindings" },
+        "id": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "assetRevision": { "type": "integer", "minimum": 0 },
+        "nodeRefs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nodeRef" }
+        },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "status": { "const": "ready" }
+      }
+    },
+    "errorCode": { "type": "string", "minLength": 1 },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "gameSlug": { "type": ["string", "null"] }
+  }
+}

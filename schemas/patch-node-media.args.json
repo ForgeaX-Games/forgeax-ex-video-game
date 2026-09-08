@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "wb-game-video:patch-node-media args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "activityRevision",
+    "expectedGraphRevision",
+    "graphSnapshotToken",
+    "expectedAssetRevision",
+    "idempotencyKey",
+    "bindings"
+  ],
+  "$defs": {
+    "nodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blueprintId", "nodeId"],
+      "properties": {
+        "blueprintId": { "type": "string", "minLength": 1 },
+        "nodeId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "references": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sceneAssetIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "firstFrameAssetId": { "type": "string", "minLength": 1 },
+        "lastFrameAssetId": { "type": "string", "minLength": 1 },
+        "extraImageAssetIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "description": "Provider-neutral platform asset ids only. Provider resource ids, URLs, paths, and job ids are forbidden."
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "durationSeconds",
+        "generateAudio",
+        "mode",
+        "references"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "durationSeconds": { "type": "integer", "minimum": 4, "maximum": 15 },
+        "generateAudio": { "type": "boolean" },
+        "mode": { "enum": ["strict", "firstref", "ref", "t2v"] },
+        "size": {
+          "enum": ["2560x1440", "1440x2560", "2496x1664", "1664x2496"]
+        },
+        "resolution": { "enum": ["720p", "1080p"] },
+        "model": { "type": "string", "minLength": 1 },
+        "visualStyleKey": { "type": "string", "minLength": 1 },
+        "references": { "$ref": "#/$defs/references" }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "prompt", "generation"],
+      "properties": {
+        "kind": { "const": "video" },
+        "prompt": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "generation": { "$ref": "#/$defs/generation" }
+      },
+      "description": "The complete node.data.media authoring payload. It intentionally excludes ref, meta, provider ids, topology, UI, rules, and story fields."
+    }
+  },
+  "properties": {
+    "activityRevision": { "type": "integer", "minimum": 1 },
+    "expectedGraphRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Exact blueprint revision returned with graphSnapshotToken."
+    },
+    "graphSnapshotToken": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Snapshot token returned by get-graph for the node shard used to build this binding."
+    },
+    "expectedAssetRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Exact stable assets/manifest.json revision containing the character and scene references."
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "bindings": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nodeRef", "media"],
+        "properties": {
+          "nodeRef": { "$ref": "#/$defs/nodeRef" },
+          "media": { "$ref": "#/$defs/media" }
+        }
+      }
+    }
+  }
+}

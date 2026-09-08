@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:upsert-component args",
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Flat optional-fields schema. The framework cannot pass union (anyOf/oneOf) tool arguments, so the single-control vs template distinction is validated by the service: provide id/events/implementation to author a control, provide compose to assemble a template, or provide both to create a control and assemble it in one call. Providing neither is rejected by the service.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$",
+      "description": "Stable component id used by OverlayChild.component and base:<id>. Required when authoring a single control, or when composing a template that also creates a brand-new control in the same call."
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "User-facing name shown under Basic UI."
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "面向 AI 的摆放位置与潜规则提示：元件一般放在页面的什么位置、以及一些潜规则（如血条不建议同一场景出现两次；敌方血条一般放在页面顶部水平居中位置；我方血条一般放在页面右下角）。配界面时据此决定元件放在哪。"
+    },
+    "inputs": {
+      "type": "array",
+      "maxItems": 40,
+      "description": "Manifest-driven configuration fields rendered in the right inspector. Every field must declare a default whose JSON type matches valueType. Color fields use valueType=color and a ColorPicker-compatible default such as #rrggbb or rgba(r,g,b,a); component=color is not required.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "valueType", "default"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "valueType": { "enum": ["string", "number", "boolean", "color", "bind", "json"] },
+          "required": { "type": "boolean" },
+          "default": {
+            "description": "Required initial value. Must match valueType; when options are present it must equal one option.value."
+          },
+          "options": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 40,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["value", "label"],
+              "properties": {
+                "value": { "type": "string", "minLength": 1, "maxLength": 120 },
+                "label": { "type": "string", "minLength": 1, "maxLength": 120 }
+              }
+            }
+          },
+          "min": { "type": "number" },
+          "step": { "type": "number" },
+          "component": {
+            "enum": ["textStyle", "effects", "events", "hotspotEvents", "qteCues", "entity", "attr", "color", "numberExpr"]
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 40,
+      "description": "Events emitted through props.emit(eventId) and exposed in the event editor. Required when authoring a single control, or when the composed template also creates a new control in the same call.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 120 }
+        }
+      }
+    },
+    "implementation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50000,
+      "description": "A JavaScript expression evaluating to a React component, usually `function MyControl(props) { ... }`. React is injected in lexical scope; use React.createElement and React hooks, and never redeclare or shadow React with a variable, function, class, parameter, destructuring target, or catch binding. Do not use import, export, JSX, TypeScript, external packages, or undeclared identifiers. Inputs arrive as flat props; call props.emit(eventId) for declared events. The tool validates the implementation before writing. When validation fails, fix the reported implementation defect and call this tool again; do not report the component as created until the tool succeeds. Required when authoring a single control, or when the composed template also creates a new control in the same call."
+    },
+    "compose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["children"],
+      "description": "Assemble a multi-control template (overlay). Omit to author a single control, which lands in the 控件 directory as base:<id>. When present, the children are written to ui.overlays as a reusable template in the 模板 directory; a brand-new control may be created in the same call by also providing id/events/implementation.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$",
+          "description": "Overlay id stored under ui.overlays. Omit to auto-derive scheme-<slug> from the title. Must not start with base: or node:."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Template display name shown in the 模板 directory."
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "面向 AI 的整块模板摆放提示：这张拼好的模板作为一个整体一般放在视频画布的什么位置（例如「我方状态 HUD 一般放在右下角」）。"
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 40,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "component"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
+              "component": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$",
+                "description": "Existing control id (built-in, previously authored, or the new control created in this same call)."
+              },
+              "inputs": { "type": "object" },
+              "layout": { "type": "object" },
+              "trigger": { "type": "object" },
+              "window": { "type": "object" },
+              "note": { "type": "string", "maxLength": 500 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

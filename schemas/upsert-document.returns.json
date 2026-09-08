@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:upsert-document returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "document"
+  ],
+  "properties": {
+    "document": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "成功时是 DocumentRecord 摘要（id、name、documentType、updatedAt）；失败时为 null，真实原因在 error 字段里。"
+    },
+    "error": {
+      "type": "string",
+      "description": "失败原因原文。document 为 null 时必看这里，不要重试同样的内容。"
+    }
+  }
+}

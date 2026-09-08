@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:simulate-pass-a blueprint logic simulation args",
+  "description": "蓝图可玩性审查使用的无媒体 GraphSession 逻辑模拟；工具 ID 保持稳定。",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "可省略：由 Host 从当前状态取当前活动修订号。"
+    }
+  }
+}

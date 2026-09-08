@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:inspect-project returns",
+  "type": "object",
+  "required": ["schemaVersion", "projectRevision", "inventory", "issues"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "projectRevision": { "type": "integer" },
+    "inventory": { "type": "object" },
+    "issues": { "type": "array" },
+    "qualityMetrics": {
+      "type": "object",
+      "required": [
+        "interactionDensity",
+        "maxBattlepackLoopDepth",
+        "decisionConsequenceRate",
+        "stateActivityRate",
+        "formulaConsumptionRate",
+        "feedbackCoverageRate",
+        "differentiatedEndingCount"
+      ],
+      "properties": {
+        "interactionDensity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxBattlepackLoopDepth": { "type": ["integer", "null"], "minimum": 1 },
+        "decisionConsequenceRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stateActivityRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "formulaConsumptionRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "feedbackCoverageRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "differentiatedEndingCount": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

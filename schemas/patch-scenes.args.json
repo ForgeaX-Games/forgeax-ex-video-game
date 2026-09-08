@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:patch-scenes args",
+  "description": "Atomically maintain scene entities in assets/manifest.json assetCatalog. Blueprint nodes only reference these entities by sceneId.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ops"
+  ],
+  "properties": {
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "可省略：幂等写与只读调用由 Host 从当前状态取当前活动修订号。只有需要跨活动世代做冲突检测时才显式携带。"
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optimistic asset-manifest revision returned by get-graph.assetRevision."
+    },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "sceneId"
+            ],
+            "properties": {
+              "op": {
+                "const": "upsert-scene"
+              },
+              "sceneId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "新建 ID 只允许字母、数字与下划线，且不能以数字开头（正则 ^[A-Za-z_][A-Za-z0-9_]*$）。合法：hp、wanted_level、Boss2。非法：通缉等级、wanted-level、2hp。中文场景名放 name 字段，不受限制。更新或删除历史 ID 不受此限制。"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "场景名，使用作者语言（默认中文）。"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "description": "视觉描述，使用作者语言。"
+              },
+              "previewPrompt": {
+                "type": "string",
+                "minLength": 1,
+                "description": "场景参考图的生成提示词，使用作者语言。不要写成英文；如某个生成服务需要英文，由平台在提交时转换。"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "sceneId"
+            ],
+            "properties": {
+              "op": {
+                "const": "remove-scene"
+              },
+              "sceneId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "新建 ID 只允许字母、数字与下划线，且不能以数字开头（正则 ^[A-Za-z_][A-Za-z0-9_]*$）。合法：hp、wanted_level、Boss2。非法：通缉等级、wanted-level、2hp。中文场景名放 name 字段，不受限制。更新或删除历史 ID 不受此限制。"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

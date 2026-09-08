@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:preflight-activity args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "activity"
+  ],
+  "properties": {
+    "activity": {
+      "enum": [
+        "brief.collecting",
+        "document.inquiry",
+        "document.core",
+        "document.pillar",
+        "blueprint.outline",
+        "characters.modeling",
+        "characters.previewing",
+        "scenes.modeling",
+        "scenes.previewing",
+        "rules.catalog",
+        "rules.binding",
+        "ui.authoring",
+        "game.finalizing",
+        "assets.character",
+        "assets.scene",
+        "video.presets.binding",
+        "video.presets.validating",
+        "playtest.validating"
+      ],
+      "description": "\u6253\u7b97\u6d3e\u53d1\u7684\u6d3b\u52a8\u3002\u9884\u68c0\u53ea\u8bfb\uff0c\u4e0d\u6539\u72b6\u6001\uff0c\u4e5f\u4e0d\u5f00\u542f\u6d3b\u52a8\u3002"
+    },
+    "entityIdBindingRequested": {
+      "type": "boolean",
+      "default": false,
+      "description": "characters.modeling 是否需要同时绑定规则实体；纯视觉定义保持 false。"
+    }
+  }
+}

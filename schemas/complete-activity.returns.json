@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:complete-activity returns",
+  "type": "object",
+  "required": ["schemaVersion", "accepted", "state", "projection", "evidence"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "accepted": { "type": "boolean" },
+    "disposition": { "enum": ["retryable", "blocked"] },
+    "activity": { "type": "string" },
+    "activityRevision": { "type": "integer", "minimum": 0 },
+    "currentRevision": { "type": "integer", "minimum": 0 },
+    "failedChecks": { "type": "array", "items": { "type": "string" } },
+    "retry": { "enum": ["retry", "stop"] },
+    "guidance": { "type": "string" },
+    "alreadyComplete": {
+      "type": "boolean",
+      "description": "Host 已交付过该活动。这次调用是幂等重放，没有改状态。"
+    },
+    "state": { "type": "object" },
+    "projection": { "type": "object" },
+    "evidence": { "type": "array" }
+  }
+}

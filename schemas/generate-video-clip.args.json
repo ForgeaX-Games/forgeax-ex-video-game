@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:generate-video-clip args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["prompt"],
+  "properties": {
+    "prompt": { "type": "string", "minLength": 1, "maxLength": 4000, "description": "Base video prompt. When generating for a blueprint node, use that node's data.media.prompt and preserve it after binding the generated asset." },
+    "durationSeconds": { "type": "integer", "minimum": 4, "maximum": 15, "default": 8, "description": "Clip duration in seconds. >15s segmented generation is out of scope for this tool." },
+    "generateAudio": { "type": "boolean", "default": false, "description": "Ask the provider to synthesize audio." },
+    "mode": { "type": "string", "enum": ["strict", "firstref", "ref", "t2v"], "default": "t2v", "description": "Generation mode; the server validates the matching reference combination." },
+    "firstFrameAssetId": { "type": "string", "description": "Registry image asset id used as first_frame." },
+    "lastFrameAssetId": { "type": "string", "description": "Registry image asset id used as last_frame (strict mode only)." },
+    "referenceImageAssetIds": { "type": "array", "items": { "type": "string" }, "maxItems": 9, "description": "Registry image asset ids used as reference_image (ref mode only)." },
+    "size": { "type": "string", "enum": ["2560x1440", "1440x2560", "2496x1664", "1664x2496"], "default": "2560x1440", "description": "Kino output size; the Host capability receives the corresponding aspect ratio." },
+    "resolution": { "type": "string", "enum": ["720p", "1080p"], "default": "720p", "description": "Requested Kino output resolution." },
+    "model": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional Kino video model id. Omit to use the server-selected model." },
+    "visualStyleKey": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[A-Za-z0-9_-]+$", "description": "Kino visual style key returned by list-video-visual-styles." },
+    "label": { "type": "string", "maxLength": 120, "description": "Display label for the produced video_clip asset." },
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional opaque client correlation token, persisted in asset metadata without affecting authorization or generation inputs." }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:save-graph args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project"],
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "Full GraphLibraryDocument to persist (scenario + manifest with main and sub blueprints). Whole-document overwrite into blueprint.json."
+    },
+    "title": {
+      "type": "string",
+      "description": "Reserved human-readable label. Accepted for compatibility but currently ignored."
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optimistic lock. Pass the revision this document was read at; the save is refused with errorCode revision.conflict if the document moved on. A revision inside project is ignored — the server owns the counter."
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Stable identity for one logical whole-document save. Same key and content replay the original accepted revision."
+    }
+  }
+}

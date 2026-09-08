@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:patch-characters args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ops"
+  ],
+  "properties": {
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "可省略：幂等写与只读调用由 Host 从当前状态取当前活动修订号。只有需要跨活动世代做冲突检测时才显式携带。"
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optimistic asset-manifest revision returned by get-graph.assetRevision."
+    },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "character"
+            ],
+            "properties": {
+              "op": {
+                "const": "upsert-character"
+              },
+              "character": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "entityId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "appearance": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "description",
+                      "previewPrompt"
+                    ],
+                    "properties": {
+                      "description": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "previewPrompt": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                },
+                "description": "写入 assets/manifest.json 的角色资产实体。声明期只给 id 与 name；外观与出图提示词由角色线补齐。当前预览由生成/应用操作维护，调用方不得写入。"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "characterId"
+            ],
+            "properties": {
+              "op": {
+                "const": "remove-character"
+              },
+              "characterId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,569 @@
+{
+  "version": "game-video.graph.v1",
+  "variables": {},
+  "entities": {},
+  "ui": {
+    "overlays": {
+      "base:BattleEnemyHpBar": {
+        "id": "base:BattleEnemyHpBar",
+        "title": "敌方水墨血条",
+        "children": [
+          {
+            "id": "BattleEnemyHpBar-0",
+            "component": "BattleEnemyHpBar",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:BattlePlayerHpBar": {
+        "id": "base:BattlePlayerHpBar",
+        "title": "我方水墨血条",
+        "children": [
+          {
+            "id": "BattlePlayerHpBar-0",
+            "component": "BattlePlayerHpBar",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:BattleSkill": {
+        "id": "base:BattleSkill",
+        "title": "战斗技能条",
+        "children": [
+          {
+            "id": "BattleSkill-0",
+            "component": "BattleSkill",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:BattleParry": {
+        "id": "base:BattleParry",
+        "title": "防反 QTE",
+        "children": [
+          {
+            "id": "BattleParry-0",
+            "component": "BattleParry",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:Dialogue": {
+        "id": "base:Dialogue",
+        "title": "字幕/对白",
+        "children": [
+          {
+            "id": "Dialogue-0",
+            "component": "Dialogue",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:DamageFloatText": {
+        "id": "base:DamageFloatText",
+        "title": "伤害飘字",
+        "children": [
+          {
+            "id": "DamageFloatText-0",
+            "component": "DamageFloatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:GainFloatText": {
+        "id": "base:GainFloatText",
+        "title": "增益飘字",
+        "children": [
+          {
+            "id": "GainFloatText-0",
+            "component": "GainFloatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:InkYingMo": {
+        "id": "base:InkYingMo",
+        "title": "應/默 抉择",
+        "children": [
+          {
+            "id": "InkYingMo-0",
+            "component": "InkYingMo",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:InkKou": {
+        "id": "base:InkKou",
+        "title": "叩击",
+        "children": [
+          {
+            "id": "InkKou-0",
+            "component": "InkKou",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:StatusNotice": {
+        "id": "base:StatusNotice",
+        "title": "状态提示",
+        "children": [
+          {
+            "id": "StatusNotice-0",
+            "component": "StatusNotice",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      },
+      "base:TextOption": {
+        "id": "base:TextOption",
+        "title": "文字交互",
+        "children": [
+          {
+            "id": "TextOption-0",
+            "component": "TextOption",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ]
+      }
+    }
+  },
+  "uiTree": {
+    "root": [
+      {
+        "kind": "folder",
+        "id": "ui-folder:custom",
+        "name": "模板",
+        "children": []
+      },
+      {
+        "kind": "folder",
+        "id": "ui-folder:basic",
+        "name": "控件",
+        "children": [
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:BattleEnemyHpBar",
+            "overlayId": "base:BattleEnemyHpBar"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:BattlePlayerHpBar",
+            "overlayId": "base:BattlePlayerHpBar"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:BattleSkill",
+            "overlayId": "base:BattleSkill"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:BattleParry",
+            "overlayId": "base:BattleParry"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:Dialogue",
+            "overlayId": "base:Dialogue"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:DamageFloatText",
+            "overlayId": "base:DamageFloatText"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:GainFloatText",
+            "overlayId": "base:GainFloatText"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:InkYingMo",
+            "overlayId": "base:InkYingMo"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:InkKou",
+            "overlayId": "base:InkKou"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:StatusNotice",
+            "overlayId": "base:StatusNotice"
+          },
+          {
+            "kind": "scheme",
+            "id": "ui-scheme:base:TextOption",
+            "overlayId": "base:TextOption"
+          }
+        ]
+      }
+    ]
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "entry",
+        "type": "perf",
+        "position": {
+          "x": -160,
+          "y": 63.42843329401508
+        },
+        "inputs": [],
+        "outputs": [],
+        "data": {
+          "name": "起点",
+          "media": {
+            "kind": "VIDEO",
+            "ref": "99e3beb1-dd55-4a30-82c4-8ed481af2cd0"
+          },
+          "overlayNodes": [
+            {
+              "id": "choice@entry",
+              "overlay": "base:InkYingMo",
+              "layout": {
+                "width": 1,
+                "left": 0.015229287264833575,
+                "height": 1,
+                "top": 0.08371522752854156
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "n-msskgizo-1",
+        "type": "perf",
+        "position": {
+          "x": 221,
+          "y": 56
+        },
+        "inputs": [],
+        "outputs": [],
+        "data": {
+          "name": "新演出节点",
+          "media": {
+            "kind": "VIDEO",
+            "ref": "99e3beb1-dd55-4a30-82c4-8ed481af2cd0"
+          },
+          "overlayNodes": [
+            {
+              "id": "choice@n1",
+              "overlay": "base:InkYingMo",
+              "layout": {
+                "width": 1,
+                "left": 0,
+                "height": 1,
+                "top": 0
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "n-mssn0dmr-2",
+        "type": "perf",
+        "position": {
+          "x": 513.5715667059849,
+          "y": 61.857188901994974
+        },
+        "inputs": [],
+        "outputs": [],
+        "data": {
+          "name": "新演出节点"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-mssn0dmr-3",
+        "source": "n-msskgizo-1",
+        "target": "n-mssn0dmr-2",
+        "sourceHandle": "default",
+        "targetHandle": "in"
+      },
+      {
+        "id": "edge-mssn1wzv-7",
+        "source": "n-mssn0dmr-2",
+        "target": "entry",
+        "sourceHandle": "default",
+        "targetHandle": "in"
+      },
+      {
+        "id": "edge-mssn9rk2-8",
+        "source": "entry",
+        "target": "n-msskgizo-1",
+        "sourceHandle": "default",
+        "targetHandle": "in"
+      },
+      {
+        "id": "edge-entry-ying",
+        "source": "entry",
+        "target": "n-msskgizo-1",
+        "sourceHandle": "ying",
+        "targetHandle": "in"
+      },
+      {
+        "id": "edge-entry-mo",
+        "source": "entry",
+        "target": "n-mssn0dmr-2",
+        "sourceHandle": "mo",
+        "targetHandle": "in"
+      }
+    ]
+  },
+  "manifest": {
+    "version": "game-video.blueprint-manifest.v1",
+    "mainPackId": "bp-main",
+    "packs": {
+      "bp-main": {
+        "id": "bp-main",
+        "title": "主蓝图",
+        "entry": "n-msskgizo-1",
+        "graph": {
+          "nodes": [
+            {
+              "id": "entry",
+              "type": "perf",
+              "position": {
+                "x": -160,
+                "y": 63.42843329401508
+              },
+              "inputs": [],
+              "outputs": [],
+              "data": {
+                "name": "起点",
+                "media": {
+                  "kind": "VIDEO",
+                  "ref": "99e3beb1-dd55-4a30-82c4-8ed481af2cd0"
+                },
+                "overlayNodes": [
+                  {
+                    "id": "choice@entry",
+                    "overlay": "base:InkYingMo",
+                    "layout": {
+                      "width": 1,
+                      "left": 0.015229287264833575,
+                      "height": 1,
+                      "top": 0.08371522752854156
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "n-msskgizo-1",
+              "type": "perf",
+              "position": {
+                "x": 221,
+                "y": 56
+              },
+              "inputs": [],
+              "outputs": [],
+              "data": {
+                "name": "新演出节点",
+                "media": {
+                  "kind": "VIDEO",
+                  "ref": "99e3beb1-dd55-4a30-82c4-8ed481af2cd0"
+                },
+                "overlayNodes": [
+                  {
+                    "id": "choice@n1",
+                    "overlay": "base:InkYingMo",
+                    "layout": {
+                      "width": 1,
+                      "left": 0,
+                      "height": 1,
+                      "top": 0
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "n-mssn0dmr-2",
+              "type": "perf",
+              "position": {
+                "x": 513.5715667059849,
+                "y": 61.857188901994974
+              },
+              "inputs": [],
+              "outputs": [],
+              "data": {
+                "name": "新演出节点"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "edge-mssn0dmr-3",
+              "source": "n-msskgizo-1",
+              "target": "n-mssn0dmr-2",
+              "sourceHandle": "default",
+              "targetHandle": "in"
+            },
+            {
+              "id": "edge-mssn1wzv-7",
+              "source": "n-mssn0dmr-2",
+              "target": "entry",
+              "sourceHandle": "default",
+              "targetHandle": "in"
+            },
+            {
+              "id": "edge-mssn9rk2-8",
+              "source": "entry",
+              "target": "n-msskgizo-1",
+              "sourceHandle": "default",
+              "targetHandle": "in"
+            },
+            {
+              "id": "edge-entry-ying",
+              "source": "entry",
+              "target": "n-msskgizo-1",
+              "sourceHandle": "ying",
+              "targetHandle": "in"
+            },
+            {
+              "id": "edge-entry-mo",
+              "source": "entry",
+              "target": "n-mssn0dmr-2",
+              "sourceHandle": "mo",
+              "targetHandle": "in"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

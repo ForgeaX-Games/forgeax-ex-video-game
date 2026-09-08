@@ -1,0 +1,8 @@
+{
+  // Production build type-check gate (used by `bun run build` → `tsc -p`).
+  // Excludes test files: they are type-checked and executed by Vitest
+  // (`bun run test`), not by the shipped-bundle gate. Keeps `dist/` builds
+  // from being blocked by test-fixture drift.
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.test.tsx"]
+}

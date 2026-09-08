@@ -1,0 +1,46 @@
+---
+description: Figma 设计稿还原规范 — 用户提供 Figma 链接时生效
+globs: "**/*.tsx,**/*.scss,**/*.css,**/*.module.scss"
+alwaysApply: true
+---
+
+# Figma 设计稿还原
+
+> 用户提供 Figma 文件链接时强制生效。
+
+## 素材获取
+
+1. 用 MCP `get_design_context` 读取节点
+2. **图标必须 SVG** — 从 Figma 导出，不用 Unicode/emoji
+3. **图片用原始资源** — 不用 placeholder
+4. **字体** — 按 Figma font-family 配置，优先 Token 字体栈
+
+## 实现标准
+
+| 维度　 | 要求　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| --------| ---------------------------------------------------------|
+| 技术栈 | React + SCSS/CSS Modules（本项目不用 Tailwind）　　　　 |
+| 尺寸　 | 精确到 px　　　　　　　　　　　　　　　　　　　　　　　 |
+| 间距　 | padding/margin/gap 严格还原　　　　　　　　　　　　　　 |
+| 对齐　 | flex 对齐与 Figma 一致　　　　　　　　　　　　　　　　　|
+| 字重　 | 400/500/600/700 不可混用　　　　　　　　　　　　　　　　|
+| 圆角　 | 精确还原容器 vs 子元素　　　　　　　　　　　　　　　　　|
+| 颜色　 | `var(--vag-sem-*)`；无 Token 时用 Figma hex 并标注 TODO |
+| 层级　 | 按 Figma 图层拆组件　　　　　　　　　　　　　　　　　　 |
+
+## 组件映射
+
+```
+Frame       →  div 或语义标签
+Auto Layout →  flex + direction/gap
+Component   →  独立 React 组件
+Instance    →  组件 + props
+```
+
+## 质检
+
+- [ ] 文字内容/字号/字重/行高/颜色与 Figma 一致
+- [ ] 间距 ±1px 容差
+- [ ] 图标为 SVG
+- [ ] hover/active/disabled 状态齐全
+- [ ] 组件树与 Figma 层级一致

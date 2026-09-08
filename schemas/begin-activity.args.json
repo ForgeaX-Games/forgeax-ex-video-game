@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:begin-activity args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["activity", "expectedWorkflowRevision"],
+  "properties": {
+    "activity": { "type": "string", "enum": ["brief.collecting", "document.inquiry", "document.core", "document.pillar", "blueprint.outline", "characters.modeling", "characters.previewing", "scenes.modeling", "scenes.previewing", "rules.catalog", "rules.binding", "ui.authoring", "game.finalizing", "assets.character", "assets.scene", "video.presets.binding", "video.presets.validating", "playtest.validating"] },
+    "expectedWorkflowRevision": { "type": "integer", "minimum": 1 },
+    "rework": { "type": "boolean", "default": false },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "entityIdBindingRequested": { "type": "boolean", "default": false }
+    ,"gateApproval": {
+      "type": "object", "additionalProperties": false,
+      "required": ["gate", "evidenceRef", "revision"],
+      "properties": {
+        "gate": { "type": "string", "enum": ["core"] },
+        "evidenceRef": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "approvedAt": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

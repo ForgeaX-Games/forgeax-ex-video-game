@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:list-ui-components returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "components"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "components": {
+      "type": "array",
+      "description": "平台内置界面元件的契约。events 有两个用途：写节点 reaction 的 when.event.id，以及作为节点的**出口 handle**——节点除 default 外的每个出口都来自挂载元件的某个事件，边的 sourceHandle 必须对齐其中一个 id。inputs 是可写的输入键，component 为 numberExpr 的输入可以绑表达式（实体属性、变量或公式）。",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "events",
+          "inputs"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "面向 AI 的摆放位置与潜规则提示：元件一般放在页面的什么位置、以及一些潜规则（如血条不建议同一场景出现两次；敌方血条一般放在页面顶部水平居中位置；我方血条一般放在页面右下角）。配界面时据此决定元件放在哪。"
+          },
+          "layout": {
+            "type": "object",
+            "description": "机器可读的布局契约。坐标和区域均相对游戏舞台归一化到 0~1；Agent 应优先使用 defaultLayout，并确保完整矩形位于安全区内。",
+            "required": [
+              "anchor",
+              "preferredRegion",
+              "defaultLayout",
+              "safeMargin",
+              "avoid",
+              "overflow"
+            ],
+            "properties": {
+              "anchor": {
+                "type": "string",
+                "enum": [
+                  "top-left",
+                  "top-center",
+                  "top-right",
+                  "center",
+                  "bottom-left",
+                  "bottom-center",
+                  "bottom-right",
+                  "target",
+                  "target-or-bottom-center",
+                  "center-or-bottom-center"
+                ]
+              },
+              "preferredRegion": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                  "x": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }], "minItems": 2, "maxItems": 2 },
+                  "y": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }], "minItems": 2, "maxItems": 2 }
+                }
+              },
+              "defaultLayout": {
+                "type": "object",
+                "required": ["left", "top", "width", "height"],
+                "properties": {
+                  "left": { "type": "number" },
+                  "top": { "type": "number" },
+                  "width": { "type": "number" },
+                  "height": { "type": "number" }
+                }
+              },
+              "minSize": {
+                "type": "object",
+                "required": ["width", "height"],
+                "properties": {
+                  "width": { "type": "number" },
+                  "height": { "type": "number" }
+                }
+              },
+              "safeMargin": { "type": "number", "minimum": 0, "maximum": 0.5 },
+              "avoid": { "type": "array", "items": { "type": "string" } },
+              "maxInstances": { "type": "integer", "minimum": 1 },
+              "overflow": { "const": "forbidden" }
+            }
+          },
+          "timing": {
+            "type": "object",
+            "description": "机器可读的控件生命周期契约。Agent 应按 mount 选择 enter、window 或 spawn。",
+            "required": ["kind", "mount"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["persistent-hud", "windowed-qte", "spawn-only", "interactive-choice"]
+              },
+              "mount": {
+                "type": "string",
+                "enum": ["trigger-enter", "window", "spawn"]
+              },
+              "selfSettleMs": { "type": "number", "minimum": 0 },
+              "emitsOnUnmount": { "type": "boolean" },
+              "defaultTtlMs": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "元件可发的事件；同时是它给宿主节点贡献的出口 handle id。"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "key"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "valueType": {
+                  "type": "string"
+                },
+                "component": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

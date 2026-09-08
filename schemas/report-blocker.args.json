@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:report-blocker args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "activityRevision",
+    "code",
+    "message",
+    "retryable"
+  ],
+  "properties": {
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]+$"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "location": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "document",
+            "blueprint",
+            "rule",
+            "ui",
+            "asset",
+            "play"
+          ]
+        },
+        "documentType": {
+          "type": "string"
+        },
+        "blueprintId": {
+          "type": "string"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "section": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "treeNodeId": {
+          "type": "string"
+        },
+        "overlayId": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "folderId": {
+          "type": "string"
+        },
+        "entryId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "activity": {
+      "enum": [
+        "brief.collecting",
+        "document.inquiry",
+        "document.core",
+        "document.pillar",
+        "blueprint.outline",
+        "characters.modeling",
+        "characters.previewing",
+        "scenes.modeling",
+        "scenes.previewing",
+        "rules.catalog",
+        "rules.binding",
+        "ui.authoring",
+        "game.finalizing",
+        "assets.character",
+        "assets.scene",
+        "video.presets.binding",
+        "video.presets.validating",
+        "playtest.validating"
+      ],
+      "description": "并发组里必须指明是哪条线；省略则回落到组内代表活动。"
+    }
+  }
+}

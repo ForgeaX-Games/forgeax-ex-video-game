@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:apply-design-options args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["optionId"],
+  "properties": {
+    "optionId": {
+      "enum": ["A", "B", "C"],
+      "description": "The option selected in the design-options Slide. The server reads the current registered JSON document as the source of truth."
+    }
+  }
+}

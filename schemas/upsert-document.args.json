@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:upsert-document args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["documentType", "slug"],
+  "properties": {
+    "documentType": {
+      "enum": ["intake", "design-options", "core", "inquiry", "pillar"],
+      "description": "Pipeline document slot to upsert."
+    },
+    "content": {
+      "type": "string",
+      "description": "Markdown body to write. Omit to register an existing docs/ file."
+    },
+    "name": {
+      "type": "string",
+      "description": "Display name in the asset manifest."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "description": "Required filename slug prefix for docs/<slug>_<type>.md. Never inferred; an illegal slug is rejected instead of sanitized."
+    }
+  }
+}

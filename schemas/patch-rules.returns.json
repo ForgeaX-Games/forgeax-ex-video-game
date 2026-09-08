@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:patch-rules returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "ok": { "type": "boolean" },
+    "replayed": { "type": "boolean", "description": "True when the same idempotencyKey and ops replayed an accepted result." },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Document revision after a successful batch, or the current revision when the batch was refused."
+    },
+    "results": {
+      "type": "array",
+      "description": "One entry per op, in order, carrying the id the op finally acted on including auto-allocated ids.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["op", "id"],
+        "properties": {
+          "op": { "type": "string" },
+          "id": { "type": "string" },
+          "attrId": { "type": "string" }
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "properties": { "results": { "type": "array" } }
+    },
+    "artifactRef": {
+      "type": "object",
+      "required": ["kind", "id", "revision"],
+      "properties": {
+        "kind": { "const": "blueprint" },
+        "id": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "validation": { "type": "object", "description": "ValidationSummary for the accepted document revision." },
+    "uiHint": { "type": "object", "description": "Semantic rule section and item location for Extension focus." },
+    "errorCode": {
+      "type": "string",
+      "description": "Stable failure code, e.g. revision.conflict, rules.entity.not-found, rules.variable.in-use, rules.formula.parse-failed, rules.formula.unknown-reference."
+    },
+    "errors": { "type": "array", "items": { "type": "string" } },
+    "failedOpIndex": { "type": "integer", "minimum": 0 },
+    "gameSlug": { "type": ["string", "null"] }
+  }
+}

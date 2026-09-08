@@ -1,0 +1,1163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:patch-graph args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ops"
+  ],
+  "$defs": {
+    "cmpOp": {
+      "enum": ["gte", "lte", "gt", "lt", "eq", "neq"]
+    },
+    "textValue": {
+      "anyOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref"],
+          "properties": { "ref": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    },
+    "graphClause": {
+      "description": "One condition clause. Each variant is closed: no extra keys, no string dialect.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "varId", "op", "value"],
+          "properties": {
+            "type": { "const": "var" },
+            "varId": { "type": "string", "minLength": 1 },
+            "valueType": { "const": "number" },
+            "op": { "$ref": "#/$defs/cmpOp" },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "varId", "valueType", "op", "value"],
+          "properties": {
+            "type": { "const": "var" },
+            "varId": { "type": "string", "minLength": 1 },
+            "valueType": { "const": "text" },
+            "op": { "enum": ["eq", "neq"] },
+            "value": { "$ref": "#/$defs/textValue" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "varId", "equals"],
+          "properties": {
+            "type": { "const": "flag" },
+            "varId": { "type": "string", "minLength": 1 },
+            "equals": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "nodeId"],
+          "properties": {
+            "type": { "const": "visited" },
+            "nodeId": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "entityId", "attr", "op", "value"],
+          "properties": {
+            "type": { "enum": ["attr", "attrRatio"] },
+            "entityId": { "type": "string", "minLength": 1 },
+            "attr": { "type": "string", "minLength": 1 },
+            "op": { "$ref": "#/$defs/cmpOp" },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "left", "right", "attr", "op"],
+          "properties": {
+            "type": { "const": "attrCompare" },
+            "left": { "type": "string", "minLength": 1 },
+            "right": { "type": "string", "minLength": 1 },
+            "attr": { "type": "string", "minLength": 1 },
+            "op": { "$ref": "#/$defs/cmpOp" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "op", "value"],
+          "properties": {
+            "type": { "const": "score" },
+            "op": { "$ref": "#/$defs/cmpOp" },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "itemId"],
+          "properties": {
+            "type": { "const": "hasItem" },
+            "itemId": { "type": "string", "minLength": 1 },
+            "count": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "graphCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all"],
+      "description": "Always { all: [clause…] }. Never a string, never { any }. On a state reaction it belongs at when.condition, never at the reaction top level.",
+      "properties": {
+        "all": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graphClause" }
+        }
+      }
+    },
+    "nodeAction": {
+      "type": "object",
+      "required": ["kind"],
+      "description": "One do entry: effect / advance / spawn / hideOverlay. Payload shape is checked by runtime.shape.valid rather than here, because a malformed action degrades into a no-op instead of crashing the editor.",
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reactionTrigger": {
+      "description": "Closed trigger set. A state trigger carries its condition at when.condition.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "enum": ["enter", "exit"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "ms"],
+          "properties": {
+            "type": { "const": "at" },
+            "ms": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "complete" },
+            "if": { "$ref": "#/$defs/graphCondition" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id"],
+          "properties": {
+            "type": { "const": "event" },
+            "id": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "condition"],
+          "properties": {
+            "type": { "const": "state" },
+            "condition": { "$ref": "#/$defs/graphCondition" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "of"],
+          "properties": {
+            "type": { "const": "watch" },
+            "of": { "type": "string", "minLength": 1 },
+            "on": { "enum": ["change", "inc", "dec"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "of"],
+          "properties": {
+            "type": { "enum": ["shown", "hidden"] },
+            "of": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "reaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "do"],
+      "description": "Author SSOT: when → do. Exactly these two keys. A top-level condition key is the edge dialect (edge.data.condition) and is rejected here: state reactions write { when: { type: 'state', condition: { all: […] } }, do: […] }.",
+      "properties": {
+        "when": { "$ref": "#/$defs/reactionTrigger" },
+        "do": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nodeAction" }
+        }
+      }
+    },
+    "nodeVideoGeneration": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Provider-resource-neutral Kino preset for this node. Holds author choices and platform asset ids only — never Kino resource ids, job state, or URLs; those are resolved at the user's explicit generate action. The prompt is NOT repeated here: media.prompt stays the single source of truth.",
+      "required": [
+        "schemaVersion",
+        "durationSeconds",
+        "generateAudio",
+        "mode"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "durationSeconds": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 15,
+          "default": 8
+        },
+        "generateAudio": {
+          "type": "boolean",
+          "default": false
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "strict",
+            "firstref",
+            "ref",
+            "t2v"
+          ],
+          "description": "strict needs first+last frame; firstref needs a first frame; ref needs at least one reference image; t2v needs none. The submission boundary validates the combination."
+        },
+        "size": {
+          "type": "string",
+          "enum": [
+            "2560x1440",
+            "1440x2560",
+            "2496x1664",
+            "1664x2496"
+          ]
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "720p",
+            "1080p"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "visualStyleKey": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact key returned by list-video-visual-styles. Omit when no catalog style is selected; never invent or translate a style name."
+        },
+        "references": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Logical references as platform asset ids, NOT Kino resource ids.",
+          "properties": {
+            "sceneAssetIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "firstFrameAssetId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "lastFrameAssetId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "extraImageAssetIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "nodeCast": {
+      "type": "array",
+      "description": "On-screen cast for this node. References characterId only — never copy a character's name or appearance text into the node.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "characterId"
+        ],
+        "properties": {
+          "characterId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Key in assets/manifest.json assetCatalog.entities.character. An unknown id fails validation; a character name is not an implicit reference."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "supporting",
+              "background"
+            ]
+          },
+          "onScreen": {
+            "type": "boolean",
+            "default": true,
+            "description": "false = mentioned in narration only; excluded from visual reference derivation."
+          }
+        }
+      }
+    },
+    "nodeScenes": {
+      "type": "array",
+      "description": "Scene usage declarations for this node. blueprint.outline may assign stable sceneId values only; visual definitions and reference assets belong to the asset lane.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sceneId"
+        ],
+        "properties": {
+          "sceneId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "background"
+            ]
+          },
+          "useAsVideoReference": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "nodeMedia": {
+      "type": "object",
+      "description": "Video authoring data. Every newly authored performance node should include a non-empty base prompt. Omit ref while the bundled placeholder is shown; after generation, set ref to the returned asset id and preserve prompt.",
+      "required": [
+        "kind",
+        "prompt"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "video"
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "Base Kino prompt describing the shot, action, subject continuity, camera, lighting, and atmosphere."
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Generated or existing video asset id. Omit before a real video is available; never write the UI placeholder URL here."
+        },
+        "generation": {
+          "$ref": "#/$defs/nodeVideoGeneration"
+        },
+        "meta": {
+          "type": "object"
+        }
+      }
+    },
+    "layoutValue": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "pattern": "^-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:%|px)$"
+        }
+      ]
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Absolute layout relative to the parent box. A stage-style mount whose child uses width:1,height:1 must explicitly carry { left:0, top:0, width:1, height:1 }; preserve any authored anchors or dimensions.",
+      "properties": {
+        "top": {
+          "$ref": "#/$defs/layoutValue"
+        },
+        "right": {
+          "$ref": "#/$defs/layoutValue"
+        },
+        "bottom": {
+          "$ref": "#/$defs/layoutValue"
+        },
+        "left": {
+          "$ref": "#/$defs/layoutValue"
+        },
+        "width": {
+          "$ref": "#/$defs/layoutValue"
+        },
+        "height": {
+          "$ref": "#/$defs/layoutValue"
+        },
+        "translateX": {
+          "$ref": "#/$defs/layoutValue"
+        },
+        "translateY": {
+          "$ref": "#/$defs/layoutValue"
+        },
+        "zIndex": {
+          "type": "number"
+        }
+      }
+    },
+    "graphNode": {
+      "type": "object",
+      "description": "Graph node shape shared by add-node and insert-node-after. Canvas position { x, y } is mandatory when a full node is supplied — omitting it crashes the editor on position.x.",
+      "required": [
+        "id",
+        "type",
+        "position"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Usually \"perf\" for story beats."
+        },
+        "position": {
+          "type": "object",
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "x": {
+              "type": "number",
+              "description": "Canvas X. Main-graph chapters typically increment by ~240 per column."
+            },
+            "y": {
+              "type": "number"
+            }
+          }
+        },
+        "data": {
+          "$ref": "#/$defs/nodeAuthoringData"
+        },
+        "inputs": {
+          "type": "array"
+        },
+        "outputs": {
+          "type": "array"
+        }
+      }
+    },
+    "overlayNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A node-level mount of an overlay. ui.authoring is limited to existing base:* overlays by Host policy; game.finalizing may author the complete overlay structure. Configure prototype children through overrides keyed by childId; never write a children field. Stage-style mounts must include layout { left:0, top:0, width:1, height:1 }.",
+      "required": [
+        "overlay"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "overlay": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Overlay id. ui.authoring uses an exact base:* id; game.finalizing may reference or author any valid overlay id."
+        },
+        "layout": {
+          "$ref": "#/$defs/layout"
+        },
+        "reactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reaction"
+          }
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          },
+          "description": "Sparse child patches keyed by an existing childId from the referenced base:* overlay."
+        }
+      }
+    },
+    "nodeAuthoringData": {
+      "type": "object",
+      "description": "Authoring fields on node data. A finished video beat carries chapterSummary, storyText, cast, and media with a base prompt plus generation preset. game.finalizing may configure the complete graph and overlay structure; activity-specific write policy is enforced by Host.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chapterSummary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Chapter/beat overview shown on the node card and used as production context."
+        },
+        "storyText": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Author-readable performance text: staging, dialogue, inner monologue, and the choices. The video is generated downstream from this. The field is storyText, never scriptText."
+        },
+        "cast": {
+          "$ref": "#/$defs/nodeCast"
+        },
+        "scenes": {
+          "$ref": "#/$defs/nodeScenes"
+        },
+        "media": {
+          "$ref": "#/$defs/nodeMedia"
+        },
+        "overlayNodes": {
+          "type": "array",
+          "description": "Complete node overlay mount list. Use mount.layout plus overrides or the dedicated overlay ops; never overlayNodes[].children.",
+          "items": {
+            "$ref": "#/$defs/overlayNode"
+          }
+        },
+        "reactions": {
+          "type": "array",
+          "description": "Node settlement reactions (when → do).",
+          "items": {
+            "$ref": "#/$defs/reaction"
+          }
+        },
+        "interaction": {
+          "type": "object",
+          "description": "本节拍的玩法契约（总脉络必填，三条线共享的唯一玩法设计）。数值线读 effect.formulaId 决定造哪些公式，汇总整装照它挂元件、接结算、连出口。完成门：outline.interaction-plan / rules.plan-formulas / finalization.plan-wired。",
+          "required": [
+            "beat"
+          ],
+          "properties": {
+            "beat": {
+              "enum": [
+                "narrative",
+                "choice",
+                "combat",
+                "check",
+                "timed"
+              ],
+              "description": "narrative = 有意的纯叙事段（观众只看，无需 actions）；其余四类必须给出 actions，否则判为漏配。"
+            },
+            "actions": {
+              "type": "array",
+              "description": "观众在这个节拍能做的事，每条对应一个界面元件事件。",
+              "items": {
+                "type": "object",
+                "required": [
+                  "component",
+                  "event",
+                  "intent"
+                ],
+                "properties": {
+                  "component": {
+                    "type": "string",
+                    "description": "界面元件 id，必须来自 list_ui_components。"
+                  },
+                  "event": {
+                    "type": "string",
+                    "description": "该元件能发的事件 id；它同时就是本节点的出口 handle（边的 sourceHandle 与它对齐）。"
+                  },
+                  "intent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "一句话说明观众为什么会点它，用作者语言写；整装靠它判断该怎么配。"
+                  },
+                  "effect": {
+                    "type": "object",
+                    "description": "这个动作改什么。纯分支动作（只跳转不改数值）可以省略。",
+                    "required": [
+                      "target",
+                      "op"
+                    ],
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "description": "`entity.<实体id>.attr.<属性>` 或 `var.<变量id>`。"
+                      },
+                      "op": {
+                        "enum": [
+                          "add",
+                          "sub",
+                          "set"
+                        ]
+                      },
+                      "formulaId": {
+                        "type": "string",
+                        "description": "期望数值线提供的公式名（例如 dmg_wusong_light）。这是给数值线下的订单，名字必须与它造出来的一致。"
+                      },
+                      "value": {
+                        "type": "number",
+                        "description": "不需要公式的定值改动。"
+                      }
+                    }
+                  },
+                  "exit": {
+                    "type": "string",
+                    "description": "这个动作要走的出边 sourceHandle；缺省即与 event 同名，填 'none' 表示只结算不离开节点（例如连击）。"
+                  }
+                }
+              }
+            },
+            "terminals": {
+              "type": "array",
+              "description": "终局/转折条件；整装把它落成出边条件或 state reaction。",
+              "items": {
+                "type": "object",
+                "required": [
+                  "when"
+                ],
+                "properties": {
+                  "when": {
+                    "type": "string",
+                    "description": "例如 `entity.tiger.attr.hp <= 0`。"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nodeIdOp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "nodeId"
+      ],
+      "properties": {
+        "op": {
+          "enum": [
+            "remove-node",
+            "ensure-node-overlay"
+          ]
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "overlayChildTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "nodeId",
+        "childId"
+      ],
+      "properties": {
+        "op": {
+          "enum": [
+            "remove-overlay-child",
+            "reset-overlay-override"
+          ]
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "childId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "properties": {
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "可省略：幂等写与只读调用由 Host 从当前状态取当前活动修订号。只有需要跨活动世代做冲突检测时才显式携带。"
+    },
+    "blueprintId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optimistic lock. Pass the revision returned by the get-graph call these ops were built from; the patch is refused with errorCode revision.conflict if the document moved on. Omit only for a blind write."
+    },
+    "snapshotToken": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional Host snapshot token returned by get_graph. A stale token is refused before applying any op."
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Stable identity for one logical mutation batch. Reusing it with the same ops replays the accepted result; reusing it with different ops fails with idempotency.conflict."
+    },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "nodeId",
+              "field",
+              "value"
+            ],
+            "properties": {
+              "op": {
+                "const": "set-node-field"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "field": {
+                "enum": [
+                  "name",
+                  "type",
+                  "position"
+                ]
+              },
+              "value": {}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "nodeId",
+              "patch"
+            ],
+            "properties": {
+              "op": {
+                "const": "set-node-data"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "patch": {
+                "$ref": "#/$defs/nodeAuthoringData"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "node"
+            ],
+            "properties": {
+              "op": {
+                "const": "add-node"
+              },
+              "node": {
+                "$ref": "#/$defs/graphNode"
+              }
+            }
+          },
+          {
+            "$ref": "#/$defs/nodeIdOp"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "afterId"
+            ],
+            "properties": {
+              "op": {
+                "const": "insert-node-after"
+              },
+              "afterId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "gapX": {
+                "type": "number"
+              },
+              "node": {
+                "$ref": "#/$defs/graphNode"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "source",
+              "target"
+            ],
+            "properties": {
+              "op": {
+                "const": "connect"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceHandle": {
+                "type": "string"
+              },
+              "targetHandle": {
+                "type": "string"
+              },
+              "data": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "edgeId"
+            ],
+            "properties": {
+              "op": {
+                "const": "disconnect"
+              },
+              "edgeId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "edgeId",
+              "data"
+            ],
+            "properties": {
+              "op": {
+                "const": "update-edge-data"
+              },
+              "edgeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "data": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "nodeId",
+              "patch"
+            ],
+            "properties": {
+              "op": {
+                "const": "patch-node-bgm"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "patch": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "nodeId",
+              "child"
+            ],
+            "properties": {
+              "op": {
+                "const": "add-overlay-child"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "child": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "$ref": "#/$defs/overlayChildTarget"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "nodeId",
+              "childId",
+              "patch"
+            ],
+            "properties": {
+              "op": {
+                "const": "patch-overlay-child"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "childId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "patch": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "nodeId",
+              "childId",
+              "inputs"
+            ],
+            "properties": {
+              "op": {
+                "const": "patch-overlay-child-params"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "childId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "inputs": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "nodeId",
+              "mountId",
+              "patch"
+            ],
+            "properties": {
+              "op": {
+                "const": "patch-overlay-mount"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mountId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "patch": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "formulaId",
+              "formula"
+            ],
+            "properties": {
+              "op": {
+                "const": "set-formula"
+              },
+              "formulaId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "formula": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "ast"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "ast": {}
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "formulaId"
+            ],
+            "properties": {
+              "op": {
+                "const": "remove-formula"
+              },
+              "formulaId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Nesting A — inline sub-process: turns the node into a container holding its own private child graph. Takes no packId and never references a blueprint; to reuse a standalone blueprint use make-empty-sub-flow-pack + set-sub-flow-pack instead.",
+            "required": [
+              "op",
+              "nodeId"
+            ],
+            "properties": {
+              "op": {
+                "const": "attach-sub-process"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Nesting B step 1 — create a standalone blueprint in manifest.packs. This alone leaves the blueprint orphaned: bind it to a node with set-sub-flow-pack, otherwise it is unreachable at runtime.",
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "const": "make-empty-sub-flow-pack"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Nesting B step 2 — point a node at an existing blueprint from manifest.packs (mutually exclusive with attach-sub-process, which is dropped). Fails when the blueprint is missing or the reference would form a cycle.",
+            "required": [
+              "op",
+              "nodeId",
+              "packId"
+            ],
+            "properties": {
+              "op": {
+                "const": "set-sub-flow-pack"
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "packId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Target blueprint id in manifest.packs."
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional guard: must equal the target blueprint's version. Omit to pin the current version automatically."
+              },
+              "entry": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional entry override; must be a node id inside the target blueprint. Omit to use the blueprint's own entry."
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

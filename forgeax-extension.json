@@ -1,0 +1,510 @@
+{
+  "schemaVersion": 2,
+  "id": "@forgeax-extension/game-video",
+  "version": "0.26.1",
+  "displayName": {
+    "zh": "视频游戏",
+    "en": "Video Game Studio"
+  },
+  "description": {
+    "zh": "视频游戏（玩法优先）蓝图编辑器与运行时 · 演出节点图 + Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点热点，新引擎 GameGraph 为唯一 SSOT",
+    "en": "Video-game (gameplay-on-video) blueprint editor & runtime — a graph of performance nodes with boss battles, HP bars, QTE, timed/pause choices, clickable hotspots. The GameGraph engine is the single source of truth."
+  },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
+  "icon": "Gamepad2",
+  "keywords": [
+    "game-video",
+    "video-game",
+    "gameplay",
+    "boss",
+    "qte",
+    "blueprint",
+    "graph"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "game-video.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "game-video",
+        "title": {
+          "zh": "视频游戏",
+          "en": "Video Game Studio"
+        },
+        "icon": "🎮",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 1,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": ["sidebar"],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": ["workspace"],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 1,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "game-video.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "minWidth": 320,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "game-video.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/blueprint.json",
+          "**/assets/manifest.json"
+        ],
+        "preferredAgent": "@forgeax-extension/agent-nodia"
+      }
+    ],
+    "activities": [
+      {
+        "id": "game-video.launcher",
+        "title": {
+          "zh": "视频游戏",
+          "en": "Video Game Studio"
+        },
+        "icon": "🎮",
+        "order": 161,
+        "pageType": {
+          "extension": "self",
+          "id": "game-video"
+        }
+      }
+    ],
+    "skills": [
+      {
+        "id": "game-video:author-guide",
+        "entry": "./SKILL.md",
+        "trigger": "/game-video"
+      }
+    ],
+    "tools": [
+      {
+        "id": "game-video:get-graph",
+        "args": "./schemas/get-graph.args.json",
+        "returns": "./schemas/get-graph.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取纯蓝图文档，并从 assets/manifest.json 单独投影 assetEntities。角色/场景的描述、Prompt 和当前资产不进入 blueprint.json；节点只用稳定 ID 引用。",
+          "en": "Read the pure blueprint document plus a separate assetEntities projection from assets/manifest.json. Character and scene prompts never live in blueprint.json; nodes reference manifest entities by stable id."
+        }
+      },
+      {
+        "id": "game-video:save-graph",
+        "args": "./schemas/save-graph.args.json",
+        "returns": "./schemas/save-graph.returns.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "仅供编辑器 UI 整本覆盖写宿主绑定游戏的 GraphLibraryDocument 到 blueprint.json；AI 改图请使用 patch-graph。首次写入时补 project.json。title 当前忽略。",
+          "en": "UI-only full-document overwrite of the host-bound game's GraphLibraryDocument in blueprint.json; AI graph edits must use patch-graph. Creates project.json on the first write. title is currently ignored."
+        }
+      },
+      {
+        "id": "game-video:patch-graph",
+        "args": "./schemas/patch-graph.args.json",
+        "returns": "./schemas/patch-graph.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "对宿主绑定游戏的蓝图执行原子增量修改。新建演出节点时写入 data.media.prompt 作为后续 Kino 视频生成的基础 prompt，真实视频生成前省略 media.ref。可选 blueprintId 指定蓝图，任一步失败或整本校验失败均不写盘。两种嵌套互斥、别混用：内嵌子流程 = attach-sub-process（节点私有子图，不接受 packId）；子蓝图 = make-empty-sub-flow-pack 建包后必须再用 set-sub-flow-pack 把节点指向它，只建包不绑定的子蓝图运行时永远进不去。",
+          "en": "Atomically patch a blueprint in the host-bound game. New performance nodes carry data.media.prompt as the base prompt for later Kino generation and omit media.ref until a real video exists. Optionally select blueprintId; any operation or document validation failure prevents all writes. The two nesting modes are mutually exclusive: an inline sub-process is attach-sub-process (node-private child graph, takes no packId), while a reusable blueprint needs make-empty-sub-flow-pack followed by set-sub-flow-pack to bind it to a node — a blueprint that is created but never bound is unreachable at runtime."
+        }
+      },
+      {
+        "id": "game-video:patch-node-media",
+        "args": "./schemas/patch-node-media.args.json",
+        "returns": "./schemas/patch-node-media.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "仅在 video.presets.binding 活动中，按 NodeRef、蓝图快照、稳定资产清单修订号和幂等键原子绑定 provider-neutral 的 node.data.media prompt、generation 与平台 asset 引用。不得修改图拓扑、剧情、规则或界面。",
+          "en": "During video.presets.binding only, atomically bind provider-neutral node.data.media prompt, generation options, and platform asset references against explicit NodeRefs, a graph snapshot, a stable asset-manifest revision, and an idempotency key. It cannot modify topology, story, rules, or UI."
+        }
+      },
+      {
+        "id": "game-video:patch-rules",
+        "args": "./schemas/patch-rules.args.json",
+        "returns": "./schemas/patch-rules.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "原子批量维护宿主绑定游戏的作者态规则目录：实体、实体属性、变量和公式。公式用 expressionText 提交，服务端以共享 parser 生成规范 AST 并校验全部引用；任一 op、引用或修订号检查失败则整批不写盘。改的是试玩的初值模板，不是正在运行的会话状态。节点/边上的 condition、effect、reaction 仍用 patch-graph 挂。",
+          "en": "Atomically maintain the host-bound game's author-time rule catalog: entities, entity attributes, variables, and formulas. Submit formulas as expressionText; the server parses them into the canonical AST with the shared parser and validates every reference. Any failed op, reference, or revision check prevents all writes. This edits the initial-state template a playthrough starts from, not a running session. Bind conditions, effects, and reactions onto nodes and edges with patch-graph."
+        }
+      },
+      {
+        "id": "game-video:patch-characters",
+        "args": "./schemas/patch-characters.args.json",
+        "returns": "./schemas/patch-characters.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "原子维护 assets/manifest.json 中的角色资产实体、视觉描述、预览 Prompt 和规则实体关联；当前预览由生成/应用操作维护，删除仍被蓝图节点引用的角色会被拒绝。",
+          "en": "Atomically maintain manifest-backed character entities, visual descriptions, prompts, and runtime-entity links. Current preview assets are maintained by generation/apply operations; referenced characters cannot be removed."
+        }
+      },
+      {
+        "id": "game-video:generate-character-previews",
+        "args": "./schemas/generate-character-previews.args.json",
+        "returns": "./schemas/generate-character-previews.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "Agent 专用 Kino 图片生成入口。在角色出图阶段无需用户确认，按 get-graph.assetEntities.characters 中的 manifest 角色实体批量生成参考图，登记 character_ref，并原子更新 assetCatalog 的 current/history；不向 blueprint.json 写入资产生产数据。",
+          "en": "Agent-only Kino image generation without user confirmation during the character-preview stage, using manifest character entities returned by get-graph.assetEntities.characters. Registers character_ref assets and atomically updates assetCatalog current/history without writing asset production data to blueprint.json."
+        }
+      },
+      {
+        "id": "game-video:patch-scenes",
+        "args": "./schemas/patch-scenes.args.json",
+        "returns": "./schemas/patch-scenes.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "原子维护 assets/manifest.json 中的场景资产实体：把总脉络声明的场景补成完整定义（名称、视觉描述、图片 Prompt）。不得新增未声明场景，删除仍被蓝图节点引用的场景会被拒绝。",
+          "en": "Atomically maintain manifest-backed scene entities with names, visual descriptions and preview prompts. Undeclared scenes cannot be added, and scenes referenced by blueprint nodes cannot be removed."
+        }
+      },
+      {
+        "id": "game-video:generate-scene-previews",
+        "args": "./schemas/generate-scene-previews.args.json",
+        "returns": "./schemas/generate-scene-previews.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "Agent 专用场景参考图生成入口。按 get-graph.assetEntities.scenes 中的 manifest 场景实体批量出图，登记 scene_ref，并原子更新 assetCatalog 的 current/history；不向 blueprint.json 写入资产生产数据。",
+          "en": "Agent-only scene-reference generation from manifest scene entities returned by get-graph.assetEntities.scenes. Registers scene_ref assets and atomically updates assetCatalog current/history without writing asset production data to blueprint.json."
+        }
+      },
+      {
+        "id": "game-video:get-workflow-state",
+        "args": "./schemas/get-workflow-state.args.json",
+        "returns": "./schemas/get-workflow-state.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取并恢复当前游戏的四阶段/细活动工作流状态、唯一 ActivityContract 和实时 ProductionProjection。",
+          "en": "Read and restore the current game's phase/activity workflow state, one ActivityContract, and ProductionProjection."
+        }
+      },
+      {
+        "id": "game-video:begin-activity",
+        "args": "./schemas/begin-activity.args.json",
+        "returns": "./schemas/begin-activity.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "按状态机进入下一个细活动或显式返工；推进后返回新的活动契约和侧栏投影。",
+          "en": "Enter the next workflow activity or an explicit rework and return its contract and projection."
+        }
+      },
+      {
+        "id": "game-video:await-user",
+        "args": "./schemas/await-user.args.json",
+        "returns": "./schemas/await-user.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "将当前工作活动暂停为等待作者输入，并返回等待态提示和聚焦后的侧栏投影。",
+          "en": "Pause the current working activity for author input and return its waiting notice and focused sidebar projection."
+        }
+      },
+      {
+        "id": "game-video:complete-activity",
+        "args": "./schemas/complete-activity.args.json",
+        "returns": "./schemas/complete-activity.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "提交当前细活动的产物引用；Host 重新执行硬校验并只在证据通过时接受完成。",
+          "en": "Submit current activity artifact refs; the Host reruns hard checks and accepts completion only with passing evidence."
+        }
+      },
+      {
+        "id": "game-video:report-blocker",
+        "args": "./schemas/report-blocker.args.json",
+        "returns": "./schemas/report-blocker.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "以稳定错误码、可重试性和语义位置记录当前活动 blocker。",
+          "en": "Record a current-activity blocker with a stable code, retryability, and semantic location."
+        }
+      },
+      {
+        "id": "game-video:focus-page",
+        "args": "./schemas/focus-page.args.json",
+        "returns": "./schemas/focus-page.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "发布一次与活动 revision 绑定的语义工作台聚焦意图；不接受 DOM 或侧栏内部 ID。",
+          "en": "Publish an activity-revision-bound semantic focus intent without DOM or sidebar implementation IDs."
+        }
+      },
+      {
+        "id": "game-video:inspect-project",
+        "args": "./schemas/inspect-project.args.json",
+        "returns": "./schemas/inspect-project.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "只读检查真实文档、蓝图、规则、角色、界面和素材清单，返回 revision 与内容库存。",
+          "en": "Inspect real documents, graph, rules, characters, UI, and assets and return their revisions and inventory."
+        }
+      },
+      {
+        "id": "game-video:preflight-activity",
+        "args": "./schemas/preflight-activity.args.json",
+        "returns": "./schemas/preflight-activity.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "派发前只读预检：前置产物、作者门、组归属与写域是否齐备；不齐返回缺口，不要派发。",
+          "en": "Read-only preflight before dispatch: required inputs, author gates, group eligibility and write scope. Returns gaps instead of starting the activity."
+        }
+      },
+      {
+        "id": "game-video:list-ui-components",
+        "args": "./schemas/list-ui-components.args.json",
+        "returns": "./schemas/list-ui-components.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "只读列出平台内置界面元件的契约：每个元件抛什么事件、接受哪些输入键。配界面与结算前先查，别猜输入键。",
+          "en": "Read-only catalog of built-in UI components: the events each emits and the input keys it accepts."
+        }
+      },
+      {
+        "id": "game-video:validate-project",
+        "args": "./schemas/validate-project.args.json",
+        "returns": "./schemas/validate-project.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "执行当前活动的确定性硬检查并返回结构化 validation evidence。",
+          "en": "Run deterministic hard checks for the current activity and return structured validation evidence."
+        }
+      },
+      {
+        "id": "game-video:simulate-pass-a",
+        "args": "./schemas/simulate-pass-a.args.json",
+        "returns": "./schemas/simulate-pass-a.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "使用 GraphSession 对蓝图做无媒体加载的逻辑模拟，遍历可达路径并验证路由、事件与终局；不打开试玩页，也不要求节点视频。",
+          "en": "Run a media-independent GraphSession simulation over the blueprint to validate reachable routes, events, and terminal outcomes without opening Play or requiring node videos."
+        }
+      },
+      {
+        "id": "game-video:get-node-production-context",
+        "args": "./schemas/get-node-production-context.args.json",
+        "returns": "./schemas/get-node-production-context.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "按复合 NodeRef 返回章节、正文、角色/实体、规则快照、视频 Prompt、生成预设、素材引用、可提交状态和当前视频绑定状态。绑定状态统一覆盖生成、上传和导入来源。只读，不创建视频任务。",
+          "en": "Resolve a compound NodeRef into chapter, story, cast/entities, rules, video prompt, generation preset, asset refs, submission readiness, and the current video binding state across generated, uploaded, or imported sources. Read-only; never creates a video job."
+        }
+      },
+      {
+        "id": "game-video:list-videos",
+        "args": "./schemas/list-videos.args.json",
+        "returns": "./schemas/list-videos.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出内置演出视频库可用的 media.ref（basename）。编排节点绑视频前先调它看有哪些片段。",
+          "en": "List available built-in performance-video media.ref values (basenames). Call before binding videos to nodes."
+        }
+      },
+      {
+        "id": "game-video:generate-shot-script",
+        "args": "./schemas/generate-shot-script.args.json",
+        "returns": "./schemas/generate-shot-script.returns.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "第1步·为一个演出节点生成 Seedance V2 镜头脚本（防字幕/一致性/POV 等 prompt IP，纯文本，不落素材层）。生成视频前先拿它作 seedancePrompt。",
+          "en": "Step 1: generate a Seedance V2 shot script for one node (anti-subtitle / consistency / POV prompt IP; text only, no registry write). Get it first as the seedancePrompt before generating video."
+        }
+      },
+      {
+        "id": "game-video:generate-keyframe",
+        "args": "./schemas/generate-keyframe.args.json",
+        "returns": "./schemas/generate-keyframe.returns.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "仅供用户在节点制作界面生成分镜图/关键帧，产物只能是 shot_image 或 grid_storyboard，绝不生成或登记角色 character_ref。角色资产必须先建立角色目录和节点 cast，再由 workflow 自动调用 generate-character-previews；本工具失败后不得改比例重试角色图，也不得切换视频工具绕过。",
+          "en": "User-only node-production keyframe/storyboard generation. Outputs only shot_image or grid_storyboard and never creates or registers character_ref assets. Character assets require the character catalog and node cast, then automatic workflow use of generate-character-previews; never retry this tool with another ratio or switch to video tools as a fallback."
+        }
+      },
+      {
+        "id": "game-video:generate-video",
+        "args": "./schemas/generate-video.args.json",
+        "returns": "./schemas/generate-video.returns.json",
+        "requiresCapabilities": [
+          {
+            "id": "media.video.generate",
+            "version": 1
+          }
+        ],
+        "exposedToAI": false,
+        "description": {
+          "zh": "仅供用户在节点视频页显式提交一段节点视频，产物只能是 video_clip，不能替代角色 character_ref 生成。必传角色与场景参考图，缺失时硬失败；不得把本工具作为角色预览或关键帧失败后的降级入口。",
+          "en": "User-only explicit node-video submission. Outputs only video_clip and cannot replace character_ref generation. Character and scene references are required and missing refs fail hard; never use this as a fallback for character-preview or keyframe failures."
+        }
+      },
+      {
+        "id": "game-video:generate-video-clip",
+        "args": "./schemas/generate-video-clip.args.json",
+        "returns": "./schemas/generate-video-clip.returns.json",
+        "requiresCapabilities": [
+          {
+            "id": "media.video.generate",
+            "version": 1
+          }
+        ],
+        "exposedToAI": false,
+        "description": {
+          "zh": "按用户请求为视频素材界面生成 video_clip；当用户已选择视觉风格时，必须把对应 visualStyleKey 原样传入。不能生成角色 character_ref，也不得作为角色预览、图片比例或关键帧失败后的降级入口。",
+          "en": "Generate a video_clip for the video asset workspace in response to the user's request. When the user has selected a visual style, pass the selected visualStyleKey through unchanged. It cannot create character_ref and must never be used as a fallback for character-preview, image-ratio, or keyframe failures."
+        }
+      },
+      {
+        "id": "game-video:list-video-visual-styles",
+        "args": "./schemas/list-video-visual-styles.args.json",
+        "returns": "./schemas/list-video-visual-styles.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取 Kino 当前可用的视频视觉风格预设。用户要求生成视频素材但尚未指定风格时，先调用本工具，让 Chat 展示可选风格卡片；不要臆造 visualStyleKey。",
+          "en": "List the video visual-style presets currently available from Kino. When the user asks for a video asset without specifying a style, call this first so Chat can show selectable style cards; do not invent a visualStyleKey."
+        }
+      },
+      {
+        "id": "game-video:generate-node-video",
+        "args": "./schemas/generate-node-video.args.json",
+        "returns": "./schemas/generate-node-video.returns.json",
+        "requiresCapabilities": [
+          {
+            "id": "media.video.generate",
+            "version": 1
+          }
+        ],
+        "exposedToAI": false,
+        "description": {
+          "zh": "仅供用户显式提交超长节点成片，产物只能是 video_clip 分段。必传角色与场景参考图；不能生成角色 character_ref，也不得作为角色预览、图片比例或关键帧失败后的降级入口。",
+          "en": "User-only explicit long-form node-video submission producing video_clip segments. Character and scene refs are required; it cannot create character_ref and must never be used as a fallback for character-preview, image-ratio, or keyframe failures."
+        }
+      },
+      {
+        "id": "game-video:list-assets",
+        "args": "./schemas/list-assets.args.json",
+        "returns": "./schemas/list-assets.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "列出共享素材层的资产（可按 kind/productionType/sceneNodeId 过滤）。挑参考图或查生成产物时用。",
+          "en": "List shared-registry assets (filter by kind/productionType/sceneNodeId). Use to pick reference images or inspect generated outputs."
+        }
+      },
+      {
+        "id": "game-video:get-asset",
+        "args": "./schemas/get-asset.args.json",
+        "returns": "./schemas/get-asset.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "取单条素材资产（含 status/file/error 等），轮询生成进度或校验绑定用。",
+          "en": "Fetch a single registry asset (status/file/error, etc.) for polling generation progress or verifying a binding."
+        }
+      },
+      {
+        "id": "game-video:import-character-refs",
+        "args": "./schemas/import-character-refs.args.json",
+        "returns": "./schemas/import-refs.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "跨模块只读拿料·读取 character 已产出的角色立绘，通过宿主 media capability 持久化副本并登记成 character_ref；不改角色源目录。生成视频前先备齐角色参考图。",
+          "en": "Cross-module read-only intake: read character portraits, persist copies through the host media capability, and register them as character_ref without modifying the source directory. Call before video generation to stock character references."
+        }
+      },
+      {
+        "id": "game-video:import-scene-refs",
+        "args": "./schemas/import-scene-refs.args.json",
+        "returns": "./schemas/import-refs.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "跨模块只读拿料·读取场景模块发布到 textures/ 的贴图，通过宿主 media capability 持久化副本并登记成 scene_ref；不改场景源目录。生成视频前先备齐场景参考图。",
+          "en": "Cross-module read-only intake: read scene textures from textures/, persist copies through the host media capability, and register them as scene_ref without modifying the source directory. Call before video generation to stock scene references."
+        }
+      },
+      {
+        "id": "game-video:upsert-document",
+        "args": "./schemas/upsert-document.args.json",
+        "returns": "./schemas/upsert-document.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "原子写入或登记 docs/<slug>_<type>.md，并在 manifest 登记 doc-<type>。slug 必填且不从 project.json 推断，非法 slug 直接拒绝；content 省略时仅登记已有文件。",
+          "en": "Atomically write or register docs/<slug>_<type>.md and manifest doc-<type>. slug is required, never inferred from project.json, and an illegal slug is rejected. Omit content to register an existing file only."
+        }
+      },
+      {
+        "id": "game-video:upsert-component",
+        "args": "./schemas/upsert-component.args.json",
+        "returns": "./schemas/upsert-component.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "在宿主绑定的真实游戏项目中新增或更新界面。单组件界面：不带 compose，输入 manifest 的 inputs/events 与无 import 的 React 实现，工具维护 structured definitions 并生成 components/index.js，控件以 base:<id> 出现在控件目录。多组件界面：带 compose，若所需控件当前游戏不具备则先在本调用里带 id/events/implementation 造一个新控件，再把 children 组装成一张可复用模板写入 ui.overlays（归模板目录，返回 overlayId 供后续挂载）；compose.children[].component 必须引用已知控件（内置、已 authored、或本调用新造）。",
+          "en": "Create or update UI in the host-bound real game project. Single-control interface: omit compose and provide manifest inputs/events plus an import-free React implementation; the tool maintains structured definitions and generates components/index.js, with the control appearing as base:<id> in the control catalog. Multi-control interface: provide compose; if a needed control does not exist yet, create it in the same call via id/events/implementation, then assemble children into a reusable template under ui.overlays (template catalog, returning overlayId for later mounting). compose.children[].component must reference a known control (built-in, previously authored, or created in this same call)."
+        }
+      }
+    ]
+  },
+  "entry": {
+    "frontend": "./dist/index.html",
+    "backend": "./dist/server/host.js",
+    "standalone": {
+      "start": "bun run dev",
+      "port": 15185,
+      "readyProbe": "/",
+      "embeddedAlso": false
+    }
+  },
+  "permissions": [
+    "fs:read:{gameRoot}/blueprint.json",
+    "fs:write:{gameRoot}/blueprint.json",
+    "fs:read:{gameRoot}/project.json",
+    "fs:write:{gameRoot}/project.json",
+    "fs:read:{gameRoot}/assets/**",
+    "fs:write:{gameRoot}/assets/**",
+    "fs:read:{gameRoot}/docs/**",
+    "fs:write:{gameRoot}/docs/**",
+    "fs:read:{gameRoot}/characters/**",
+    "fs:read:{gameRoot}/textures/**",
+    "fs:read:{gameRoot}/components/**",
+    "fs:write:{gameRoot}/components/**",
+    "model:text:reasoning",
+    "model:image:still",
+    "model:video:kinetic"
+  ],
+  "requestedEnv": [],
+  "experimental": true
+}

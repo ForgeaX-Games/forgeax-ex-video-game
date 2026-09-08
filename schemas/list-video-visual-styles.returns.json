@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:list-video-visual-styles returns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "label", "cdnUrl", "tags", "order"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "cdnUrl": { "type": "string", "pattern": "^https://" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "order": { "type": "number" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,85 @@
+# 依赖 / 产物
+node_modules/
+*.tsbuildinfo
+
+# 非 canonical 包管理器的产物 —— 本包 canonical 是 bun（packageManager + bun.lock）
+# 任何人跑 pnpm/npm install 都会写这些文件，但不要 commit，避免 lock 分叉。
+pnpm-lock.yaml
+pnpm-workspace.yaml
+package-lock.json
+.npmrc
+
+# 环境/系统
+.env
+.env.local
+*.local
+.DS_Store
+
+# 本地 LLM 凭据 —— 任何 key 文件**永远**不要入仓
+# vite.config.ts 会按以下优先级查找 key：
+#   1. process.env.KS_LLM_KEY_PATH
+#   2. ./key/llm_key.json   （**仅本地，已 ignore**）
+key/
+*.key.json
+**/llm_key.json
+
+# 媒体资产缓存（dev server 持久化目录，per-machine）
+.reel-assets/
+
+# 剧本/历史磁盘镜像（dev server 持久化目录，per-machine）
+# 默认不入库；想跨设备同步可放在 iCloud 等同步目录下
+.reel-scenarios/
+
+# per-game 剧本磁盘镜像（dev server 运行时按游戏 slug 落盘的本地数据，per-machine）
+# 与 .reel-scenarios 同性质：纯运行时内容，不是源码，不入库。
+games/
+
+# 角色精灵原始资产（1626×1626 × 36 帧 ≈ 16MB）
+# 游戏运行用的是预下采样到 192×192 的 assets/character/frames/，
+# 原始源只作为本地"可再次下采样"的后备，不进仓。
+# 如需在不同机器上重建 frames/，复制这份到对应路径即可。
+src/minigames/magical-witch/assets/game-character-sprites/
+# 用户后续又发来的同一批精灵（只是更名/微调尺寸）—— 同样规模、同等职责，整目录排除
+src/minigames/magical-witch/assets/1123/
+
+# 其他原始 / 未下采样的工作素材（platforms, props, backgrounds 的 raw 源文件等）
+src/minigames/magical-witch/assets/raw/
+
+# tsc -b 在源码目录 emit 出来的 stale .js / .d.ts —— 仓库级历史问题
+# vite 的 resolve.extensions 已把 .ts 排在最前规避 import 误命中，
+# 这里把它们从 git 隔离，避免 commit 历史里塞满"自动生成"噪声
+vite.config.js
+src/**/*.js
+src/**/*.d.ts
+# Exception: hand-authored ambient declarations for Vite `define` globals
+# (__RS_*__). Not tsc-emitted — must be tracked so `tsc -p tsconfig.build.json`
+# resolves them on a fresh clone.
+!src/rs-defines.d.ts
+!src/assets.d.ts
+# Exception: hand-authored eslint-scope declarations used by the server compiler.
+!src/server/eslint-scope.d.ts
+# Exception: editor-emitted game component module bundled with the player.
+!game-package/components/index.js
+
+# 测试 / IDE
+coverage/
+.vscode/
+.idea/
+.cursor/
+
+# Runtime / deploy files (non-source)
+server.log
+.server.pid
+
+# 本地 dev server 多端口运行日志
+server-*.log
+
+dist/
+.codebuddy/
+assets/a peer agent CLIAssets/
+.playwright-mcp/
+.playwright-cli/.worktrees/
+.playwright-cli/
+
+# Git worktrees created for isolated feature implementation
+.worktrees/

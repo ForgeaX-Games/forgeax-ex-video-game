@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:validate-project args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "\u53ef\u7701\u7565\uff1a\u5e42\u7b49\u5199\u4e0e\u53ea\u8bfb\u8c03\u7528\u7531 Host \u4ece\u5f53\u524d\u72b6\u6001\u53d6\u5f53\u524d\u6d3b\u52a8\u4fee\u8ba2\u53f7\u3002\u53ea\u6709\u9700\u8981\u8de8\u6d3b\u52a8\u4e16\u4ee3\u505a\u51b2\u7a81\u68c0\u6d4b\u65f6\u624d\u663e\u5f0f\u643a\u5e26\u3002"
+    },
+    "checkIds": {
+      "type": "array",
+      "description": "Optional subset to run. Accepts leaf check ids (e.g. edge.no-producer) or group ids (blueprint.data.valid, playtest.playability.valid). Evidence always uses leaf checkIds.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "activity": {
+      "enum": [
+        "brief.collecting",
+        "document.inquiry",
+        "document.core",
+        "document.pillar",
+        "blueprint.outline",
+        "characters.modeling",
+        "characters.previewing",
+        "scenes.modeling",
+        "scenes.previewing",
+        "rules.catalog",
+        "rules.binding",
+        "ui.authoring",
+        "game.finalizing",
+        "assets.character",
+        "assets.scene",
+        "video.presets.binding",
+        "video.presets.validating",
+        "playtest.validating"
+      ],
+      "description": "\u5e76\u53d1\u7ec4\u91cc\u5fc5\u987b\u6307\u660e\u662f\u54ea\u6761\u7ebf\uff1b\u7701\u7565\u5219\u56de\u843d\u5230\u7ec4\u5185\u4ee3\u8868\u6d3b\u52a8\u3002"
+    }
+  }
+}
