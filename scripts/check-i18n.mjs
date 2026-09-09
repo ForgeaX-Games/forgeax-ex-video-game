@@ -131,7 +131,10 @@ for (const key of new Set([...en.keys(), ...zh.keys()])) {
 
 const sourcePaths = readdirSync(resolve(ROOT, 'src'), { recursive: true })
   .filter((path) => typeof path === 'string' && /\.[jt]sx?$/.test(path))
-  .map((path) => `src/${path}`)
+  // readdirSync yields `\`-separated segments on Windows while every exclusion
+  // below matches POSIX separators; normalise or the src/server/ exclusion
+  // silently stops matching and server prompt copy gets flagged as UI text.
+  .map((path) => `src/${path.split('\\').join('/')}`)
 
 for (const relativePath of sourcePaths) {
   // The server now lives under the shared source root, but its prompt strings,
