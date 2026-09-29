@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAssetCatalogOperations } from '../asset-catalog-operations'
+import type { CatalogItemRow } from '../asset-catalog'
 
 describe('asset catalog operations', () => {
   it('uploads once and defers catalog registration so a failed registration can retry safely', async () => {
@@ -87,5 +88,34 @@ describe('asset catalog operations', () => {
         createEntity: { name: 'battle' },
       }),
     }))
+  })
+
+  it('creates a placement when moving a control with only a derived root location', async () => {
+    const place = vi.fn(async () => {})
+    const moveAsset = vi.fn(async () => {})
+    const operations = createAssetCatalogOperations({
+      catalogClient: { place, moveAsset } as never,
+      operationId: () => 'control-placement-1',
+    })
+    const row: CatalogItemRow = {
+      placementKey: 'control:base:joystick',
+      tabKind: 'control',
+      itemId: 'base:joystick',
+      name: '摇杆',
+      placement: { folderId: 'root:control', sortKey: '摇杆', createdAt: 0, updatedAt: 0 },
+      entity: null,
+      asset: null,
+      pendingAsset: null,
+    }
+
+    await operations.moveCatalogItem(row, 'folder-controls', true)
+
+    expect(place).toHaveBeenCalledWith({
+      operationId: 'control-placement-1',
+      placementKey: 'control:base:joystick',
+      folderId: 'folder-controls',
+      sortKey: '摇杆',
+    })
+    expect(moveAsset).not.toHaveBeenCalled()
   })
 })

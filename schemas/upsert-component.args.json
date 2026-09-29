@@ -22,6 +22,39 @@
       "maxLength": 2000,
       "description": "面向 AI 的摆放位置与潜规则提示：元件一般放在页面的什么位置、以及一些潜规则（如血条不建议同一场景出现两次；敌方血条一般放在页面顶部水平居中位置；我方血条一般放在页面右下角）。配界面时据此决定元件放在哪。"
     },
+    "gameplaySemantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "新建原子控件必填。说明该控件在互动因果链中的用途、状态绑定、事件后果、反馈、结算搭档和反模式；不能只描述视觉样式。",
+      "required": ["roles", "purpose", "stateBindings", "eventSemantics", "requiredCompanions", "recommendedSettlements", "requiredFeedback", "antiPatterns"],
+      "properties": {
+        "roles": { "type": "array", "minItems": 1, "items": { "enum": ["narrative-display", "player-choice", "combat-command", "timed-input", "state-feedback", "transient-feedback"] } },
+        "purpose": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "stateBindings": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["input", "meaning", "required"],
+            "properties": { "input": { "type": "string" }, "meaning": { "type": "string" }, "required": { "type": "boolean" } }
+          }
+        },
+        "eventSemantics": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["event", "intent", "requiredConsequences", "stateMutationOwner", "downstreamPayoff"],
+            "properties": {
+              "event": { "type": "string" }, "intent": { "type": "string" },
+              "requiredConsequences": { "type": "array", "items": { "enum": ["effect", "feedback", "advance"] } },
+              "stateMutationOwner": { "const": "settlement", "description": "界面事件负责路由；数值状态必须由结果节点结算。" },
+              "downstreamPayoff": { "type": "string" }
+            }
+          }
+        },
+        "requiredCompanions": { "type": "array", "items": { "type": "string" } },
+        "recommendedSettlements": { "type": "array", "items": { "type": "string" } },
+        "requiredFeedback": { "type": "array", "items": { "type": "string" } },
+        "antiPatterns": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "inputs": {
       "type": "array",
       "maxItems": 40,
@@ -63,14 +96,28 @@
     "events": {
       "type": "array",
       "maxItems": 40,
-      "description": "Events emitted through props.emit(eventId) and exposed in the event editor. Required when authoring a single control, or when the composed template also creates a new control in the same call.",
+      "description": "Events emitted through props.emit(eventId, payload) and exposed to node reactions. Declare outputs when payload fields will be consumed through eventPayload.<key>. Required when authoring a single control, or when the composed template also creates a new control in the same call.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["id"],
         "properties": {
           "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
-          "label": { "type": "string", "minLength": 1, "maxLength": 120 }
+          "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "outputs": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "valueType"],
+              "properties": {
+                "key": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
+                "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+                "valueType": { "enum": ["string", "number", "boolean"] }
+              }
+            }
+          }
         }
       }
     },
@@ -78,7 +125,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 50000,
-      "description": "A JavaScript expression evaluating to a React component, usually `function MyControl(props) { ... }`. React is injected in lexical scope; use React.createElement and React hooks, and never redeclare or shadow React with a variable, function, class, parameter, destructuring target, or catch binding. Do not use import, export, JSX, TypeScript, external packages, or undeclared identifiers. Inputs arrive as flat props; call props.emit(eventId) for declared events. The tool validates the implementation before writing. When validation fails, fix the reported implementation defect and call this tool again; do not report the component as created until the tool succeeds. Required when authoring a single control, or when the composed template also creates a new control in the same call."
+      "description": "A JavaScript expression evaluating to a React component, usually `function MyControl(props) { ... }`. React is injected in lexical scope; use React.createElement and React hooks, and never redeclare or shadow React with a variable, function, class, parameter, destructuring target, or catch binding. Do not use import, export, JSX, TypeScript, external packages, or undeclared identifiers. Inputs arrive as flat props; call props.emit(eventId, payload) for declared events and declare every consumed payload field in event.outputs. The tool validates the implementation before writing. When validation fails, fix the reported implementation defect and call this tool again; do not report the component as created until the tool succeeds. Required when authoring a single control, or when the composed template also creates a new control in the same call."
     },
     "compose": {
       "type": "object",

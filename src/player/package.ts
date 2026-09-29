@@ -12,6 +12,7 @@ export interface RuntimeAsset {
   provider?: {
     kind?: string
     ref?: string
+    upstreamResourceId?: string
   }
 }
 

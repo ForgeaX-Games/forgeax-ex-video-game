@@ -20,6 +20,8 @@ export const VALIDATION_CHECK_GROUPS = {
     'playtest.paths-not-illegally-stuck',
     'playtest.rules-executable',
     'playtest.numeric-sanity',
+    'finalization.causal-quality',
+    'playtest.semantic-quality',
   ],
 } as const
 

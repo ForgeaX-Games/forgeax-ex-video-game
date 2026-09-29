@@ -110,12 +110,14 @@ export function ImageGenerationWorkspace({
         ? 'imageGeneration.defaultSceneName'
         : targetRoot === 'image'
           ? 'imageGeneration.defaultImageName'
+          : targetRoot === 'icon'
+            ? 'imageGeneration.defaultIconName'
           : undefined
     const existingNames = targetRoot === 'image'
       ? Object.values(catalog.assets).filter((asset) => asset.kind === 'image').map((asset) => asset.name)
       : Object.values(catalog.entities[targetRoot]).map((entity) => entity.name)
     const displayName = generatedDisplayName({
-      preferredName: entityName ?? existingName,
+      preferredName: targetRoot === 'image' || targetRoot === 'icon' ? undefined : entityName ?? existingName,
       ...(defaultNameKey ? { newName: nextGeneratedName(
         existingNames,
         (number) => tf(defaultNameKey, { number }),
@@ -235,7 +237,7 @@ export function ImageGenerationWorkspace({
   }, [])
 
   const targetEntityId = explicitEntityId ?? characterId
-  const { catalog: historyCatalog } = useAssetCatalogHistory(
+  const { catalog: historyCatalog, loading: historyLoading } = useAssetCatalogHistory(
     targetRoot === 'image' || !targetEntityId ? undefined : targetRoot,
     targetEntityId,
   )
@@ -249,6 +251,10 @@ export function ImageGenerationWorkspace({
     [catalog, historyCatalog, initialAssetId, targetEntityId, targetRoot],
   )
   const mentionAssets = useMemo(() => catalogPromptMentionAssets(catalog), [catalog])
+  const waitForEntityHistory = open && historyLoading && (targetRoot === 'character' || targetRoot === 'scene')
+  if (waitForEntityHistory) {
+    return <div className="igen-page" role="status" aria-busy="true">{t('imageGeneration.loadingHistory')}</div>
+  }
   return <>
     <ImageGenerationSurface
       open={open}

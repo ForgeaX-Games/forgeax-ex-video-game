@@ -38,6 +38,7 @@ describe('VgenImagePicker', () => {
 
     opener.focus()
     fireEvent.click(opener)
+    fireEvent.click(screen.getByRole('tab', { name: '角色' }))
     fireEvent.click(screen.getByRole('button', { name: 'Hero' }))
 
     expect(onPick).toHaveBeenCalledTimes(1)
@@ -46,7 +47,7 @@ describe('VgenImagePicker', () => {
     await waitFor(() => expect(opener).toHaveFocus())
   })
 
-  it('filters registry images by role tabs', () => {
+  it('filters registry images by category tabs', () => {
     render(
       <VgenImagePicker
         open
@@ -57,17 +58,18 @@ describe('VgenImagePicker', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: 'Hero' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Street' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Keyframe' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Hero' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Street' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '角色' }))
     expect(screen.getByRole('button', { name: 'Hero' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Street' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: '关键帧' }))
-    expect(screen.getByRole('button', { name: 'Keyframe' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '场景' }))
+    expect(screen.getByRole('button', { name: 'Street' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Hero' })).not.toBeInTheDocument()
   })
 
-  it('picks the shared-registry id after local import is atomically registered as scene_ref', async () => {
+  it('picks the shared-registry id after a category-specific local import', async () => {
     const created: MediaAsset = {
       id: 'registry-image-1',
       kind: 'image',
@@ -92,13 +94,13 @@ describe('VgenImagePicker', () => {
         onClose={() => {}}
       />,
     )
-    const input = screen.getByLabelText('导入本地图片并登记为场景参考图') as HTMLInputElement
+    const input = screen.getByLabelText('从本地上传') as HTMLInputElement
     expect(input).toHaveAttribute('accept', 'image/png,image/jpeg,image/webp')
     const file = new File(['png'], 'import.png', { type: 'image/png' })
 
     fireEvent.change(input, { target: { files: [file] } })
 
-    await waitFor(() => expect(uploadRegistryImage).toHaveBeenCalledWith('demo', file))
+    await waitFor(() => expect(uploadRegistryImage).toHaveBeenCalledWith('demo', file, 'keyframe'))
     expect(onPick).toHaveBeenCalledWith({
       id: 'registry-image-1',
       resourceId: 'kino-imported-1',
@@ -121,6 +123,7 @@ describe('VgenImagePicker', () => {
       />,
     )
 
+    fireEvent.click(screen.getByRole('tab', { name: '场景' }))
     expect(screen.getByRole('button', { name: 'Legacy image' })).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent(
       '部分图片缺少 Kino resource_id，无法用于当前生成链路。',
@@ -140,7 +143,7 @@ describe('VgenImagePicker', () => {
       />,
     )
     const file = new File(['gif'], 'import.gif', { type: 'image/gif' })
-    fireEvent.change(screen.getByLabelText('导入本地图片并登记为场景参考图'), {
+    fireEvent.change(screen.getByLabelText('从本地上传'), {
       target: { files: [file] },
     })
 
@@ -165,7 +168,7 @@ describe('VgenImagePicker', () => {
     )
     const file = new File(['png'], 'import.png', { type: 'image/png' })
 
-    fireEvent.change(screen.getByLabelText('导入本地图片并登记为场景参考图'), {
+    fireEvent.change(screen.getByLabelText('从本地上传'), {
       target: { files: [file] },
     })
 
@@ -195,7 +198,7 @@ describe('VgenImagePicker', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('导入本地图片并登记为场景参考图'), {
+    fireEvent.change(screen.getByLabelText('从本地上传'), {
       target: { files: [new File(['png'], 'import.png', { type: 'image/png' })] },
     })
 
@@ -219,12 +222,12 @@ describe('VgenImagePicker', () => {
         onUploadingChange={onUploadingChange}
       />,
     )
-    fireEvent.change(screen.getByLabelText('导入本地图片并登记为场景参考图'), {
+    fireEvent.change(screen.getByLabelText('从本地上传'), {
       target: { files: [new File(['png'], 'import.png', { type: 'image/png' })] },
     })
     await waitFor(() => expect(onUploadingChange).toHaveBeenLastCalledWith(true))
     fireEvent.keyDown(window, { key: 'Escape' })
-    fireEvent.mouseDown(screen.getByRole('presentation'))
+    fireEvent.mouseDown(document.querySelector('.vgen-picker-layer')!)
     fireEvent.click(screen.getByRole('button', { name: '关闭图片选择器' }))
     expect(onClose).not.toHaveBeenCalled()
     resolveUpload({

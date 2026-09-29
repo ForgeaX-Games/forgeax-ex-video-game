@@ -4,7 +4,8 @@ import generationFrameRemoveIcon from '@/editor/ui-assets/video-generation-frame
 import generationEmptyIcon from '@/editor/ui-assets/video-generation-empty.svg?url'
 import generationStyleSwapIcon from '@/editor/ui-assets/video-generation-style-swap.svg?url'
 import generationUndoIcon from '@/editor/ui-assets/video-generation-undo.svg?url'
-import generationSendIcon from '@/editor/ui-assets/video-generation-send.svg?url'
+import generationSubmitIcon from '@/editor/ui-assets/video-generation-submit.svg?url'
+import mentionRemoveIcon from '@/editor/ui-assets/video-generation-chip-remove.svg?url'
 import { useT } from '../../../i18n'
 import type { KinoPromptContentItem, KinoVideoGenerationParams } from '@/runtime/core/schema/kino-schema'
 import {
@@ -511,7 +512,7 @@ export function VideoGenerationSurface({
       styleIcon={<span className="vgen-style-swap" aria-hidden><img src={generationStyleSwapIcon} alt="" /></span>}
       clearIcon={<img src={generationUndoIcon} alt="" />}
       cancelIcon={<img src={generationUndoIcon} alt="" />}
-      submitIcon={<img src={generationSendIcon} alt="" />}
+      submitIcon={<img src={generationSubmitIcon} alt="" />}
       prefix={prefilledReferenceAssets.length > 0 ? (
         <div className="vgen-prefilled-reference-list" role="group" aria-label={t('videoAssets.generate.nodeReferences')}>
           {prefilledReferenceAssets.map(({ resourceId, asset }) => (
@@ -534,7 +535,9 @@ export function VideoGenerationSurface({
                 onClick={() => setPrefilledReferenceImageResourceIds((current) => (
                   current.filter((candidate) => candidate !== resourceId)
                 ))}
-              />
+              >
+                <img src={mentionRemoveIcon} alt="" />
+              </button>
             </span>
           ))}
         </div>

@@ -1,6 +1,6 @@
 /**
  * 视频/配置栏目（catalog）的共享 gc-* 样式 —— 从旧 forge/CatalogTabs 的 CATALOG_CSS
- * 原样搬来（解耦自已删的 FMV 外壳），供 CatalogShell、GraphConfigView 与
+ * 原样搬来（解耦自已删的 FMV 外壳），供 GraphConfigView 与
  * NodePreviewStage 共用。各入口都经 injectStyleOnce('graph-catalog') 注入，去重后只落一份。
  */
 import { PREVIEW_CLOCK_CSS } from './previewClock'
@@ -1099,12 +1099,13 @@ ${PREVIEW_CLOCK_CSS}
 }
 .gc-rule-root {
   box-sizing: border-box;
+  display:flex;
+  flex-direction:column;
   min-height: 100%;
   padding: 24px;
   background: var(--rule-surface);
   font-size: 14px;
 }
-.gc-rule-root--entities { display:flex; flex-direction:column; }
 .gc-rule-toolbar {
   position: sticky; top: 0; z-index: 2;
   box-sizing: border-box;
@@ -1156,30 +1157,6 @@ ${PREVIEW_CLOCK_CSS}
   pointer-events: none;
 }
 .gc-rule-search-icon img { display:block; width:24px; height:24px; }
-.gc-rule-empty {
-  display:flex; flex:1; min-height:320px; align-items:center; justify-content:center;
-}
-.gc-rule-empty-content {
-  display:flex; width:148px; flex-direction:column; align-items:center; gap:24px;
-}
-.gc-rule-empty-message {
-  display:flex; width:148px; flex-direction:column; align-items:center; gap:8px;
-}
-.gc-rule-empty-icon {
-  display:flex; width:80px; height:80px; align-items:center; justify-content:center;
-}
-.gc-rule-empty-icon img { display:block; width:72px; height:80px; }
-.gc-rule-empty-message p {
-  width:148px; margin:0; color:rgba(255,255,255,.4); text-align:center;
-  font:400 16px/24px "PingFang SC",sans-serif;
-}
-.gc-rule-empty-create {
-  box-sizing:border-box; display:flex; width:148px; height:40px; align-items:center; justify-content:center;
-  padding:2px 42px; border:0; border-radius:8px; background:#fff; color:#000;
-  font:600 16px/24px "PingFang SC",sans-serif; white-space:nowrap; cursor:pointer;
-}
-.gc-rule-empty-create:hover { background:#f2f2f2; color:#000; }
-.gc-rule-empty-create:focus-visible { outline:2px solid var(--gc-accent); outline-offset:2px; }
 .gc-rule-accordion { border-bottom: 1px solid var(--rule-divider); }
 .gc-rule-accordion-head { box-sizing:border-box; display:flex; align-items:center; gap:8px; height:76px; padding:8px 0; border-bottom:1px solid var(--rule-divider); }
 .gc-rule-expand-toggle { display:grid; flex:0 0 20px; width:20px; height:20px; place-items:center; border:0; padding:0; background:transparent; cursor:pointer; }
@@ -1201,9 +1178,15 @@ ${PREVIEW_CLOCK_CSS}
 .gc-rule-accordion-head .gc-rule-icon-button > img { width:24px; height:24px; }
 .gc-rule-icon-button { display:grid; width:14px; height:14px; padding:0; border:0; place-items:center; background:transparent; color:var(--rule-text); cursor:pointer; }
 .gc-rule-icon-button > img { display:block; width:14px; height:14px; }
-.gc-rule-menu { position:absolute; z-index:3; right:0; top:20px; width:128px; padding:8px; border:1px solid var(--rule-divider); border-radius:8px; background:#141414; }
-.gc-rule-menu button { width:100%; min-height:40px; padding:8px; border:0; border-radius:8px; background:transparent; color:#fff; font:500 16px/24px "PingFang SC",sans-serif; cursor:pointer; }
-.gc-rule-menu button:hover { background:rgba(255,255,255,.1); }
+.gc-rule-dropdown.gc-rule-menu {
+  position:absolute; top:calc(100% + 6px); right:0; width:128px; padding:8px;
+  border-color:rgba(255,255,255,.1); background:#141414;
+}
+.gc-rule-dropdown.gc-rule-menu button {
+  min-height:40px; padding:8px; border-radius:8px; color:#fff;
+  font:400 16px/24px "PingFang SC",sans-serif; text-align:center;
+}
+.gc-rule-dropdown.gc-rule-menu button:hover { background:rgba(255,255,255,.1); color:#fff; }
 .gc-rule-accordion-body { display:flex; flex-direction:column; gap:8px; padding:8px 0 16px; }
 .gc-rule-attribute-section { display:flex; flex-direction:column; gap:8px; width:100%; }
 .gc-rule-attribute-list { display:flex; flex-direction:column; gap:16px; width:100%; padding-left:8px; }
@@ -1271,14 +1254,14 @@ ${PREVIEW_CLOCK_CSS}
 .gc-rule-scalar-input input,.gc-rule-range-input { box-sizing:border-box; width:100%; min-width:0; height:27px; padding:5.5px 9.16px; border:1px solid rgba(255,255,255,.08); border-radius:8px; background:var(--rule-input); color:var(--rule-text); font:400 11px/normal Inter,sans-serif; }
 .gc-rule-dialog-backdrop { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:24px; background:rgba(0,0,0,.58); }
 .gc-rule-dialog { position:relative; box-sizing:border-box; display:flex; flex-direction:column; width:min(450px,100%); min-height:300px; padding:40px; border:1px solid rgba(255,255,255,.2); border-radius:16px; background:#141414; color:#fff; }
-.gc-rule-dialog h2 { margin:0; text-align:center; font:600 24px/36px "PingFang SC",sans-serif; }
+.gc-rule-dialog h2 { margin:0; text-align:center; font:400 24px/36px "PingFang SC",sans-serif; }
 .gc-rule-dialog p { flex:1; margin:28px 0; text-align:center; font:400 16px/24px "PingFang SC",sans-serif; }
-.gc-rule-dialog p span { color:#ff9c2a; white-space:nowrap; }
+.gc-rule-dialog p span { color:#ff9c2a; white-space:normal; overflow-wrap:anywhere; }
 .gc-rule-dialog-close { position:absolute; top:23px; right:25px; display:grid; place-items:center; width:24px; height:24px; padding:0; border:0; background:transparent; cursor:pointer; }
 .gc-rule-dialog-close img { display:block; width:20px; height:20px; transform:rotate(-45deg); }
 .gc-rule-dialog-input { width:100%; box-sizing:border-box; margin:28px 0 auto; padding:8px 12px; border:1px solid rgba(255,255,255,.2); border-radius:8px; outline:0; background:#333; color:#fff; font:400 16px/24px "PingFang SC",sans-serif; }
 .gc-rule-dialog-actions { display:flex; justify-content:center; gap:16px; margin-top:32px; }
-.gc-rule-dialog-actions button { display:flex; align-items:center; justify-content:center; box-sizing:border-box; width:120px; height:32px; padding:1px 28px; border:0; border-radius:8px; background:#fff; color:#000; font:600 16px/24px "PingFang SC",sans-serif; cursor:pointer; transition:background var(--motion-duration-base,150ms) var(--motion-ease-out,ease),filter var(--motion-duration-base,150ms) var(--motion-ease-out,ease); }
+.gc-rule-dialog-actions button { display:flex; align-items:center; justify-content:center; box-sizing:border-box; width:120px; height:32px; padding:1px 28px; border:0; border-radius:8px; background:#fff; color:#000; font:400 16px/24px "PingFang SC",sans-serif; cursor:pointer; transition:background var(--motion-duration-base,150ms) var(--motion-ease-out,ease),filter var(--motion-duration-base,150ms) var(--motion-ease-out,ease); }
 .gc-rule-dialog-actions button.is-danger { background:linear-gradient(90deg,#ff7001,#ff9c2a); }
 .gc-rule-dialog-actions button:not(:disabled):not(.is-disabled):hover { background:#f2f2f2; color:#000; filter:brightness(.95); }
 .gc-rule-dialog-actions button.is-danger:not(:disabled):not(.is-disabled):hover { background:linear-gradient(90deg,#ff7001,#ff9c2a); color:#000; }
@@ -1298,6 +1281,8 @@ ${PREVIEW_CLOCK_CSS}
 .gc-rule-delete-dialog .gc-rule-dialog-actions { margin-top:auto; }
 .gc-rule-new-entity-dialog { min-height:340px; }
 .gc-rule-new-entity-dialog > label { display:grid; gap:8px; margin-top:16px; color:#fff; font:400 16px/24px "PingFang SC",sans-serif; }
+.gc-rule-rename-field > span,
+.gc-rule-new-entity-dialog > label > span { white-space:nowrap; }
 .gc-rule-id-format-hint { margin-left:8px; color:rgba(255,255,255,.6); font:400 12px/18px "PingFang SC",sans-serif; }
 .gc-rule-new-entity-dialog > label > input { box-sizing:border-box; width:100%; height:40px; padding:0 16px; border:1px solid rgba(255,255,255,.6); border-radius:8px; outline:0; background:transparent; color:#fff; font:400 14px/21px "PingFang SC",sans-serif; }
 .gc-rule-new-entity-dialog > label > input::placeholder { color:rgba(255,255,255,.4); }
@@ -1312,15 +1297,19 @@ ${PREVIEW_CLOCK_CSS}
 .gc-rule-type-select-trigger:focus-visible { outline:2px solid rgba(240,136,64,.3); outline-offset:2px; }
 .gc-rule-type-select-trigger svg { width:12px; height:8px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.5; transition:transform var(--motion-duration-base,150ms) var(--motion-ease-out,ease); }
 .gc-rule-type-select-trigger[aria-expanded="true"] svg { transform:rotate(180deg); }
-.gc-rule-type-select-menu {
-  position:absolute; z-index:var(--z-menu,10100); top:calc(100% + 6px); right:0; left:0; display:grid; gap:4px; padding:4px;
+.gc-rule-dropdown {
+  z-index:var(--z-menu,10100); display:grid; gap:4px; padding:4px;
   border:1px solid var(--color-border-default,#404040); border-radius:8px; background:var(--color-background-floating,#333); box-shadow:0 8px 24px rgba(0,0,0,.45);
 }
-.gc-rule-type-select-menu button {
+.gc-rule-dropdown button {
   min-height:32px; padding:0 12px; border:0; border-radius:5px; background:transparent; color:var(--color-text-secondary,rgba(255,255,255,.6));
   font:400 14px/21px "PingFang SC",sans-serif; text-align:left; cursor:pointer;
 }
-.gc-rule-type-select-menu button:hover { background:rgba(240,136,64,.16); color:var(--color-text-primary,#fff); }
+.gc-rule-dropdown button:hover { background:rgba(240,136,64,.16); color:var(--color-text-primary,#fff); }
+.gc-rule-type-select-menu {
+  position:absolute; top:calc(100% + 6px); right:0; left:0; padding:4px;
+  border-color:var(--color-border-default,#404040); background:var(--color-background-floating,#333);
+}
 .gc-rule-new-entity-dialog .gc-rule-dialog-actions { margin-top:auto; }
 .gc-rule-new-variable-dialog .gc-rule-dialog-actions { margin-top:14px; }
 .gc-rule-empty { padding:16px 0; color:var(--rule-muted); text-align:center; }

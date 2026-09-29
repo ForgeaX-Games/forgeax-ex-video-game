@@ -35,7 +35,7 @@ import {
 } from './keyBindingConflicts'
 import { overlayDisplayLabel } from './schemeOverlays'
 import { scrollIntoViewWithin } from './focus-scroll'
-import { listSchemeAndBaseOverlayIds } from '@/authoring/demo/builtin-schemes'
+import { listSchemeAndBaseOverlayIds } from '@/authoring/overlays/builtin-schemes'
 import { buildFieldTree, sparseOverlayInputOverride, type OptItem, type VideoOption } from './node-inspector/shared'
 import { PerformanceSection } from './node-inspector/PerformanceSection'
 import { OverlaySection } from './node-inspector/OverlaySection'
@@ -229,17 +229,23 @@ export function NodeInspector({
   const fieldTree = buildFieldTree(entities, variables)
   const pickers: EditorPickerCtx = { entities, variables, formulas, nodeLabel }
   const flowHandleOptions = (() => {
+    const derived = deriveOutputs(node, overlays)
+    const labels = new Map(derived.map((h) => [h.id, h.label] as const))
     const extra = graph.edges
       .filter((e) => e.source === node.id)
-      .map((e) => e.sourceHandle ?? 'default')
-    return mergeFlowHandles(deriveOutputs(node, overlays), extra)
+      .map((e) => ({ id: e.sourceHandle ?? 'default', label: labels.get(e.sourceHandle ?? 'default') }))
+    return mergeFlowHandles(derived, extra)
   })()
   const edgeOptions: OptItem[] = graph.edges
     .filter((e) => e.source === node.id)
-    .map((e) => ({
-      value: e.id,
-      label: `${flowHandleDisplay(e.sourceHandle ?? 'default')} → ${nodeLabel(e.target)}`,
-    }))
+    .map((e) => {
+      const handle = e.sourceHandle ?? 'default'
+      const label = flowHandleOptions.find((o) => o.value === handle)?.label
+      return {
+        value: e.id,
+        label: `${flowHandleDisplay(handle, label)} → ${nodeLabel(e.target)}`,
+      }
+    })
   /** 每个交互出口 → 目标节点摘要（单边 `→ X`，多边 `→ A | B`）。 */
   const routeHints = (() => {
     const byHandle = new Map<string, string[]>()

@@ -26,6 +26,8 @@ export type {
   OverlayInstanceChild,
   OverlayInstance,
   ComponentInput,
+  ComponentOutput,
+  EventPayload,
   ComponentEvent,
   ComponentManifest,
   ComponentTimingContract,
@@ -73,6 +75,7 @@ export {
   resolveOverlayReaction,
   resolveEventReactionDo,
   resolveEventReactions,
+  eventReactionKeys,
   completeReactions,
 } from './overlay-events'
 
@@ -99,6 +102,8 @@ export type CmpOp = 'gte' | 'lte' | 'gt' | 'lt' | 'eq' | 'neq'
 export type TextCmpOp = 'eq' | 'neq'
 /** 文本值可为字面量，或对变量/实体文案的引用。 */
 export type TextValue = string | { ref: string }
+/** 布尔值可为字面量，或事件 payload 布尔字段引用。 */
+export type BooleanValue = boolean | { ref: string }
 
 // ── 副作用（图原生，通用）────────────────────────────────────────────────────
 /** 数值类 effect 的运算：加 / 乘 / 设为（减 = 增加负数）。 */
@@ -108,8 +113,8 @@ export type GraphEffect =
   /** 缺少 valueType 的旧数据按数值变量解释。 */
   | { kind: 'var'; varId: string; valueType?: 'number'; op: NumericEffectOp; value: NumOrExpr; once?: boolean; id?: string }
   | { kind: 'var'; varId: string; valueType: 'text'; op: 'set'; value: TextValue; once?: boolean; id?: string }
-  | { kind: 'flag'; varId: string; value: boolean; id?: string }
-  | { kind: 'item'; itemId: string; op: 'give' | 'take'; count: number; id?: string }
+  | { kind: 'flag'; varId: string; value: BooleanValue; id?: string }
+  | { kind: 'item'; itemId: string; op: 'give' | 'take'; count: NumOrExpr; id?: string }
 
 // ── 条件（图原生，通用；无 hp 特判）──────────────────────────────────────────
 export type GraphClause =
@@ -394,8 +399,16 @@ export interface NodeInteractionPlan {
    * 这条区分让「漏配」和「刻意不配」在机器上可分辨。
    */
   beat: 'narrative' | 'choice' | 'combat' | 'check' | 'timed'
+  /** 支柱文档「互动节拍」中的稳定 ID；总脉络不得创造无法追溯的新玩法。 */
+  sourcePillarBeatId?: string
+  /** 从支柱逐字继承的节拍叙事目的；用于防止只借 beat ID 重新发明玩法。 */
+  narrativeIntent?: string
+  /** 玩家在做决定前能够看见或推断的信息。 */
+  playerInformation?: string[]
   /** 观众在这个节拍能做的事；每条对应一个界面元件事件。 */
   actions?: NodeInteractionAction[]
+  /** 系统触发而不是玩家直接点击的结算计划。 */
+  settlements?: NodeInteractionSettlementPlan[]
   /** 回合节拍未分胜负时回到的节点；由 Host 校验真实回边。 */
   loop?: {
     backTo: string
@@ -405,14 +418,49 @@ export interface NodeInteractionPlan {
   terminals?: Array<{ when: string; note?: string }>
 }
 
+export interface NodeInteractionSettlementPlan {
+  id: string
+  sourcePillarSettlementId?: string
+  /** 该结算承接的支柱动作。数值动作由界面事件路由到结果节点，再由这里的结算应用效果。 */
+  sourcePillarActionId?: string
+  pattern: string
+  trigger: 'at' | 'watch' | 'state'
+  intent: string
+  /** at 使用毫秒说明；watch/state 使用变量、属性或条件表达式说明。 */
+  source: string
+  /** 总脉络把作者语义编译成运行时可直接比较的触发器；整装必须逐字段照此落 reaction.when。 */
+  triggerSpec?:
+  | { type: 'at'; ms: number }
+  | { type: 'watch'; of: string; on?: 'change' | 'inc' | 'dec' }
+  | { type: 'state'; condition: GraphCondition }
+  feedback: string
+  feedbackSpec?: InteractionFeedbackSpec
+  exitIntent?: string
+  exit?: string
+  targetNodeId?: string
+}
+
 /** 一次玩家动作：点哪个元件的哪个事件、改什么、走向哪里。 */
 export interface NodeInteractionAction {
+  sourcePillarActionId?: string
+  /** none = 纯剧情分流；settlement = 持久数值必须在目标结果节点结算。 */
+  stateMutationOwner?: 'none' | 'settlement'
   /** 界面元件 id，必须在元件清单里（`list_ui_components`）。 */
   component: string
   /** 元件事件 id；它同时是本节点的出口 handle（见 `ComponentRegistry.deriveOutputs`）。 */
   event: string
   /** 一句话说明观众为什么会点它（作者语言），供整装与后续人工审读。 */
   intent: string
+  /** 从支柱动作逐字继承的状态变化语义，再由 effect 编译成具体 ID。 */
+  stateChangeIntent?: string
+  /** 当前节点中的即时反馈，例如血条变化、飘字、按钮锁定或状态提示。 */
+  feedback?: string
+  /** 将作者反馈语义编译为可机械核验的界面动作。 */
+  feedbackSpec?: InteractionFeedbackSpec
+  /** 下游视频必须呈现的叙事结果。 */
+  downstreamPayoff?: string
+  /** 从支柱动作逐字继承的出口语义。 */
+  exitIntent?: string
   /**
    * 这个动作改什么。`target` 用 `entity.<id>.attr.<attr>` 或 `var.<id>`；
    * `formulaId` 是**期望数值线提供的公式名**——数值线读这里决定要造哪些公式，
@@ -429,6 +477,22 @@ export interface NodeInteractionAction {
    * 填 `none` 表示只结算不离开节点；一次性组件不会因此获得第二次 emit。
    */
   exit?: string
+  /** exit 对应边的真实目标节点；用于把故事分支与 UI 事件计划绑定起来。 */
+  targetNodeId?: string
+}
+
+export type InteractionFeedbackSpec =
+  | { kind: 'transient-component'; component: string }
+  | { kind: 'state-binding'; component: string; target: string }
+  | { kind: 'hide-interface' }
+
+export interface NodeOutcomeEvidence {
+  /** 稳定格式建议 `${pillarBeatId}/${pillarActionOrSettlementId}`。 */
+  id: string
+  /** 产生该结果的上游边。 */
+  sourceEdgeId: string
+  /** 当前节点的视频/正文具体怎样呈现上游动作结果。 */
+  presentation: string
 }
 
 export interface NodeData {
@@ -437,6 +501,8 @@ export interface NodeData {
   chapterSummary?: string
   /** 本节拍的玩法契约；见 `NodeInteractionPlan`。纯叙事节点也要显式声明 beat。 */
   interaction?: NodeInteractionPlan
+  /** 总脉络提供的下游结果证明；目标节点必须覆盖入边 design.outcomeEvidenceId。 */
+  outcomeEvidence?: NodeOutcomeEvidence[]
   /**
    * 作者可读的演出/叙事正文（演出描述 + 台词 + 内心独白 + 选项）。
    * 视频是它的下游产物：正文 → 分镜 → 关键帧 → 视频。字段名是 storyText，不是 scriptText。
@@ -580,6 +646,17 @@ export interface EdgeRouting {
   condition?: GraphCondition
   weight?: number
   transition?: EdgeTransition
+  /** 从支柱节拍到物理边的因果追踪；不参与运行时路由判断。 */
+  design?: {
+    pillarBeatId: string
+    producer: {
+      kind: 'component-event' | 'settlement' | 'lifecycle'
+      ref: string
+    }
+    narrativePayoff: string
+    /** 目标节点 outcomeEvidence 中必须存在的稳定证据 ID。 */
+    outcomeEvidenceId?: string
+  }
 }
 
 /**

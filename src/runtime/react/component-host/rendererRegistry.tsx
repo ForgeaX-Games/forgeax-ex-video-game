@@ -31,7 +31,7 @@ export interface SkinCtx {
 /** @deprecated 叶子已改扁平 props；保留类型仅供少数仍引用 OverlayProps 的旧测试/工具。 */
 export interface OverlayProps {
   overlay: OverlaySnap
-  emit?: (key: string) => void
+  emit?: (key: string, payload?: Record<string, unknown>) => void
   ctx?: SkinCtx
   preview?: boolean
   previewTimeMs?: number
@@ -109,7 +109,7 @@ export class SkinRegistry {
    */
   renderOverlayMount(
     mount: OverlayMountSnap,
-    emit?: (elementId: string, key: string) => void,
+    emit?: (elementId: string, key: string, payload?: Record<string, unknown>) => void,
     ctx?: SkinCtx,
     preview?: { timeMs?: number; playing?: boolean },
   ): ReactNode {
@@ -132,7 +132,7 @@ export class SkinRegistry {
                 <RuntimeComponentHost
                   registration={registration}
                   overlay={snap}
-                  emit={(key) => emit?.(child.elementId, key)}
+                  emit={(key, payload) => emit?.(child.elementId, key, payload)}
                   ctx={ctx}
                   preview={!!preview}
                   previewTimeMs={preview?.timeMs}
@@ -161,7 +161,7 @@ export function unregisterOverlayRenderer(id: string): void {
 }
 export function renderOverlayMount(
   mount: OverlayMountSnap,
-  emit?: (elementId: string, key: string) => void,
+  emit?: (elementId: string, key: string, payload?: Record<string, unknown>) => void,
   ctx?: SkinCtx,
   preview?: { timeMs?: number; playing?: boolean },
 ): ReactNode {

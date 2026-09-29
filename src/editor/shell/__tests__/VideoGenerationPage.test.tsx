@@ -149,6 +149,8 @@ describe('<VideoGenerationPage />', () => {
   it('can hide route breadcrumb when rendered inside the node video tab', () => {
     const { rerender } = render(<VideoGenerationPage onBack={vi.fn()} />)
     expect(screen.getByLabelText('生成页路径')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '视频' })).toBeTruthy()
+    expect(screen.getByText('视频生成')).toBeTruthy()
 
     rerender(<VideoGenerationPage onBack={vi.fn()} showBreadcrumb={false} />)
     expect(screen.queryByLabelText('生成页路径')).toBeNull()

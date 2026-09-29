@@ -28,11 +28,13 @@ import { SelectDropdown } from './SelectDropdown'
 import formulaToolbarAddIcon from '../ui-assets/formula-toolbar-add.svg'
 import ruleChevronRightIcon from '../ui-assets/rule-chevron-right.png'
 import { findEntity, listAttrOptions, listEntityOptions, listVarOptions, nextCatalogId, catalogIdOccupied, type EntityAttributeCreateRequest, type EntityCreateRequest, type VariableCreateRequest } from '@/authoring/formulas/meta-catalog'
-import { LooseNumberInput } from './TermChainEditor'
+import { LooseNumberInput } from './LooseNumberInput'
 import type { EntityAttributeCreateHandler, EntityCreateHandler, VariableCreateHandler } from './component-form-fields'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }
 const FORMULA_EXAMPLE = 'max(?攻击力 * ?技能倍率 - ?防御力, 0)'
+// 临时隐藏公式结构摘要与试算面板，保留实现以便后续恢复。
+const SHOW_FORMULA_AUXILIARY = false
 // expr.ts eval 支持的函数名（插入用）。
 const FUNCTIONS = ['floor', 'round', 'abs', 'min', 'max', 'chance', 'rand', 'randInt']
 const FUNCTION_OPTIONS = FUNCTIONS.map((fn) => ({ value: fn, label: `${fn}()` }))
@@ -573,7 +575,7 @@ export function FormulaTextEditor({
       </div>
 
       {/* 结构摘要行（不复述公式串；给引用和样例值的概览） */}
-      {showSummary ? (
+      {SHOW_FORMULA_AUXILIARY && showSummary ? (
         <div className="gc-fx-summary" aria-label={translateUi('ui.copy.440c7e727050')}>
           {refs.entities.size > 0 && (
             <span className="gc-fx-summary-item">
@@ -593,7 +595,7 @@ export function FormulaTextEditor({
       ) : null}
 
       {/* 试算面板（默认折叠）：给每个 ?参数 填样例值、实时算出结果 */}
-      {hasHole && liveAst && !failure && (
+      {SHOW_FORMULA_AUXILIARY && hasHole && liveAst && !failure && (
         <TrialPanel ast={liveAst} holes={holes} ctx={ctx} entities={entities} />
       )}
 

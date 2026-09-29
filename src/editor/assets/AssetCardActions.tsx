@@ -1,5 +1,7 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useId, useRef, useState } from 'react'
 import { tf, useT } from '../../i18n'
+import ruleDialogCloseIcon from '../shell/rule-dialog-close.svg?url'
 
 /** Where a card menu was opened from, in viewport coordinates. */
 export interface AssetCardAnchor {
@@ -114,32 +116,39 @@ export function AssetCardDialog({ mode, folder, preserveMedia, name, onSubmit, o
   // Split on the placeholder so the name keeps its own highlight instead of being interpolated flat.
   const [messageBefore, messageAfter] = t(deleteMessageKey).split('{name}')
 
-  return (
-    <div className="acp-dialog-backdrop" role="presentation">
-      <section className="acp-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={busy} data-testid="asset-card-dialog">
+  return createPortal(
+    <div className="gc-rule-dialog-backdrop" role="presentation" onPointerDown={(event) => {
+      if (event.target === event.currentTarget && !busy) onClose()
+    }}>
+      <section className={`gc-rule-dialog gc-rule-${mode}-dialog acp-card-dialog`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={busy} data-testid="asset-card-dialog">
         <h2 id={titleId}>{title}</h2>
-        <button type="button" className="acp-dialog-close" aria-label={t('assetCatalog.cardActions.close')} disabled={busy} onClick={onClose}>×</button>
+        <button type="button" className="gc-rule-dialog-close" aria-label={t('assetCatalog.cardActions.close')} disabled={busy} onClick={onClose}>
+          <img src={ruleDialogCloseIcon} alt="" />
+        </button>
         {mode === 'rename' ? (
-          <>
-            <label htmlFor={nameId}>{folder ? t('assetCatalog.cardActions.folderNameLabel') : t('assetCatalog.cardActions.assetNameLabel')}</label>
-            <input
-              ref={inputRef}
-              id={nameId}
-              value={draft}
-              disabled={busy}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submit() } }}
-            />
-          </>
+          <div className="gc-rule-rename-fields">
+            <label className="gc-rule-rename-field" htmlFor={nameId}>
+              <span>{folder ? t('assetCatalog.cardActions.folderNameLabel') : t('assetCatalog.cardActions.assetNameLabel')}</span>
+              <input
+                ref={inputRef}
+                className="gc-rule-dialog-input"
+                id={nameId}
+                value={draft}
+                disabled={busy}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submit() } }}
+              />
+            </label>
+          </div>
         ) : (
-          <p className="acp-dialog-message">{messageBefore}<strong>[{name}]</strong>{messageAfter}</p>
+          <p>{messageBefore}<span>[{name}]</span>{messageAfter}</p>
         )}
-        {error ? <p className="acp-dialog-error" role="alert">{error}</p> : null}
-        <div className="acp-dialog-actions">
+        {error ? <p role="alert">{error}</p> : null}
+        <div className="gc-rule-dialog-actions">
           <button type="button" disabled={busy} onClick={onClose}>{t('common.cancel')}</button>
           <button
             type="button"
-            className={mode === 'rename' ? 'acp-primary' : 'acp-primary is-danger'}
+            className="is-danger"
             disabled={busy || (mode === 'rename' && !trimmed)}
             onClick={() => void submit()}
           >
@@ -147,6 +156,7 @@ export function AssetCardDialog({ mode, folder, preserveMedia, name, onSubmit, o
           </button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }

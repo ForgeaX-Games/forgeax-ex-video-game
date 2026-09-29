@@ -149,6 +149,22 @@ const patchGraph: ExtensionToolHandler = async (context, args) => (
   createGameVideoService(context).patchGraph(args)
 )
 
+const compileBlueprintOutline: ExtensionToolHandler = async (context, args) => (
+  createGameVideoService(context).compileBlueprintOutline(args)
+)
+
+const createBlueprintOutlineSkeleton: ExtensionToolHandler = async (context, args) => (
+  createGameVideoService(context).createBlueprintOutlineSkeleton(args)
+)
+
+const configureBlueprintOutlineNode: ExtensionToolHandler = async (context, args) => (
+  createGameVideoService(context).configureBlueprintOutlineNode(args)
+)
+
+const configureBlueprintNode: ExtensionToolHandler = async (context, args) => (
+  createGameVideoService(context).configureBlueprintNode(args)
+)
+
 const patchNodeMedia: ExtensionToolHandler = async (context, args) => (
   createGameVideoService(context).patchNodeMedia(args)
 )
@@ -299,6 +315,10 @@ const rawTools: Record<string, ExtensionToolHandler> = {
   'game-video:get-graph': getGraph,
   'game-video:save-graph': saveGraph,
   'game-video:patch-graph': patchGraph,
+  'game-video:compile-blueprint-outline': compileBlueprintOutline,
+  'game-video:create-blueprint-outline-skeleton': createBlueprintOutlineSkeleton,
+  'game-video:configure-blueprint-outline-node': configureBlueprintOutlineNode,
+  'game-video:configure-blueprint-node': configureBlueprintNode,
   'game-video:patch-node-media': patchNodeMedia,
   'game-video:patch-rules': patchRules,
   'game-video:patch-characters': patchCharacters,

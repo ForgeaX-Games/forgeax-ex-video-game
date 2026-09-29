@@ -62,7 +62,7 @@ describe('返工作用域', () => {
       activity: 'rules.catalog',
       expectedWorkflowRevision: before.revision,
       rework: true,
-    })
+    }, { compilerOwned: true })
     const after = (await readWorkflowState(context))!
 
     expect(after.activities['rules.catalog']?.status).toBe('working')
@@ -79,7 +79,7 @@ describe('返工作用域', () => {
       activity: 'rules.catalog',
       expectedWorkflowRevision: before.revision,
       rework: true,
-    })
+    }, { compilerOwned: true })
     const after = (await readWorkflowState(context))!
 
     expect(after.validationEvidence.map((item) => item.checkId)).toEqual(['characters.references.ready'])
@@ -118,7 +118,7 @@ describe('返工作用域', () => {
       activity: 'rules.catalog',
       expectedWorkflowRevision: seeded.revision,
       rework: true,
-    })
+    }, { compilerOwned: true })
     const after = (await readWorkflowState(context))!
 
     expect(after.activities['rules.binding']?.status).toBe('not-started')

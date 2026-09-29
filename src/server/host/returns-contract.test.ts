@@ -72,6 +72,42 @@ describe('软失败返回值契约', () => {
     expect(validate(result), JSON.stringify(validate.errors)).toBe(true)
     expect(result.document?.id).toBeTruthy()
   })
+
+  it('pillar 内容校验失败时在写入前返回结构化检查项', async () => {
+    const service = createGameVideoService(createContext())
+    const validate = ajv.compile(schema('upsert-document.returns.json'))
+
+    const result = await service.upsertDocument({
+      documentType: 'pillar',
+      slug: 'wusong',
+      activityRevision: 1,
+      content: '# 支柱\n\n只有标题，缺少互动契约。',
+    }) as { document: unknown; error?: string; failedChecks?: string[]; issues?: unknown[] }
+
+    expect(validate(result), JSON.stringify(validate.errors)).toBe(true)
+    expect(result.document).toBeNull()
+    expect(result.failedChecks).toEqual(['document.pillar.ready'])
+    expect(result.issues?.length).toBeGreaterThan(0)
+  })
+
+  it('pillar 超长时返回可执行的压缩指引，而不是无信息的 schema too_big', async () => {
+    const service = createGameVideoService(createContext())
+    const validate = ajv.compile(schema('upsert-document.returns.json'))
+    // 必须真的超过 Host 硬上限：低于上限只会落到「缺契约块」那条解析错误上。
+    const content = `# 支柱\n## 角色\n甲。\n## 场景\n江。\n## 主循环\n选。\n## 互动节拍\n${'散文'.repeat(18_000)}`
+
+    const result = await service.upsertDocument({
+      documentType: 'pillar',
+      slug: 'wusong',
+      activityRevision: 1,
+      content,
+    }) as { document: unknown; error?: string }
+
+    expect(validate(result), JSON.stringify(validate.errors)).toBe(true)
+    expect(result.document).toBeNull()
+    expect(result.error).toContain('kind=pass')
+    expect(result.error).toContain(String(content.length))
+  })
 })
 
 describe('幂等键推导', () => {

@@ -1,4 +1,4 @@
-import { t as translateUi, tf as formatUi, useT } from '../../i18n'
+import { t as translateUi, useT } from '../../i18n'
 /**
  * ComponentLibrary —— 界面 tab 底部的工作区组件库。
  * 直接读取 components 的唯一注册清单，
@@ -18,24 +18,27 @@ import {
   type JSX,
   type ReactNode,
 } from 'react'
-import { createPortal } from 'react-dom'
-import {
-  isProjectComponent,
-  listComponentCatalogEntries,
-  refreshGameComponents,
-} from '@/runtime/react/component-host'
+import { listComponentCatalogEntries } from '@/runtime/react/component-host'
 import type { ComponentManifest } from '@/runtime/core/schema/node-config-schema'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { reportRenderError } from '@/lib/diagnostics/error-report'
 import { overlayContentAndHitTargets } from './overlay-fit-targets'
+import { useAdaptiveCatalogGrid } from './useAdaptiveCatalogGrid'
 import { AiParameterFillButton } from './AiParameterFillButton'
 import { forgeaxHost } from '../../platform/HostSdkBridge'
 import { buildOverlayComponentContextReference } from './overlay-agent-context'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { useComponentCatalogRevision } from './useComponentCatalogRevision'
-import { placeAdaptivePop } from './useBlueprintNavActions'
-import { deleteProjectComponent } from '../assets/project-component-client'
 import emptyComponentLibraryUrl from '@/editor/ui-assets/entity-empty.svg'
+import { CatalogSearchInput } from './CatalogSearchInput'
+import {
+  catalogFolderChildren,
+  catalogRootTarget,
+  useAssetCatalog,
+  type CatalogFolder,
+} from '@/editor/assets/asset-catalog'
+import componentLibraryFolderIcon from '@/editor/ui-assets/component-library-folder.svg?url'
+import { ComponentThumbnail } from './ComponentThumbnail'
 
 /** 拖拽 MIME：库 chip → 画布落地时用它取组件 id。 */
 export const OVERLAY_PRESET_MIME = 'application/x-overlay-preset'
@@ -51,23 +54,16 @@ const LIB_CSS = `
   min-height:42px; padding:0 14px; box-sizing:border-box;
 }
 .ocl-breadcrumb {
-  display:flex; align-items:center; gap:7px; min-width:0; font-size:12px; white-space:nowrap;
+  display:flex; flex:1; align-items:center; gap:6px; min-width:0; padding:0; overflow:hidden; font-size:12px; white-space:nowrap;
 }
-.ocl-breadcrumb strong { color:#ff9c2a; font-weight:500; }
-.ocl-breadcrumb span { color:#777; }
-.ocl-search {
-  flex:0 1 244px; width:244px; height:31px; box-sizing:border-box; border:0; border-radius:5px;
-  padding:0 11px 0 31px; color:#d8d8d8; background:#454545;
-  font:inherit; outline:none;
-  background-image:radial-gradient(circle at 17px 14px, transparent 4px, #969696 4.5px, #969696 5.5px, transparent 6px),
-    linear-gradient(45deg, transparent 47%, #969696 48%, #969696 56%, transparent 57%);
-  background-size:auto, 7px 7px; background-position:0 0, 19px 18px; background-repeat:no-repeat;
-}
-.ocl-search::placeholder { color:#8f8f8f; }
-.ocl-search:focus { box-shadow:0 0 0 1px #ff9c2a; }
+.ocl-breadcrumb button { border:0; padding:0; color:rgba(255,255,255,.6); background:transparent; font:inherit; cursor:pointer; }
+.ocl-breadcrumb button:hover { color:#fff; }
+.ocl-breadcrumb strong { color:#fff; font-weight:500; }
+.ocl-breadcrumb span { color:rgba(255,255,255,.6); }
 .ocl-grid {
-  display:grid; grid-template-columns:repeat(auto-fill, 134px); grid-auto-rows:139px;
-  flex:1; align-content:start; gap:0 12px; min-height:0; padding:8px 14px 16px; overflow:auto;
+  --adaptive-grid-min-column-gap:12px;
+  display:grid; grid-template-columns:repeat(var(--adaptive-grid-columns, 1), 134px); grid-auto-rows:139px;
+  flex:1; align-content:start; row-gap:0; column-gap:var(--adaptive-grid-column-gap, 12px); min-height:0; padding:8px 14px 16px; overflow:auto;
 }
 .ocl-grid.is-empty {
   grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); place-items:center;
@@ -86,24 +82,29 @@ const LIB_CSS = `
   transition:background .12s;
 }
 .ocl-card:hover .ocl-preview { background:rgba(255,255,255,.2); }
+.ocl-card.is-dragging .ocl-preview { box-shadow:inset 0 0 0 1px rgba(255,156,42,.6); }
 .ocl-card[data-library-kind="folder"] .ocl-preview {
-  border-radius:0 6px 6px; clip-path:polygon(0 12%,32% 12%,39% 0,100% 0,100% 100%,0 100%);
+  overflow:visible; border-radius:0; background:transparent;
 }
+.ocl-folder-card { cursor:pointer; }
+.ocl-folder-card .ocl-preview > img { position:absolute; inset:0; width:134px; height:108px; pointer-events:none; }
+.ocl-folder-card .ocl-folder-hover-overlay { opacity:0; transition:opacity .12s; }
+.ocl-folder-card:hover .ocl-folder-hover-overlay,
+.ocl-folder-card:focus-visible .ocl-folder-hover-overlay { opacity:1; }
+.ocl-folder-preview {
+  position:absolute; z-index:1; top:28px; left:9px; display:grid; width:112px; height:72px;
+  grid-template-columns:repeat(3, minmax(0, 1fr)); grid-template-rows:repeat(2, minmax(0, 1fr)); gap:6px;
+}
+.ocl-folder-preview > span {
+  position:relative; display:grid; min-width:0; min-height:0; place-items:center; overflow:hidden;
+  border-radius:1.453px; background:rgba(255,255,255,.1);
+}
+.ocl-folder-preview-folder { width:100%; height:100%; object-fit:fill; }
 .ocl-ai-slot {
   position:absolute; z-index:2; top:4px; right:4px; display:block;
   width:18px; height:18px; visibility:hidden;
 }
 .ocl-preview:hover .ocl-ai-slot { visibility:visible; }
-.ocl-delete {
-  position:absolute; z-index:3; top:4px; left:4px; display:grid; place-items:center;
-  width:20px; height:20px; border:0; border-radius:3px; padding:0;
-  background:rgba(32,32,32,.8); color:rgba(255,255,255,.7); cursor:pointer;
-  opacity:0; pointer-events:none;
-}
-.ocl-preview:hover .ocl-delete,.ocl-delete:focus-visible,.ocl-delete.is-open { opacity:1; pointer-events:auto; }
-.ocl-delete:hover,.ocl-delete.is-open { color:#ff9b9b; background:rgba(84,38,38,.92); }
-.ocl-delete svg { width:13px; height:13px; display:block; }
-.ocl-delete-error { color:#ffb4b4; }
 .ocl-ai-quick { pointer-events:auto; }
 .ocl-ai-quick img { display:block; width:18px; height:18px; }
 .ocl-render-stage {
@@ -115,7 +116,7 @@ const LIB_CSS = `
 }
 .ocl-name {
   flex:none; height:24px; padding:0 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  font-size:10px; line-height:24px;
+  font-size:12px; line-height:24px;
 }
 .ocl-empty {
   display:flex; flex-direction:column; align-items:center; gap:8px; width:148px; padding:0;
@@ -156,13 +157,6 @@ type PreviewBox = {
   previewHeight: number
 }
 
-const TrashIcon = (
-  <svg viewBox="0 0 14 14" fill="none" aria-hidden>
-    <path d="M12.25 2.916H1.75M2.917 2.916h8.166l-.291 9.917H3.208L2.917 2.916ZM4.958 1.166h4.084v1.75H4.958v-1.75Z" stroke="currentColor" strokeWidth="1.167" />
-    <path d="M7 5.25v5.25" stroke="currentColor" strokeWidth="1.167" />
-  </svg>
-)
-
 class ComponentPreviewBoundary extends Component<{
   componentId: string
   resetKey: unknown
@@ -200,57 +194,23 @@ function ComponentCard({
   label,
   inputs,
   manifest,
-  projectComponent,
-  onDeleted,
 }: {
   component: ComponentType<Record<string, unknown>>
   id: string
   label: string
   inputs: readonly { key: string; default?: unknown }[]
   manifest: ComponentManifest
-  projectComponent: boolean
-  onDeleted: (componentId: string) => Promise<void>
 }): JSX.Element {
   const previewRef = useRef<HTMLSpanElement>(null)
   const stageRef = useRef<HTMLSpanElement>(null)
   const dragImageRef = useRef<HTMLElement | null>(null)
   const nativeDragImageRef = useRef<HTMLCanvasElement | null>(null)
   const [box, setBox] = useState<PreviewBox | null>(null)
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deleteBusy, setDeleteBusy] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const deletePopRef = useRef<HTMLDivElement | null>(null)
-  const [deletePlacement, setDeletePlacement] = useState<ReturnType<typeof placeAdaptivePop>>(null)
+  const [dragging, setDragging] = useState(false)
   const props = useMemo(() => previewProps(id, inputs), [id, inputs])
   const Preview = component
   const game = useGraphScenario((s) => s.game)
 
-  useLayoutEffect(() => {
-    if (!deleteOpen) {
-      setDeletePlacement(null)
-      return
-    }
-    const place = (): void => {
-      setDeletePlacement(placeAdaptivePop(deleteTriggerRef.current, {
-        width: 220,
-        height: deleteError ? 132 : 112,
-      }))
-    }
-    place()
-    const raf = requestAnimationFrame(place)
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => {
-      cancelAnimationFrame(raf)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-    }
-  }, [deleteError, deleteOpen])
-
-  useEffect(() => {
-    if (!deleteOpen) setDeleteError(null)
-  }, [deleteOpen])
   function referenceComponent(): void {
     if (!forgeaxHost.available) return
     forgeaxHost.composer.insertReference(buildOverlayComponentContextReference({
@@ -326,6 +286,7 @@ function ComponentCard({
   }
 
   const onDragStart = (event: DragEvent<HTMLDivElement>): void => {
+    setDragging(true)
     event.dataTransfer.setData(OVERLAY_PRESET_MIME, id)
     event.dataTransfer.setData('text/plain', label)
     event.dataTransfer.effectAllowed = 'copy'
@@ -357,11 +318,11 @@ function ComponentCard({
 
   return (
     <div
-      className="ocl-card"
+      className={`ocl-card${dragging ? ' is-dragging' : ''}`}
       draggable
       onDragStart={onDragStart}
       onDrag={(event) => moveDragImage(event.clientX, event.clientY)}
-      onDragEnd={clearDragImage}
+      onDragEnd={() => { setDragging(false); clearDragImage() }}
       title={`${translateUi('ui.template.fdba810a753a')}${label}（${id}）`}
       data-component-id={id}
     >
@@ -376,23 +337,6 @@ function ComponentCard({
             <Preview {...props} preview previewTimeMs={400} />
           </ComponentPreviewBoundary>
         </span>
-        {projectComponent ? (
-          <button
-            ref={deleteTriggerRef}
-            type="button"
-            className={`ocl-delete${deleteOpen ? ' is-open' : ''}`}
-            aria-label={formatUi('componentLibrary.delete.aria', { name: label })}
-            title={translateUi('componentLibrary.delete.title')}
-            aria-expanded={deleteOpen}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation()
-              setDeleteOpen((open) => !open)
-            }}
-          >
-            {TrashIcon}
-          </button>
-        ) : null}
         <span className="ocl-ai-slot">
           <AiParameterFillButton
             className="ocl-ai-quick"
@@ -403,90 +347,146 @@ function ComponentCard({
         </span>
       </span>
       <span className="ocl-name">{label}</span>
-      {deleteOpen && deletePlacement && typeof document !== 'undefined'
-        ? createPortal(
-          <div
-            ref={deletePopRef}
-            className="ns-pop-confirm"
-            data-side={deletePlacement.side}
-            role="dialog"
-            aria-label={formatUi('componentLibrary.delete.aria', { name: label })}
-            style={deletePlacement.style}
-          >
-            <span className="ns-pop-arrow" aria-hidden />
-            <div className="ns-pop-confirm-msg">
-              {formatUi('componentLibrary.delete.message', { name: label })}
-              {deleteError ? <div className="ocl-delete-error">{deleteError}</div> : null}
-            </div>
-            <div className="ns-pop-confirm-actions">
-              <button type="button" disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>{translateUi('common.cancel')}</button>
-              <button
-                type="button"
-                className="is-danger"
-                disabled={deleteBusy}
-                onClick={() => {
-                  setDeleteBusy(true)
-                  setDeleteError(null)
-                  void onDeleted(id).then(() => {
-                    setDeleteOpen(false)
-                  }).catch((cause) => {
-                    setDeleteError(cause instanceof Error ? cause.message : translateUi('componentLibrary.delete.failed'))
-                  }).finally(() => setDeleteBusy(false))
-                }}
-              >
-                {deleteBusy ? translateUi('componentLibrary.delete.busy') : translateUi('componentLibrary.delete.confirm')}
-              </button>
-            </div>
-          </div>,
-          document.body,
-        )
-        : null}
     </div>
   )
 }
 
-export function ComponentLibrary(): JSX.Element {
+type CatalogComponentEntry = ReturnType<typeof listComponentCatalogEntries>[number]
+type FolderPreviewEntry =
+  | { kind: 'folder' }
+  | { kind: 'component'; entry: CatalogComponentEntry }
+
+function folderPreviewEntries(
+  catalog: ReturnType<typeof useAssetCatalog>['catalog'],
+  folderId: string,
+  entries: readonly CatalogComponentEntry[],
+): FolderPreviewEntry[] {
+  return [
+    ...catalogFolderChildren(catalog, folderId, 'control').map((): FolderPreviewEntry => ({ kind: 'folder' })),
+    ...entries.flatMap((entry): FolderPreviewEntry[] => {
+      const placement = catalog.placements[`control:${entry.manifest.id}`]
+      const target = placement?.folderId ?? catalogRootTarget('control')
+      return target === folderId ? [{ kind: 'component', entry }] : []
+    }),
+  ].slice(0, 6)
+}
+
+function ControlFolderCard({
+  folder,
+  onOpen,
+  previewEntries,
+}: {
+  folder: CatalogFolder
+  onOpen: () => void
+  previewEntries: readonly FolderPreviewEntry[]
+}): JSX.Element {
+  return (
+    <div
+      className="ocl-card ocl-folder-card"
+      data-library-kind="folder"
+      data-folder-id={folder.id}
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
+    >
+      <span className="ocl-preview" aria-hidden>
+        <img src={componentLibraryFolderIcon} alt="" />
+        <img className="ocl-folder-hover-overlay" src={componentLibraryFolderIcon} alt="" />
+        <span className="ocl-folder-preview">
+          {previewEntries.map((entry, index) => (
+            <span key={`${entry.kind}-${entry.kind === 'component' ? entry.entry.manifest.id : index}`}>
+              {entry.kind === 'folder'
+                ? <img className="ocl-folder-preview-folder" src={componentLibraryFolderIcon} alt="" />
+                : <ComponentThumbnail component={entry.entry.component} manifest={entry.entry.manifest} />}
+            </span>
+          ))}
+        </span>
+      </span>
+      <span className="ocl-name">{folder.name}</span>
+    </div>
+  )
+}
+
+export function ComponentLibrary({
+  query: queryProp,
+  onQueryChange,
+  showSearch = true,
+}: {
+  query?: string
+  onQueryChange?: (query: string) => void
+  showSearch?: boolean
+} = {}): JSX.Element {
   injectStyleOnce('overlay-component-library', LIB_CSS)
   const t = useT()
-  const [query, setQuery] = useState('')
+  const [localQuery, setLocalQuery] = useState('')
+  const query = queryProp ?? localQuery
+  const setQuery = onQueryChange ?? setLocalQuery
   const catalogRevision = useComponentCatalogRevision()
   const game = useGraphScenario((state) => state.game)
-  const removeReferences = useGraphScenario((state) => state.removeProjectComponentReferences)
-  const deleteComponent = async (componentId: string): Promise<void> => {
-    const saved = await removeReferences(componentId)
-    if (!saved) throw new Error(translateUi('componentLibrary.delete.saveFailed'))
-    await deleteProjectComponent(componentId)
-    await refreshGameComponents(game)
-  }
-  const components = useMemo(() => {
-    const catalog = listComponentCatalogEntries()
+  const { catalog } = useAssetCatalog(game)
+  const rootTarget = catalogRootTarget('control')
+  const [target, setTarget] = useState(rootTarget)
+  const activeFolder = target === rootTarget
+    ? null
+    : catalog.folders.find((folder) => folder.id === target && folder.tabKind === 'control') ?? null
+  const folders = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase()
-    if (!needle) return catalog
-    return catalog.filter(({ manifest }) => {
+    return catalogFolderChildren(catalog, target, 'control')
+      .filter((folder) => !needle || folder.name.toLocaleLowerCase().includes(needle))
+  }, [catalog, query, target])
+
+  useEffect(() => {
+    if (target !== rootTarget && !activeFolder) setTarget(rootTarget)
+  }, [activeFolder, rootTarget, target])
+
+  const entries = useMemo(() => listComponentCatalogEntries(), [catalogRevision])
+  const components = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase()
+    return entries.filter((entry) => {
+      const { manifest } = entry
       const id = manifest.id
       const label = manifest.label ?? id
-      return `${label} ${id}`.toLocaleLowerCase().includes(needle)
+      const placement = catalog.placements[`control:${id}`]
+      const folderId = placement?.folderId ?? rootTarget
+      return folderId !== 'hidden:control'
+        && folderId === target
+        && (!needle || `${label} ${id}`.toLocaleLowerCase().includes(needle))
     })
-  }, [catalogRevision, query])
+  }, [catalog, entries, query, rootTarget, target])
+  const grid = useAdaptiveCatalogGrid({ itemCount: folders.length + components.length, cardWidth: 134, minColumnGap: 12 })
 
   return (
     <div className="ocl-root" data-testid="component-library">
-      <div className="ocl-toolbar">
-        {/* 面包屑暂时隐藏：第二层本应反映 UI 树里当前方案的层级路径，
-            但 ComponentLibrary 目前拿不到该上下文。待接通后再恢复。
-        <div className="ocl-breadcrumb" aria-label="组件库路径">
-          <strong>控件库</strong>
-        </div> */}
-        <input
-          className="ocl-search"
-          type="search"
-          aria-label={t('ui.copy.346e069b7cd4')}
-          placeholder={t('ui.copy.346e069b7cd4')}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+      {showSearch ? (
+        <div className="ocl-toolbar">
+          <CatalogSearchInput
+            ariaLabel={t('ui.copy.346e069b7cd4')}
+            placeholder={t('ui.copy.346e069b7cd4')}
+            value={query}
+            onChange={setQuery}
+          />
+        </div>
+      ) : null}
+      <div className="ocl-library-head">
+        <nav className="ocl-breadcrumb" aria-label={translateUi('ui.copy.af222a3bb664')}>
+          {activeFolder ? <><button type="button" onClick={() => setTarget(rootTarget)}>{translateUi('ui.copy.af222a3bb664')}</button><span aria-hidden="true">›</span><strong>{activeFolder.name}</strong></> : <strong>{translateUi('ui.copy.af222a3bb664')}</strong>}
+        </nav>
       </div>
-      <div className={`ocl-grid${components.length === 0 ? ' is-empty' : ''}`}>
+      <div ref={grid.ref} style={grid.style} className={`ocl-grid${folders.length === 0 && components.length === 0 ? ' is-empty' : ''}`}>
+        {folders.map((folder) => (
+          <ControlFolderCard
+            key={folder.id}
+            folder={folder}
+            onOpen={() => setTarget(folder.id)}
+            previewEntries={folderPreviewEntries(catalog, folder.id, entries)}
+          />
+        ))}
         {components.map(({ component, manifest }) => {
           const id = manifest.id
           const label = manifest.label ?? id
@@ -498,12 +498,10 @@ export function ComponentLibrary(): JSX.Element {
               label={label}
               inputs={manifest.inputs ?? []}
               manifest={manifest}
-              projectComponent={isProjectComponent(id)}
-              onDeleted={deleteComponent}
             />
           )
         })}
-        {components.length === 0 ? (
+        {folders.length === 0 && components.length === 0 ? (
           <div className="ocl-empty" role="status">
             <span className="ocl-empty-mark">
               <img src={emptyComponentLibraryUrl} alt="" aria-hidden="true" />

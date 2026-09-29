@@ -299,6 +299,9 @@ describe('asset activity preflight', () => {
     )
 
     expect(ready.ready, JSON.stringify(ready.gaps)).toBe(true)
+    expect(ready.dispatch?.requiredToolNames).toContain(
+      'mcp__as-mate-tools__workbench__game_video__patch_node_media',
+    )
   })
 
   it('allows preset validation after binding without waiting for playtest', () => {

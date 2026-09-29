@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ZHANDOU_VIDEOS } from '../../assets/catalog'
 import { EMPTY_ASSET_CATALOG } from '../../assets/asset-catalog'
 import { useKinoVideoCache } from '../../assets/kinoVideoCacheStore'
 import { requestGenerateVideo, resolveCatalogMediaSrc, resolveMediaSrc } from '../media'
@@ -28,9 +27,9 @@ afterEach(() => {
 })
 
 describe('resolveMediaSrc', () => {
-  it('keeps bundled videos ahead of remote resolvers, including m- refs', () => {
-    expect(resolveMediaSrc('idle01', 'demo')).toBe(ZHANDOU_VIDEOS.idle01)
-    expect(resolveMediaSrc('m-idle01', 'demo')).toBe(ZHANDOU_VIDEOS.idle01)
+  it('does not resolve a local basename without a hydrated playback URL', () => {
+    expect(resolveMediaSrc('idle01', 'demo')).toBeUndefined()
+    expect(resolveMediaSrc('m-idle01', 'demo')).toBeUndefined()
   })
 
   it('does not fabricate a Kino content route before a video URL is hydrated', () => {

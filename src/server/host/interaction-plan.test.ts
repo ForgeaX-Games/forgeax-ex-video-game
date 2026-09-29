@@ -2,9 +2,15 @@ import { describe, expect, it } from 'vitest'
 import type { ExtensionContext } from '@forgeax/extension-host/node'
 import { validateProjectForActivity } from './project-inspection'
 import { createInitialWorkflowState, VIDEO_GAME_WORKFLOW_FILE } from './workflow-state'
-import type { NodeInteractionPlan } from '@/runtime/core/schema/graph-schema'
+import type { GameNode, NodeInteractionPlan } from '@/runtime/core/schema/graph-schema'
 
 const encoder = new TextEncoder()
+const PILLAR_CONTENT = `
+## 互动节拍
+\`\`\`pillar-interaction-contract
+{"schemaVersion":2,"beats":[{"id":"B01","narrativeIntent":"武松识破猛虎扑击并发动轻击","playerInformation":["猛虎正在扑击","敌方当前生命值"],"uiCapabilities":["战斗输入"],"actions":[{"id":"light","intent":"观众点轻击，趁老虎扑空时打它","stateMutationOwner":"settlement","stateChange":"降低敌方生命","immediateFeedback":"敌方血条下降并显示受击反馈","downstreamPayoff":"下游视频播放猛虎中拳后退","exitIntent":"进入轻击结果演出"}],"settlements":[{"id":"light-result","sourceActionId":"light","trigger":"at","source":"轻击结果视频 1000ms 命中帧","intent":"应用轻击伤害","feedback":"敌方血条下降并显示受击反馈","exitIntent":"结果演出结束"}]}]}
+\`\`\`
+`
 
 /**
  * 玩法契约把三条线串起来（第二局问题 23–26 的共同根因）。
@@ -38,19 +44,22 @@ function project(options: {
             : {}),
           ...(options.wired
             ? {
-              overlayNodes: [{ id: 'm', overlay: 'node:clash' }],
-              reactions: [{
-                when: { type: 'event', id: 'light' },
-                do: [{
-                  kind: 'effect',
-                  effects: [{
-                    kind: 'attr',
-                    entityId: 'tiger',
-                    attr: 'hp',
-                    op: 'add',
-                    value: { expr: '-formula.dmg_light' },
-                  }],
+              overlayNodes: [{
+                id: 'm',
+                overlay: 'node:clash',
+                reactions: [{
+                  when: { type: 'event', id: 'light' },
+                  do: [{ kind: 'advance', edgeId: 'e-light' }],
                 }],
+              }],
+            }
+            : {}),
+          ...(options.plan?.actions?.some((action) => (action.exit ?? action.event) === 'light')
+            ? {
+              outcomeEvidence: [{
+                id: 'B01/light',
+                sourceEdgeId: 'e-light',
+                presentation: '下游视频播放猛虎中拳后退',
               }],
             }
             : {}),
@@ -72,7 +81,52 @@ function project(options: {
         type: 'scene',
         position: { x: 200, y: 0 },
         // 终局节点是有意的纯叙事段，也必须显式表态。
-        data: { name: '胜', chapterSummary: '胜', storyText: '胜', interaction: { beat: 'narrative' } },
+        data: {
+          name: '轻击结果',
+          chapterSummary: '猛虎中拳后退',
+          storyText: '猛虎中拳后退',
+          interaction: {
+            beat: 'narrative',
+            sourcePillarBeatId: 'B01',
+            narrativeIntent: '武松识破猛虎扑击并发动轻击',
+            playerInformation: ['猛虎正在扑击', '敌方当前生命值'],
+            settlements: [{
+              id: 'light-result',
+              sourcePillarSettlementId: 'light-result',
+              sourcePillarActionId: 'light',
+              pattern: 'timeline-hit-sync',
+              trigger: 'at',
+              source: '轻击结果视频 1000ms 命中帧',
+              triggerSpec: { type: 'at', ms: 1000 },
+              intent: '应用轻击伤害',
+              feedback: '敌方血条下降并显示受击反馈',
+              feedbackSpec: {
+                kind: 'state-binding',
+                component: 'BattleEnemyHpBar',
+                target: 'entity.tiger.attr.hp',
+              },
+              exitIntent: '结果演出结束',
+            }],
+          },
+          ...(options.wired
+            ? {
+              overlayNodes: [{ id: 'result-hud', overlay: 'node:win' }],
+              reactions: [{
+                when: { type: 'at', ms: 1000 },
+                do: [{
+                  kind: 'effect',
+                  effects: [{
+                    kind: 'attr',
+                    entityId: 'tiger',
+                    attr: 'hp',
+                    op: 'add',
+                    value: { expr: '-formula.dmg_light' },
+                  }],
+                }],
+              }],
+            }
+            : {}),
+        },
       },
     ],
     edges: [
@@ -81,8 +135,24 @@ function project(options: {
         source: 'clash',
         target: 'win',
         sourceHandle: 'default',
-        data: options.wired ? { condition: { kind: 'attr', entityId: 'tiger', attr: 'hp', op: 'lte', value: 0 } } : {},
+        data: options.wired ? { condition: { all: [{ type: 'attr', entityId: 'tiger', attr: 'hp', op: 'lte', value: 0 }] } } : {},
       },
+      ...(options.plan?.actions?.some((action) => (action.exit ?? action.event) === 'light')
+        ? [{
+          id: 'e-light',
+          source: 'clash',
+          target: 'win',
+          sourceHandle: 'light',
+          data: {
+            design: {
+              pillarBeatId: 'B01',
+              producer: { kind: 'component-event', ref: 'BattleSkill.light' },
+              narrativePayoff: '下游视频播放猛虎中拳后退',
+              outcomeEvidenceId: 'B01/light',
+            },
+          },
+        }]
+        : []),
     ],
   }
   return {
@@ -100,7 +170,25 @@ function project(options: {
             'node:clash': {
               id: 'node:clash',
               kind: 'group',
-              children: [{ id: 'skill', kind: 'component', component: 'BattleSkill', inputs: {} }],
+              children: [
+                { id: 'skill', kind: 'component', component: 'BattleSkill', inputs: {} },
+                {
+                  id: 'enemy-hp',
+                  kind: 'component',
+                  component: 'BattleEnemyHpBar',
+                  inputs: { current: { expr: 'entity.tiger.attr.hp' }, max: 30 },
+                },
+              ],
+            },
+            'node:win': {
+              id: 'node:win',
+              kind: 'group',
+              children: [{
+                id: 'enemy-hp',
+                kind: 'component',
+                component: 'BattleEnemyHpBar',
+                inputs: { current: { expr: 'entity.tiger.attr.hp' }, max: 30 },
+              }],
             },
           },
         },
@@ -109,10 +197,25 @@ function project(options: {
   }
 }
 
-function context(doc: unknown): ExtensionContext {
+/** v3 起动作必须声明承载角色，或显式承认目录承载不了。 */
+function pillarV3(carrier: string): string {
+  return PILLAR_CONTENT
+    .replace('"schemaVersion":2', '"schemaVersion":3')
+    .replace('"id":"light","intent"', `"id":"light",${carrier},"intent"`)
+}
+
+function context(doc: unknown, pillar: string = PILLAR_CONTENT): ExtensionContext {
   const files = new Map<string, Uint8Array>([
     ['blueprint.json', encoder.encode(JSON.stringify(doc))],
-    ['assets/manifest.json', encoder.encode(JSON.stringify({ version: 2, assets: [] }))],
+    ['docs/test_pillar.md', encoder.encode(pillar)],
+    ['assets/manifest.json', encoder.encode(JSON.stringify({
+      version: 2,
+      assets: [{
+        id: 'pillar', kind: 'document', name: 'pillar', status: 'ready', mimeType: 'text/markdown',
+        provider: { kind: 'local', ref: 'docs/test_pillar.md' }, createdAt: 1, updatedAt: 1,
+        meta: { documentType: 'pillar' },
+      }],
+    }))],
     [VIDEO_GAME_WORKFLOW_FILE, encoder.encode(JSON.stringify(createInitialWorkflowState('g')))],
   ])
   return {
@@ -127,9 +230,15 @@ function context(doc: unknown): ExtensionContext {
   } as unknown as ExtensionContext
 }
 
-async function statusOf(doc: unknown, activity: string, checkId: string, workflowState?: unknown) {
+async function statusOf(
+  doc: unknown,
+  activity: string,
+  checkId: string,
+  workflowState?: unknown,
+  pillar?: string,
+) {
   const result = await validateProjectForActivity(
-    context(doc),
+    context(doc, pillar),
     activity as never,
     1,
     [checkId],
@@ -141,13 +250,25 @@ async function statusOf(doc: unknown, activity: string, checkId: string, workflo
 
 const combatPlan: NodeInteractionPlan = {
   beat: 'combat',
+  sourcePillarBeatId: 'B01',
+  narrativeIntent: '武松识破猛虎扑击并发动轻击',
+  playerInformation: ['猛虎正在扑击', '敌方当前生命值'],
   actions: [{
+    sourcePillarActionId: 'light',
+    stateMutationOwner: 'settlement',
     component: 'BattleSkill',
     event: 'light',
     intent: '观众点轻击，趁老虎扑空时打它',
+    stateChangeIntent: '降低敌方生命',
+    feedback: '敌方血条下降并显示受击反馈',
+    feedbackSpec: { kind: 'state-binding', component: 'BattleEnemyHpBar', target: 'entity.tiger.attr.hp' },
+    downstreamPayoff: '下游视频播放猛虎中拳后退',
+    exitIntent: '进入轻击结果演出',
     effect: { target: 'entity.tiger.attr.hp', op: 'sub', formulaId: 'dmg_light' },
-    exit: 'none',
+    exit: 'light',
+    targetNodeId: 'win',
   }],
+  loop: { backTo: 'clash', note: '双方仍存活时进入下一回合' },
   terminals: [{ when: 'entity.tiger.attr.hp <= 0', note: '武松取胜' }],
 }
 
@@ -181,14 +302,16 @@ describe('总脉络的玩法契约闸门', () => {
     expect(codes).toContain('outline.interaction.beat-mismatch')
   })
 
-  it('纯叙事节拍不需要动作（有意留白，不是漏配）', async () => {
-    const { status } = await statusOf(
+  it('纯叙事节拍本身不需要动作，但不能吞掉支柱已确认的互动节拍', async () => {
+    const { status, codes } = await statusOf(
       project({ plan: { beat: 'narrative' } }),
       'blueprint.outline',
       'outline.interaction-plan',
     )
 
-    expect(status).toBe('pass')
+    expect(codes).not.toContain('outline.interaction.no-action')
+    expect(status).toBe('fail')
+    expect(codes).toContain('outline.interaction.pillar-beat-incomplete')
   })
 
   it('写了清单里不存在的元件或事件会被拦住，并列出可用事件', async () => {
@@ -220,6 +343,33 @@ describe('总脉络的玩法契约闸门', () => {
 
     expect(status).toBe('fail')
     expect(codes).toContain('outline.interaction.no-consequence')
+  })
+
+  it('动作反馈和结算触发必须有可机械编译的规格', async () => {
+    const actionWithoutFeedbackSpec = structuredClone(combatPlan)
+    delete actionWithoutFeedbackSpec.actions![0]!.feedbackSpec
+    const actionResult = await statusOf(
+      project({ plan: actionWithoutFeedbackSpec }),
+      'blueprint.outline',
+      'outline.interaction-plan',
+    )
+    expect(actionResult.codes).toContain('outline.interaction.feedback-spec-missing')
+
+    const settlementResult = await statusOf(
+      project({
+        plan: {
+          ...combatPlan,
+          settlements: [{
+            id: 'terminal', pattern: 'health-terminal', trigger: 'state',
+            source: 'entity.tiger.attr.hp <= 0', intent: '判胜', feedback: '冻结输入',
+            feedbackSpec: { kind: 'hide-interface' },
+          }],
+        },
+      }),
+      'blueprint.outline',
+      'outline.interaction-plan',
+    )
+    expect(settlementResult.codes).toContain('outline.interaction.settlement-trigger-spec-missing')
   })
 
   it('短篇篇幅下缺少战斗节拍时报错', async () => {
@@ -285,6 +435,67 @@ describe('总脉络的玩法契约闸门', () => {
     expect(status, codes.join(',')).toBe('pass')
   })
 
+  it('数值动作必须路由到独立结果节点并规划时间轴结算', async () => {
+    const sameNode = await statusOf(
+      project({
+        plan: {
+          ...combatPlan,
+          actions: [{ ...combatPlan.actions![0]!, targetNodeId: 'clash' }],
+        },
+      }),
+      'blueprint.outline',
+      'outline.interaction-plan',
+    )
+    expect(sameNode.codes).toContain('outline.interaction.effect-payoff-self-target')
+
+    const missingResolution = project({ plan: combatPlan })
+    missingResolution.graph.nodes.find((node) => node.id === 'win')!.data.interaction!.settlements = []
+    const result = await statusOf(missingResolution, 'blueprint.outline', 'outline.interaction-plan')
+    expect(result.codes).toContain('outline.interaction.effect-settlement-missing')
+  })
+
+  it('互动边必须声明支柱 trace、producer 和下游视频 payoff', async () => {
+    const doc = project({
+      plan: {
+        beat: 'choice',
+        sourcePillarBeatId: 'B01',
+        playerInformation: ['玩家看见两种态度的风险'],
+        actions: [{
+          component: 'TextOption', event: 'activate', intent: '选择迎战',
+          feedback: '选项锁定', downstreamPayoff: '下游播放迎战镜头',
+          exit: 'activate', targetNodeId: 'win',
+        }],
+      },
+    })
+    const edge = doc.graph.edges[0]! as unknown as { sourceHandle?: string; data: Record<string, unknown> }
+    edge.sourceHandle = 'activate'
+    edge.data = {
+      design: {
+        pillarBeatId: 'B01',
+        producer: { kind: 'component-event', ref: 'TextOption.activate' },
+        narrativePayoff: '下游播放迎战镜头',
+        outcomeEvidenceId: 'B01/light',
+      },
+    }
+    ;(doc.graph.nodes.find((node) => node.id === 'win')!.data as Record<string, unknown>).outcomeEvidence = [{
+      id: 'B01/light',
+      sourceEdgeId: 'e-default',
+      presentation: '下游播放迎战镜头',
+    }]
+
+    expect(await statusOf(doc, 'blueprint.outline', 'outline.causal-chain'))
+      .toMatchObject({ status: 'pass' })
+    delete (doc.graph.nodes.find((node) => node.id === 'win')!.data as Record<string, unknown>).outcomeEvidence
+    const missingEvidence = await statusOf(doc, 'blueprint.outline', 'outline.causal-chain')
+    expect(missingEvidence.codes).toContain('outline.edge.outcome-evidence-missing')
+    ;(doc.graph.nodes.find((node) => node.id === 'win')!.data as Record<string, unknown>).outcomeEvidence = [{
+      id: 'B01/light', sourceEdgeId: 'e-default', presentation: '下游播放迎战镜头',
+    }]
+    delete edge.data.design
+    const missing = await statusOf(doc, 'blueprint.outline', 'outline.causal-chain')
+    expect(missing.codes).toContain('outline.edge.design-trace-missing')
+  })
+
   it('回合契约必须指向当前蓝图中的真实节点', async () => {
     const { status, codes } = await statusOf(
       project({
@@ -296,6 +507,52 @@ describe('总脉络的玩法契约闸门', () => {
 
     expect(status).toBe('fail')
     expect(codes).toContain('outline.interaction.loop-target-missing')
+  })
+
+  // 这条堵的是静默降级：结构、事件、逐字漂移全对，但控件根本不提供支柱要的能力。
+  it('v3 支柱声明的承载角色必须被实际绑定的元件满足', async () => {
+    const matched = await statusOf(
+      project({ plan: combatPlan }),
+      'blueprint.outline',
+      'outline.interaction-plan',
+      undefined,
+      pillarV3('"requiredRole":"combat-command"'),
+    )
+    expect(matched.status, matched.codes.join(',')).toBe('pass')
+
+    const mismatched = await statusOf(
+      project({ plan: combatPlan }),
+      'blueprint.outline',
+      'outline.interaction-plan',
+      undefined,
+      pillarV3('"requiredRole":"timed-input"'),
+    )
+    expect(mismatched.status).toBe('fail')
+    expect(mismatched.codes).toContain('outline.interaction.role-mismatch')
+  })
+
+  it('支柱未解决的能力缺口不能被总脉络悄悄编译掉', async () => {
+    const { status, codes } = await statusOf(
+      project({ plan: combatPlan }),
+      'blueprint.outline',
+      'outline.interaction-plan',
+      undefined,
+      pillarV3('"capabilityGap":{"need":"拖动排序输入","why":"目录里没有任何拖拽类控件"}'),
+    )
+
+    expect(status).toBe('fail')
+    expect(codes).toContain('outline.interaction.capability-gap-unresolved')
+  })
+
+  it('v1/v2 支柱不触发 v3 的承载校验', async () => {
+    const { codes } = await statusOf(
+      project({ plan: combatPlan }),
+      'blueprint.outline',
+      'outline.interaction-plan',
+    )
+
+    expect(codes).not.toContain('outline.interaction.role-mismatch')
+    expect(codes).not.toContain('outline.interaction.capability-gap-unresolved')
   })
 
   it('战斗节拍必须声明 subFlowPack 战斗包', async () => {
@@ -379,6 +636,42 @@ describe('整装照契约接线', () => {
     )
 
     expect(status, codes.join(',')).toBe('pass')
+  })
+
+  it('界面事件直接修改数值会在 ui.authoring 完成门被拦住', async () => {
+    const doc = project({
+      plan: combatPlan,
+      formulas: { dmg_light: { id: 'dmg_light', ast: { t: 'num', id: 'n0', v: 3 } } },
+      wired: true,
+    })
+    const source = doc.graph.nodes.find((node) => node.id === 'clash')!
+    const sourceData = source.data as GameNode['data']
+    sourceData.overlayNodes![0]!.reactions![0]!.do.unshift({
+      kind: 'effect',
+      effects: [{
+        kind: 'attr', entityId: 'tiger', attr: 'hp', op: 'add', value: { expr: '-formula.dmg_light' },
+      }],
+    })
+
+    const { status, codes } = await statusOf(doc, 'ui.authoring', 'ui.event-routing-only')
+
+    expect(status).toBe('fail')
+    expect(codes).toContain('finalization.plan.effect-owned-by-event')
+  })
+
+  it('目标结果节点缺少动作结算会在 rules.binding 完成门被拦住', async () => {
+    const doc = project({
+      plan: combatPlan,
+      formulas: { dmg_light: { id: 'dmg_light', ast: { t: 'num', id: 'n0', v: 3 } } },
+      wired: true,
+    })
+    const resultData = doc.graph.nodes.find((node) => node.id === 'win')!.data as GameNode['data']
+    resultData.reactions = []
+
+    const { status, codes } = await statusOf(doc, 'rules.binding', 'rules.settlement-ownership')
+
+    expect(status).toBe('fail')
+    expect(codes).toContain('finalization.plan.effect-unwired')
   })
 
   it('元件挂了但契约点名的公式没人引用 = 玩法没接上', async () => {

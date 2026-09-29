@@ -30,6 +30,7 @@
         "game.finalizing",
         "assets.character",
         "assets.scene",
+        "video.presets.binding",
         "video.presets.validating",
         "playtest.validating"
       ]
@@ -78,7 +79,8 @@
         "hardChecks",
         "requiredInputs",
         "stopConditions",
-        "writeScope"
+        "writeScope",
+        "requiredToolNames"
       ],
       "description": "ready \u4e3a true \u65f6\u7ed9\u51fa\u6d3e\u53d1\u8f7d\u8377\u6240\u9700\u5b57\u6bb5\uff0c\u76f4\u63a5\u8f6c\u7ed9 dispatch_peer\uff0c\u4e0d\u8981\u81ea\u5df1\u62fc\u3002",
       "properties": {
@@ -99,6 +101,7 @@
             "game.finalizing",
             "assets.character",
             "assets.scene",
+            "video.presets.binding",
             "video.presets.validating",
             "playtest.validating"
           ]
@@ -137,6 +140,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "requiredToolNames": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^mcp__as-mate-tools__workbench__[a-z0-9_]+__[a-z0-9_]+$"
+          },
+          "description": "Exact MCP transport names that must be present in the target peer before dispatch. Validate them with workbench_tools_handshake; do not dispatch on any missing entry."
         }
       }
     }

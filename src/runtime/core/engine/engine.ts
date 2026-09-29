@@ -395,7 +395,7 @@ export class GraphRuntime {
    * 组件事件（点击 / 判定 / 超时 defaultEvent）：跑挂载 event 反应；
    * 无显式 advance 时按 handle 找边默认推进（与旧 submitInteraction 对齐）。
    */
-  emitComponentEvent(elementId: string, key: string): RuntimeDirective[] {
+  emitComponentEvent(elementId: string, key: string, payload?: Record<string, unknown>): RuntimeDirective[] {
     const node = this.node(this.state.currentNodeId)
     const el = this.childrenOf(node).find((e) => e.id === elementId)
     if (!node || !el) return this.drain()
@@ -415,10 +415,10 @@ export class GraphRuntime {
     )
     let advanced = false
     // 目录动作先执行，挂载动作随后追加；目录专用类型排除了 advance，因此走向始终属于节点挂载/边。
-    if (catalogReaction) this.runEventActions(catalogReaction.do, el)
+    if (catalogReaction) this.runEventActions(catalogReaction.do, el, payload)
     for (const r of evReactions) {
       if (this.redirect) break
-      if (this.runEventActions(r.do, el)) {
+      if (this.runEventActions(r.do, el, payload)) {
         advanced = true
         break
       }
@@ -908,13 +908,13 @@ export class GraphRuntime {
   }
 
   /** 交互事件 do：effect/spawn/advance；advance = 沿当前图的边软推进。返回是否已换节点。 */
-  private runEventActions(actions: NodeAction[], el?: OverlayInstanceChild): boolean {
+  private runEventActions(actions: NodeAction[], el?: OverlayInstanceChild, payload?: Record<string, unknown>): boolean {
     const scope = el ? this.scopeForElement(el) : this.activeScope()
     for (const a of actions) {
       if (a.kind === 'effect') {
-        if (a.effects.length) this.applyAndReact(a.effects)
+        if (a.effects.length) this.applyAndReact(a.effects, payload)
       } else if (a.kind === 'spawn') {
-        this.doSpawn(a)
+        this.doSpawn(a, undefined, payload)
       } else if (a.kind === 'hideOverlay') {
         const owner = el ? scope.graph.nodes.find((node) => node.id === el.source.nodeId) : undefined
         this.doHideOverlay(a, owner)
@@ -1058,10 +1058,10 @@ export class GraphRuntime {
    * spawn 以 `prev` / `next` / `delta` 读取；`flag` / `item` 无数值目标时返回 undefined。
    * 采样夹在 applyEffects 两侧，因此不含 checkReactiveConditions 级联带来的后续改动。
    */
-  private applyAndReact(effects: GraphEffect[]): EffectWrite | undefined {
+  private applyAndReact(effects: GraphEffect[], eventPayload?: Record<string, unknown>): EffectWrite | undefined {
     const target = effects[effects.length - 1]
     const prev = target ? effectTargetValue(this.state, target) : null
-    applyEffects(this.state, effects)
+    applyEffects(this.state, effects, eventPayload)
     const next = target && prev != null ? effectTargetValue(this.state, target) : null
     this.emit({ type: 'stateChanged' })
     this.checkReactiveConditions()
@@ -1069,7 +1069,7 @@ export class GraphRuntime {
   }
 
   // ── 响应式条件结算（pull-diff 于写屏障）──────────────────────────────────────
-  private evalCtx(locals?: Record<string, number>): EvalCtx {
+  private evalCtx(locals?: Record<string, number>, eventPayload?: Record<string, unknown>): EvalCtx {
     return {
       vars: this.state.vars,
       entities: this.state.entities,
@@ -1078,12 +1078,13 @@ export class GraphRuntime {
       score: this.state.score,
       rng: this.state.rng,
       ...(locals ? { locals } : {}),
+      ...(eventPayload ? { eventPayload } : {}),
     }
   }
 
-  private safeEval(expr: string, locals?: Record<string, number>): number {
+  private safeEval(expr: string, locals?: Record<string, number>, eventPayload?: Record<string, unknown>): number {
     try {
-      return evalExpr(expr, this.evalCtx(locals))
+      return evalExpr(expr, this.evalCtx(locals, eventPayload))
     } catch {
       return 0
     }
@@ -1189,23 +1190,24 @@ export class GraphRuntime {
     }
   }
 
-  private resolveBind(value: unknown, locals?: Record<string, number>): unknown {
+  private resolveBind(value: unknown, locals?: Record<string, number>, eventPayload?: Record<string, unknown>): unknown {
     if (value && typeof value === 'object') {
       const o = value as Record<string, unknown>
       // 数值绑定：`{ expr }`（走 expr 求值，返回数字）。
-      if (typeof o.expr === 'string') return this.safeEval(o.expr, locals)
+      if (typeof o.expr === 'string') return this.safeEval(o.expr, locals, eventPayload)
       // 标识/字符串绑定：`{ ref }`（如 entity.<id>.name，随实体改名动态取；不写死）。
-      if (typeof o.ref === 'string') return this.resolveRef(o.ref)
+      if (typeof o.ref === 'string') return this.resolveRef(o.ref, eventPayload)
     }
     return value
   }
 
   /**
    * 解析非数值引用（字符串场景，如实体名）。名字取自 scenario.entities（作者可改），非落盘写死。
-   * 支持：entity.<id>.name / entity.<id>.attr.<a>(数字) / var.<id> / score。
+   * 支持：entity.<id>.name / entity.<id>.attr.<a>(数字) / var.<id> / score / eventPayload.<key>（事件出参原样透传）。
    */
-  private resolveRef(ref: string): unknown {
+  private resolveRef(ref: string, eventPayload?: Record<string, unknown>): unknown {
     const p = ref.split('.')
+    if (p[0] === 'eventPayload') return eventPayload?.[p.slice(1).join('.')]
     if (p[0] === 'entity') {
       const id = p[1] ?? ''
       if (p[2] === 'name') return this.scenario.entities?.[id]?.name ?? id
@@ -1218,7 +1220,7 @@ export class GraphRuntime {
   }
 
   /** 主动刷出一个 overlay 组件模板实例（瞬态；ttl 到点自动移除）。 */
-  private doSpawn(action: Extract<NodeAction, { kind: 'spawn' }>, locals?: Record<string, number>): void {
+  private doSpawn(action: Extract<NodeAction, { kind: 'spawn' }>, locals?: Record<string, number>, eventPayload?: Record<string, unknown>): void {
     const nodeId = this.state.currentNodeId
     if (!nodeId) return
     const slash = action.from.indexOf('/')
@@ -1228,7 +1230,7 @@ export class GraphRuntime {
     // 模板默认 + spawn 覆盖，合并后统一 resolveBind：{expr}(数值) / {ref}(实体名等) 均在此就地求值成具体值。
     const merged: Record<string, unknown> = { ...(tpl?.inputs ?? {}), ...(action.inputs ?? {}) }
     const inputs: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(merged)) inputs[k] = this.resolveBind(v, locals)
+    for (const [k, v] of Object.entries(merged)) inputs[k] = this.resolveBind(v, locals, eventPayload)
     const component = tpl?.component ?? overlayId
     const layout: Layout | undefined = action.layout ?? (tpl?.layout && !layoutIsEffectivelyEmpty(tpl.layout) ? tpl.layout : undefined)
     const elementId = `spawn:${++this.spawnSeq}`

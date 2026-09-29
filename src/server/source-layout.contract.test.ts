@@ -40,13 +40,4 @@ describe('source domain layout', () => {
       rmSync(fixture, { recursive: true, force: true })
     }
   })
-
-  it('keeps operational scripts on current domain paths', () => {
-    const buildSeed = readFileSync(resolve(root, 'scripts/build-nodia-seed.mjs'), 'utf8')
-    const migrateSeed = readFileSync(resolve(root, 'scripts/seed-nodia-blueprint.mjs'), 'utf8')
-    expect(buildSeed).toContain('src/authoring/demo/nodia.graph.json')
-    expect(migrateSeed).toContain('src/authoring/blueprint/blueprint-project.ts')
-    expect(buildSeed).not.toContain('src/editor/demo/nodia.graph.json')
-    expect(migrateSeed).not.toContain('src/editor/persist/blueprint-project.ts')
-  })
 })

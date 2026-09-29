@@ -50,18 +50,29 @@ export interface ComponentInput {
   component?: string
 }
 
+/** 组件事件出参（`eventPayload.<key>` 求值上下文注入的类型）。组件传什么装什么，引擎不做类型阉割。 */
+export type EventPayload = Record<string, unknown>
+
+/** 事件出参声明：`key` = `eventPayload.<key>` 的取值路径；`valueType` 决定求值通道（number 走 `{expr}`，string/boolean 走 `{ref}`）。 */
+export interface ComponentOutput {
+  key: string
+  label?: string
+  valueType: 'string' | 'number' | 'boolean'
+}
+
 /**
  * 组件对外抛出的事件（作者面 · 交互目录 SSOT）。
- * 只描述「会发什么」：`id` / `label`。
+ * 只描述「会发什么」：`id` / `label`；若有出参，用 `outputs` 声明「会带出什么」。
  * 运行时 submit / resolve → 归一成这些 id；边用 `sourceHandle === event.id` 承接。
  *
  * 门控、坐标等**组件私有**参数不要挂这里——见各组件自己的 inputs 项类型
  *（如 skill/choice 的 `ChoiceOption.condition`、hotspot 的 `HotspotSpot.x/y`）。
- * 将来事件若需自带入参，再在此加 `inputs?: ComponentInput[]`。
+ * 事件出参用 `outputs` 声明，运行时由组件 `emit(key, payload)` 注入求值上下文 `eventPayload.<key>`（栈出即销，不落盘）。
  */
 export interface ComponentEvent {
   id: string
   label?: string
+  outputs?: ComponentOutput[]
 }
 
 export type ComponentLayoutAnchor =
@@ -222,6 +233,7 @@ export interface OverlayEventRef {
   localEventId: string
   label?: string
   componentId: string
+  outputs?: ComponentOutput[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

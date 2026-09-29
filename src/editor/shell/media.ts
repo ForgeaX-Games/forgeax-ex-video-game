@@ -1,7 +1,6 @@
 /**
  * Resolves a node media reference to a playable URL.
  *  - Existing http/blob/data/absolute URLs pass through unchanged.
- *  - Bundled zhandou basenames resolve first, including legacy `m-` refs.
  *  - Hydrated Kino video resources resolve to the native CDN URL from their DTO.
  *  - Audio registry ids retain their product playback path until audio resources gain
  *    the same URL cache. Unknown video ids stay unresolved instead of fabricating a
@@ -9,7 +8,6 @@
  * Uploaded images use the shared resource API; image and generation registry operations
  * continue to use host-bound extension routes.
  */
-import { zhandouUrl } from '../assets/catalog'
 import {
   createKinoVideoClient,
   KinoClientError,
@@ -47,10 +45,6 @@ export function resolveMediaSrc(ref: string | undefined, game?: string): string 
   if (!ref) return undefined
   if (/^(https?:|blob:|data:)/.test(ref)) return ref
   if (ref.startsWith('/')) return pluginUrl(ref)
-  // Bundled demo references use the zhandou basename; legacy data may add `m-`.
-  const bare = ref.startsWith('m-') ? ref.slice(2) : ref
-  const local = zhandouUrl(bare)
-  if (local) return local
   if (!game) return undefined
   const kinoResource = useKinoVideoCache.getState().byGame[game]?.items.find(
     (item) => item.resource_id === ref,
@@ -82,7 +76,7 @@ export function resolveCatalogMediaSrc(
 /**
  * 优先序解析（D8 目标态，手里已有 MediaAsset 时用）：
  *   1. `asset.url`（manifest 稳定可播地址）—— 上传能力就绪后成片走这里；
- *   2. （D9 兜底，暂留）扩展媒体流 / zhandou basename。
+ *   2. Kino / 宿主绑定的 media content 流。
  * graph/blueprint 只挂 id；URL 只住 manifest —— 引擎只抛 id，壳层在此 resolve。
  */
 export function resolveAssetSrc(asset: Pick<MediaAsset, 'id' | 'url'>, game?: string): string | undefined {

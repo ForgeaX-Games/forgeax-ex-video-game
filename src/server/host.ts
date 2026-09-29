@@ -1,6 +1,10 @@
 import { defineExtension } from '@forgeax/extension-host/node'
-import { createEmptyLibrarySeed, validateEmptyLibrarySeed } from './host/empty-library-seed'
-import { createNodiaSeed, validateNodiaSeed } from './host/nodia-seed'
+import {
+  createEmptyLibrarySeed,
+  validateEmptyLibrarySeed,
+  validateVideoGameSeed,
+} from './host/empty-library-seed'
+import { createVideoGameTemplateSeed } from './host/video-game-template-seed'
 import { createGameVideoRouter } from './host/router'
 import { ensureAuthoredComponentModule } from './host/component-authoring'
 import { tools } from './tool-handlers'
@@ -10,16 +14,22 @@ export const host = defineExtension({
   gamePackage: {
     platform: 'game-video',
     async createSeed(context) {
-      const seed = await createEmptyLibrarySeed(context)
+      const seed = await createVideoGameTemplateSeed(context)
       await ensureAuthoredComponentModule(context)
       return seed
     },
     async validateSeed(seed) {
-      validateEmptyLibrarySeed(seed)
+      validateVideoGameSeed(seed)
     },
   },
   createRouter: createGameVideoRouter,
 })
 
-export { tools, createNodiaSeed, validateNodiaSeed, createEmptyLibrarySeed, validateEmptyLibrarySeed }
+export {
+  tools,
+  createEmptyLibrarySeed,
+  createVideoGameTemplateSeed,
+  validateEmptyLibrarySeed,
+  validateVideoGameSeed,
+}
 export default host

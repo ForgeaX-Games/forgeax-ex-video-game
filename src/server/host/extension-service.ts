@@ -56,8 +56,17 @@ import {
   validateServiceInput,
   type ServiceSchemaName,
 } from './service-validation'
-import { NODIA_ASSETS_MANIFEST } from './nodia-assets'
-import { applyPatchGraphOps, agentUiPatchErrors, graphOpTouchesUi } from './patch-graph-ops'
+import {
+  applyPatchGraphOps,
+  agentUiPatchErrors,
+  graphOpTouchesInteractionDesign,
+  graphOpTouchesUi,
+} from './patch-graph-ops'
+import {
+  configureBlueprintNode as applyBlueprintNodeConfiguration,
+  type ConfigureBlueprintNodeInput,
+  type ConfigureBlueprintNodeMetrics,
+} from '@/authoring/commands/configure-blueprint-node'
 import {
   appendMutationReceipt,
   assetManifestScopedRevisionConflict,
@@ -83,6 +92,10 @@ import type { Formula } from '@/authoring/blueprint/formula-authoring'
 import { recompileFormulaUsages } from '@/authoring/formulas/formula-apply'
 import { activityContract } from '../../workflow/activity-contracts'
 import {
+  outlineScaleBudgetFailure,
+  workScaleBudgetFromContract,
+} from '../../workflow/work-scale-budget'
+import {
   VIDEO_GAME_ACTIVITIES,
   type CompletionReport,
   type PageLocation,
@@ -91,9 +104,12 @@ import {
   type VideoGameWorkflowState,
 } from '../../workflow/contracts'
 import {
+  assertBlueprintMutationAllowed,
   assertWorkflowMutationAllowed,
   assertAssetCatalogMutationAllowed,
   canCreateCatalogAdHocScenes,
+  isPostDeliveryAuthoringMaintenance,
+  allowsCompiledBlueprintRewrite,
   isPostDeliveryCatalogMaintenance,
   readWorkflowStateForMutation,
   awaitWorkflowUser,
@@ -110,12 +126,27 @@ import {
   markPeerAbandonedActivity,
   reportWorkflowBlocker,
   setWorkflowFocus,
+  guidanceFor,
   WorkflowStateError,
 } from './workflow-state'
 import { autoAdvanceWorkflowForDocument } from './workflow-auto-advance'
-import { choiceConsequenceIssues, inspectProject, uiNotRequiredByPillar, validateProjectForActivity } from './project-inspection'
+import {
+  choiceConsequenceIssues,
+  documentSubstanceIssues,
+  inspectCompiledPlayability,
+  inspectProject,
+  uiNotRequiredByPillar,
+  validateProjectForActivity,
+} from './project-inspection'
+import { compilePillar } from './pillar-compiler'
 import { simulatePassA } from './runtime-simulation'
+import {
+  captureOutlineDesignSnapshot,
+  outlineDesignDrift,
+  outlineDesignMutationDrift,
+} from './outline-design-snapshot'
 import { getNodeProductionContext } from './node-production-context'
+import { isInsufficientVideoPrompt } from '@/authoring/commands/node-video-prompt'
 import { validateNodeVideoGenerationPreset } from '@/runtime/core/schema/node-video-preset'
 import { preflightActivity } from './activity-preflight'
 import { componentContracts, authoredComponentContracts } from './component-catalog'
@@ -128,7 +159,6 @@ import {
 } from './component-authoring'
 import {
   clearRejections,
-  PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES,
   recordRejection,
 } from './retry-ledger'
 import { runGenerateCharacterPreviews } from './character-preview-service'
@@ -157,6 +187,25 @@ import {
   projectGraphShard,
   type GraphProjectionField,
 } from './graph-projection'
+import { createEmptyLibrarySeed } from './empty-library-seed'
+import { compileBlueprintOutline as applyBlueprintOutlineCompilation } from '@/authoring/commands/compile-blueprint-outline'
+import {
+  configureBlueprintOutlineNode as applyProgressiveOutlineNodeConfiguration,
+  createBlueprintOutlineSkeleton as applyBlueprintOutlineSkeleton,
+} from '@/authoring/commands/progressive-blueprint-outline'
+import {
+  parsePillarInteractionContract,
+  PillarContractError,
+  type PillarInteractionContract,
+} from '@/authoring/documents/pillar-interaction-contract'
+import { mergePillarContracts, missingBeatIds } from '@/authoring/documents/pillar-merge'
+import { composePillarDocument } from '@/authoring/documents/pillar-render'
+import {
+  clearBlueprintOutlineStage,
+  outlineRequestBytes,
+  OUTLINE_REQUEST_MAX_BYTES,
+  stageBlueprintOutlineBatch,
+} from './blueprint-outline-staging'
 
 /**
  * 幂等键由 Host 从 (活动, 活动修订号, 目标) 推导（设计 §9.7.4）。
@@ -182,11 +231,77 @@ function derivedIdempotencyKey(
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
-const BLUEPRINT_FILE = 'blueprint.json'
+import { advanceCompiledStages, BLUEPRINT_FILE, commitCompiledPillar } from './pillar-commit'
+import {
+  annotatePillarWriteGuide,
+  derivePillarSkeleton,
+  documentSlugFromDocumentRef,
+  nextPillarWriteBatch,
+  PILLAR_CONTENT_HARD_LIMIT,
+  pillarContentOversizeError,
+  rejectOffBatchPillarPatch,
+} from './pillar-skeleton'
+export { BLUEPRINT_FILE } from './pillar-commit'
 const PROJECT_FILE = 'project.json'
 const ASSETS_MANIFEST_FILE = 'assets/manifest.json'
-import { GRAPH_SAVE_LOCK } from './locks'
-export { GRAPH_SAVE_LOCK } from './locks'
+import { GAME_PACKAGE_LOCK, GRAPH_SAVE_LOCK } from './locks'
+export { GAME_PACKAGE_LOCK, GRAPH_SAVE_LOCK } from './locks'
+
+function videoPresetProjectionFingerprint(manifest: AssetManifest): string {
+  return mutationFingerprint(
+    normalizeAssetCatalogState(manifest.assetCatalog).entities.video,
+  )
+}
+
+/**
+ * Graph/UI writes frequently leave the node-video projection unchanged. Do
+ * not advance the manifest `videos` scope in that case: doing so turns an
+ * unrelated UI transaction into a false conflict for the asset lane.
+ */
+async function syncVideoPresetManifestIfChanged(
+  context: ExtensionContext,
+  manifest: AssetManifest,
+  project: GraphLibraryDocument,
+): Promise<void> {
+  const nextManifest = syncProjectVideoPresets(manifest, project)
+  if (
+    videoPresetProjectionFingerprint(nextManifest)
+    === videoPresetProjectionFingerprint(manifest)
+  ) return
+  await writeHostManifestRevision(
+    context.files,
+    nextManifest,
+    { touchedScopes: ['videos'] },
+  )
+}
+
+async function ensureWorkflowPackageSeed(context: ExtensionContext): Promise<void> {
+  await context.files.withLocks([GAME_PACKAGE_LOCK, GRAPH_SAVE_LOCK, HOST_MANIFEST_LOCK], async () => {
+    const [projectBytes, blueprintBytes, manifestBytes] = await Promise.all([
+      context.files.read(PROJECT_FILE),
+      context.files.read(BLUEPRINT_FILE),
+      context.files.read(ASSETS_MANIFEST_FILE),
+    ])
+
+    // The workflow may start writing planning documents before the editor has
+    // mounted and initialized the package. Seed the graph skeleton here as one
+    // idempotent repair, while preserving every existing file. A one-sided
+    // package can be left by an interrupted earlier seed; it must be repaired,
+    // not mistaken for proof that initialization already completed.
+    const seed = await createEmptyLibrarySeed(context)
+    const files = [
+      [PROJECT_FILE, projectBytes, seed.project],
+      [BLUEPRINT_FILE, blueprintBytes, seed.blueprint],
+      [ASSETS_MANIFEST_FILE, manifestBytes, seed.assetsManifest],
+    ] as const
+    for (const [path, bytes, value] of files) {
+      // Preserve non-null bytes, including malformed JSON, so this bootstrap
+      // never silently overwrites an existing user's package data.
+      if (bytes !== null) continue
+      await context.files.write(path, encoder.encode(JSON.stringify(value, null, 2)))
+    }
+  })
+}
 
 /** 仅供测试：幂等键推导是并发正确性的一部分，值得单独钉住。 */
 export const derivedIdempotencyKeyForTest = (
@@ -205,6 +320,10 @@ export interface GameVideoService {
   getGraph(input?: unknown): Promise<unknown>
   saveGraph(input: unknown): Promise<unknown>
   patchGraph(input: unknown): Promise<unknown>
+  compileBlueprintOutline(input: unknown): Promise<unknown>
+  createBlueprintOutlineSkeleton(input: unknown): Promise<unknown>
+  configureBlueprintOutlineNode(input: unknown): Promise<unknown>
+  configureBlueprintNode(input: unknown): Promise<unknown>
   patchNodeMedia(input: unknown): Promise<unknown>
   patchRules(input: unknown): Promise<unknown>
   patchCharacters(input: unknown): Promise<unknown>
@@ -315,6 +434,59 @@ function importedEvidence(
   }))
 }
 
+/**
+ * 支柱可执行性的保证必须挂在「写入」和「作者确认」这两个动作本身上,不能依赖
+ * 「上一步应该已经校验过了」。`import_stage_artifacts` 直接写盘并自动批准作者门,
+ * 完全绕开了 `document.pillar.ready`;作者确认也只看活动状态、不看内容。两条路都
+ * 能把画不出来的支柱送进 `blueprint.outline`。
+ */
+async function assertPillarExecutable(
+  context: ExtensionContext,
+  content: string | undefined,
+): Promise<void> {
+  const workflow = await readWorkflowState(context)
+  const blockers = documentSubstanceIssues('pillar', content, workflow)
+    .filter((item) => item.level === 'error')
+  // The author gate is the delivery preflight. Checking prose alone allows a
+  // pillar to be approved even though its deterministic compiled blueprint
+  // fails the later outline/rules/UI gates, producing an unrecoverable
+  // "outline not green" workflow state.
+  if (content && blockers.length === 0) {
+    try {
+      const compiled = compilePillar(parsePillarInteractionContract(content))
+      if (!compiled.ok) {
+        blockers.push(...compiled.issues.map((item) => ({
+          level: 'error' as const,
+          code: item.code,
+          message: item.message,
+        })))
+      } else {
+        blockers.push(...inspectCompiledPlayability(compiled.document, content)
+          .map((item) => ({
+            level: 'error' as const,
+            code: item.code,
+            message: item.message,
+          })))
+      }
+    } catch (error) {
+      blockers.push({
+        level: 'error',
+        code: 'document.pillar.not-buildable',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  if (blockers.length === 0) return
+  // 稳定 code 而不是裸 400:作者确认路径要靠它把「重试也没用,得让支柱重做」和
+  // 「稍后重试」区分开,否则作者只会看到一句不成立的「请稍后重试」。
+  throw new WorkflowStateError(
+    'workflow.gate.pillar-not-executable',
+    `pillar is not executable: ${blockers.map((item) => `${item.code}: ${item.message}`).join('; ')}`,
+    workflow?.revision,
+    { missingChecks: blockers.map((item) => ({ checkId: item.code, message: item.message })) },
+  )
+}
+
 async function completeImportedActivity(
   context: ExtensionContext,
   activity: VideoGameActivity,
@@ -354,6 +526,9 @@ async function importAcceptedStageArtifacts(
   if (currentIndex < 0 || currentIndex > workflowOrder.indexOf(latestImportedActivity)) {
     throw new ExtensionServiceInputError(`workflow has already advanced beyond ${latestImportedActivity}`)
   }
+  // 导入会连带批准作者门并直接跳到 blueprint.outline,所以校验必须在任何落盘之前,
+  // 否则失败会留下半份导入产物。
+  if (input.pillar) await assertPillarExecutable(context, input.pillar)
 
   await upsertHostDocument(context, {
     documentType: 'core',
@@ -406,10 +581,12 @@ async function importAcceptedStageArtifacts(
   state = await recordPillarAuthorGate(context, {
     productionId: `local-stage-artifact-import:${input.slug}`,
   })
-  state = await beginWorkflowActivity(context, {
-    activity: 'blueprint.outline',
-    expectedWorkflowRevision: state.revision,
-  })
+  // 导入一份已接受的支柱等同于支柱落盘：编译阶段由 Host 推进，不派 peer。
+  state = await beginWorkflowActivity(
+    context,
+    { activity: 'blueprint.outline', expectedWorkflowRevision: state.revision },
+    { compilerOwned: true },
+  )
   return { state, imported: ['core', 'pillar'], resumeActivity: 'blueprint.outline' as const }
 }
 
@@ -449,6 +626,45 @@ function artifactRef(id: string, revision: number) {
   return { kind: 'blueprint', id, revision }
 }
 
+function progressiveOutlineProgress(
+  document: GraphLibraryDocument,
+  receipts: readonly MutationReceipt[],
+  blueprintId: string,
+) {
+  const nodeIds = document.manifest.packs[blueprintId]?.graph.nodes.map((node) => node.id) ?? []
+  const nodeSet = new Set(nodeIds)
+  const configuredNodeIds = [...new Set(receipts.flatMap((receipt) => {
+    const nodeId = receipt.operation === 'configure-blueprint-outline-node'
+      ? receipt.payload.nodeId
+      : undefined
+    return typeof nodeId === 'string' && nodeSet.has(nodeId) ? [nodeId] : []
+  }))].sort()
+  const configured = new Set(configuredNodeIds)
+  return {
+    totalNodes: nodeIds.length,
+    configuredNodes: configuredNodeIds.length,
+    configuredNodeIds,
+    pendingNodeIds: nodeIds.filter((nodeId) => !configured.has(nodeId)),
+  }
+}
+
+async function readOutlinePillarContract(
+  context: ExtensionContext,
+): Promise<{ ok: true; pillar: PillarInteractionContract | undefined } | { ok: false; error: string }> {
+  const pillarDocument = await readHostDocument(context, 'doc-pillar')
+  try {
+    return {
+      ok: true,
+      pillar: pillarDocument ? parsePillarInteractionContract(pillarDocument.content) : undefined,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: `支柱互动契约无法编译：${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+}
+
 function mutationReceipt(
   key: string | undefined,
   operation: string,
@@ -464,11 +680,23 @@ function graphUiHint(
   ops: Array<Record<string, unknown>>,
 ) {
   const last = ops.at(-1)
+  const copies = Array.isArray(last?.copies) ? last.copies as Array<Record<string, unknown>> : []
+  const copiedNodeId = copies.length > 0 && typeof copies.at(-1)?.targetId === 'string'
+    ? copies.at(-1)!.targetId as string
+    : undefined
+  const insertedNode = last?.node && typeof last.node === 'object' && !Array.isArray(last.node)
+    ? last.node as Record<string, unknown>
+    : undefined
   const nodeId = typeof last?.nodeId === 'string'
     ? last.nodeId
-    : typeof last?.afterId === 'string'
-      ? last.afterId
-      : undefined
+    : typeof insertedNode?.id === 'string'
+      ? insertedNode.id
+      : copiedNodeId
+        ?? (typeof last?.afterId === 'string'
+          ? last.afterId
+          : typeof last?.beforeId === 'string'
+            ? last.beforeId
+            : undefined)
   return {
     location: nodeId
       ? { kind: 'blueprint-node', blueprintId, nodeId }
@@ -503,7 +731,7 @@ function ruleValidationErrorCode(ops: readonly RuleOp[], errors: readonly string
   if (ops.some((op) => op.op === 'remove-variable')
     && /未知变量|不存在的变量/.test(text)) return 'rules.variable.in-use'
   if (ops.some((op) => op.op === 'remove-formula')
-    && /不存在的公式/.test(text)) return 'rules.formula.in-use'
+    && /不存在的公式|未知公式/.test(text)) return 'rules.formula.in-use'
   return 'validation.failed'
 }
 
@@ -623,7 +851,7 @@ function graphOpTouchesNodeMedia(op: Record<string, unknown>): boolean {
   if (op.op === 'set-node-data') {
     return Object.prototype.hasOwnProperty.call(record(op.patch, 'patch'), 'media')
   }
-  if (op.op === 'add-node' || op.op === 'insert-node-after') {
+  if (op.op === 'add-node' || op.op === 'insert-node-after' || op.op === 'insert-node-before') {
     const node = op.node
     if (node === undefined) return false
     return Object.prototype.hasOwnProperty.call(
@@ -729,6 +957,14 @@ function nodeMediaBindingErrors(
   }
 
   const errors = validateNodeVideoGenerationPreset(binding.media.generation)
+  if (isInsufficientVideoPrompt(binding.media.prompt, {
+    name: node.data.name,
+    chapterSummary: node.data.chapterSummary,
+  })) {
+    errors.push(
+      'media.prompt 过短或只复述了章节名；需要写成可拍摄的镜头提示词（出场、动作、机位、光影）',
+    )
+  }
   const assetsById = new Map(
     manifest.assets
       .filter((asset): asset is MediaAsset => (
@@ -753,9 +989,8 @@ function nodeMediaBindingErrors(
   for (const cast of node.data.cast ?? []) {
     if (cast.onScreen === false) continue
     const assetId = characters[cast.characterId]?.currentAssetId
-    if (!assetId) {
-      errors.push(`Character ${cast.characterId} has no stable current reference`)
-    } else if (!suppliedReferences.has(assetId)) {
+    if (!assetId) continue
+    if (!suppliedReferences.has(assetId)) {
       errors.push(`Character reference is not bound for ${cast.characterId}: ${assetId}`)
     }
   }
@@ -765,9 +1000,8 @@ function nodeMediaBindingErrors(
   for (const sceneBinding of node.data.scenes ?? []) {
     if (sceneBinding.useAsVideoReference === false) continue
     const assetId = scenes[sceneBinding.sceneId]?.currentAssetId
-    if (!assetId) {
-      errors.push(`Scene ${sceneBinding.sceneId} has no stable current reference`)
-    } else if (!sceneReferences.has(assetId)) {
+    if (!assetId) continue
+    if (!sceneReferences.has(assetId)) {
       errors.push(`Scene reference is not bound for ${sceneBinding.sceneId}: ${assetId}`)
     }
   }
@@ -997,6 +1231,36 @@ function videoInput(value: unknown, maximumDuration: number): VideoGenInput {
   }
 }
 
+function parseAuthoringPillar(content: string | undefined): PillarInteractionContract | null {
+  if (!content) return null
+  try {
+    return parsePillarInteractionContract(content, { authoring: true })
+  } catch {
+    return null
+  }
+}
+
+async function pillarAuthoringContext(
+  context: ExtensionContext,
+  state: VideoGameWorkflowState,
+): Promise<{
+  pillarSkeleton: ReturnType<typeof derivePillarSkeleton>
+  pillarSource: { documentSlug?: string; coreMarkdown: string | null }
+}> {
+  const [core, pillar] = await Promise.all([
+    readHostDocument(context, 'doc-core'),
+    readHostDocument(context, 'doc-pillar'),
+  ])
+  const skeleton = derivePillarSkeleton(state.requirementContract)
+  return {
+    pillarSkeleton: annotatePillarWriteGuide(skeleton, parseAuthoringPillar(pillar?.content)),
+    pillarSource: {
+      documentSlug: documentSlugFromDocumentRef(core?.document.provider.ref),
+      coreMarkdown: core?.content ?? null,
+    },
+  }
+}
+
 export function createGameVideoService(
   context: ExtensionContext,
 ): GameVideoService {
@@ -1006,6 +1270,7 @@ export function createGameVideoService(
   return {
     async getWorkflowState(value = {}) {
       assertSchema('getWorkflowState', value)
+      await ensureWorkflowPackageSeed(context)
       const state = (await readWorkflowState(context, { create: true }))!
       const inspected = await inspectProject(context)
       return {
@@ -1013,6 +1278,12 @@ export function createGameVideoService(
         state,
         activityContract: activityContract(state.activity),
         projection: projectWorkflowState(state, inspected.inventory),
+        // 支柱阶段把骨架一并交出去：章节数、战斗回合位置、终局都由需求契约推出，
+        // peer 只填叙事与玩法语义。让它自己数的结果是反复出现「短篇 0 个战斗回合」
+        // 「节点数超预算」这类要等下游编译才暴露的偏差。
+        ...(state.activity === 'document.pillar'
+          ? await pillarAuthoringContext(context, state)
+          : {}),
       }
     },
     async importStageArtifacts(value) {
@@ -1042,9 +1313,21 @@ export function createGameVideoService(
       const proposal = await readPillarAuthorGateProposal(context)
       const productionId = stringValue(input.productionId, 'productionId', true)!
       if (productionId.length > 240) throw new ExtensionServiceInputError('productionId must be at most 240 characters')
-      const state = await recordPillarAuthorGate(context, {
+      // 确认是幂等的:已批准的门不再重验,否则一次网络重试会因为期间篇幅口径变化而
+      // 把作者已经做过的决定判成失败。
+      if (!proposal.alreadyApproved) {
+        const pillar = await readHostDocument(context, 'doc-pillar')
+        await assertPillarExecutable(context, pillar?.content)
+      }
+      const recorded = await recordPillarAuthorGate(context, {
         productionId,
       })
+      // 作者确认是编译阶段唯一的解锁点：`blueprint.outline` 要求 Host 记录过
+      // 确认，而支柱落盘发生在确认之前，所以那一次推进必然被拒。不在这里推进
+      // 的话，五个编译阶段永远停在 not-started——图已经建好了，进度却一直显示
+      // 「蓝图即将开始」，资产线也因为前置未完成而开不了。
+      await advanceCompiledStages(context)
+      const state = (await readWorkflowState(context)) ?? recorded
       const inspected = await inspectProject(context)
       return {
         schemaVersion: 1,
@@ -1147,80 +1430,51 @@ export function createGameVideoService(
           )
         }
       }
-      let waivedAfterRetries = false
-      let waiverAttempts: number | undefined
       if (!report.notRequired && !validation.ok) {
         const failedChecks = validation.evidence
           .filter((item) => item.status === 'fail')
           .map((item) => item.checkId)
-        // playtest 硬门：连续失败超过阈值后放行，避免卡死后续验证；其它活动仍严格拦截。
-        if (completing === 'playtest.validating') {
-          const rejection = await recordRejection(context, {
-            activity: completing,
-            activityRevision: completingRevision,
-            code: 'workflow.completion.rejected',
-            retry: 'fix-then-retry',
-          }).catch(() => ({
-            attempts: 0,
-            retry: 'fix-then-retry' as const,
-            budgetExhausted: false,
-          }))
-          if (rejection.attempts > PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES) {
-            waivedAfterRetries = true
-            waiverAttempts = rejection.attempts
-            // completeWorkflowActivity 要求 hardChecks 有 pass/warn 证据；放行时把 fail 降为 warn，
-            // 保留 issues，方便下游看见缺口，同时不再拦截完成。
-            validation = {
-              ...validation,
-              ok: true,
-              evidence: validation.evidence.map((item) => (
-                item.status === 'fail' ? { ...item, status: 'warn' as const } : item
-              )),
-            }
-          } else {
-            const inspected = await inspectProject(context)
-            return {
-              schemaVersion: 1,
-              accepted: false,
-              errorCode: 'workflow.completion.rejected',
-              disposition: 'retryable',
-              activity: completing,
-              activityRevision: completingRevision,
-              currentRevision: current.revision,
-              failedChecks,
-              attempts: rejection.attempts,
-              retry: 'retry',
-              guidance: `根据 failedChecks 修复当前活动负责的缺口；修复后重新读取并提交 complete_activity。`
-                + `（已连续失败 ${rejection.attempts}/${PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES} 次；`
-                + `超过 ${PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES} 次后 Host 将放行以便下游继续验证）`,
-              state: current,
-              projection: { ...projectWorkflowState(current, inspected.inventory), validation: validation.summary },
-              evidence: validation.evidence,
-            }
-          }
-        } else {
-          const inspected = await inspectProject(context)
-          return {
-            schemaVersion: 1,
-            accepted: false,
-            errorCode: 'workflow.completion.rejected',
-            disposition: 'retryable',
-            activity: completing,
-            activityRevision: completingRevision,
-            currentRevision: current.revision,
-            failedChecks,
-            retry: 'retry',
-            guidance: '根据 failedChecks 修复当前活动负责的缺口；修复后重新读取并提交 complete_activity。',
-            state: current,
-            projection: { ...projectWorkflowState(current, inspected.inventory), validation: validation.summary },
-            evidence: validation.evidence,
-          }
+        // 记录每次失败便于诊断，但绝不以重试次数降级可玩性硬门。否则损坏蓝图
+        // 会被标成已交付，问题仅从流程层转移到最终用户。
+        const rejection = await recordRejection(context, {
+          activity: completing,
+          activityRevision: completingRevision,
+          code: 'workflow.completion.rejected',
+          retry: 'fix-then-retry',
+        }).catch(() => ({ attempts: 0 }))
+        const inspected = await inspectProject(context)
+        return {
+          schemaVersion: 1,
+          accepted: false,
+          errorCode: 'workflow.completion.rejected',
+          disposition: 'retryable',
+          activity: completing,
+          activityRevision: completingRevision,
+          currentRevision: current.revision,
+          failedChecks,
+          attempts: rejection.attempts,
+          retry: 'retry',
+          guidance: '根据 failedChecks 修复当前活动负责的缺口；修复后重新读取并提交 complete_activity。',
+          state: current,
+          projection: { ...projectWorkflowState(current, inspected.inventory), validation: validation.summary },
+          evidence: validation.evidence,
         }
+      }
+      let outlineDesignSnapshot: VideoGameWorkflowState['outlineDesignSnapshot']
+      if (completing === 'blueprint.outline') {
+        const blueprintBytes = await context.files.read(BLUEPRINT_FILE)
+        const project = parseGraph(blueprintBytes)
+        if (!project) throw new ExtensionServiceInputError('Cannot freeze outline design without blueprint.json')
+        outlineDesignSnapshot = captureOutlineDesignSnapshot(
+          project,
+          readDocumentRevision(blueprintBytes),
+        )
       }
       const state = await completeWorkflowActivity(context, report, validation.evidence, {
         notRequiredAuthorized,
         ...(input.requirementContract ? { requirementContract: input.requirementContract } : {}),
         ...(input.inquiryContract ? { inquiryContract: input.inquiryContract } : {}),
+        ...(outlineDesignSnapshot ? { outlineDesignSnapshot } : {}),
       })
       // 活动交付了，上一轮的失败计数就没有意义了，别让它拖累后续返工。
       await clearRejections(context, completing)
@@ -1228,15 +1482,6 @@ export function createGameVideoService(
       return {
         schemaVersion: 1,
         accepted: true,
-        ...(waivedAfterRetries
-          ? {
-            waivedAfterRetries: true,
-            attempts: waiverAttempts,
-            guidance: `playtest.validating 校验已连续失败 ${waiverAttempts} 次（超过阈值 `
-              + `${PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES}），本次放行以便下游继续验证；`
-              + 'evidence 中仍保留未通过的硬门，勿声称蓝图已完全合法。',
-          }
-          : {}),
         state,
         projection: { ...projectWorkflowState(state, inspected.inventory), validation: validation.summary },
         evidence: validation.evidence,
@@ -1376,7 +1621,13 @@ export function createGameVideoService(
       const input = record(value)
       const state = await readWorkflowState(context)
       if (!state) throw new ExtensionServiceInputError('Call get-workflow-state before validate-project')
-      const alreadyDone = settledActivityOf(state, input.activity)
+      // 交付后的显式复验必须针对当前 blueprint revision 重新执行。返回 activity
+      // 完成时保存的旧 evidence，会让一次已破坏可玩性的维护修改看起来仍然通过。
+      const postDeliveryValidation = isPostDeliveryAuthoringMaintenance(state)
+        && input.activity !== undefined
+      const alreadyDone = postDeliveryValidation
+        ? null
+        : settledActivityOf(state, input.activity)
       if (alreadyDone) {
         const activityRecord = state.activities[alreadyDone]
         const evidence = activityRecord?.evidence ?? []
@@ -1397,8 +1648,19 @@ export function createGameVideoService(
           evidence,
         }
       }
+      const requestedActivity = (input.activity as VideoGameActivity | undefined) ?? state.activity
+      if (requestedActivity === 'document.core' || requestedActivity === 'document.pillar') {
+        throw new WorkflowStateError(
+          'workflow.capability.denied',
+          `${requestedActivity} 由 upsert_document 自动执行文档硬校验，不需要调用 validate_project。`,
+          state.revision,
+          guidanceFor(state, requestedActivity),
+        )
+      }
       // 并发组里每条线校验自己的活动契约，不能都去校验代表活动的 hard checks。
-      const target = activeActivityOf(state, input.activity, input.activityRevision)
+      const target = postDeliveryValidation
+        ? input.activity as VideoGameActivity
+        : activeActivityOf(state, input.activity, input.activityRevision)
       const targetRevision = state.activities[target]?.revision ?? state.activityRevision
       // 省略即由 Host 取当前值（设计 §9.7.4）。只读校验没有冲突检测的必要，
       // 而 `undefined !== 1` 会把「没填」误判成「填错了」——实测让 peer 卡在这里
@@ -1899,12 +2161,7 @@ export function createGameVideoService(
           BLUEPRINT_FILE,
           encoder.encode(JSON.stringify(stampDocumentRevision(project, revision, nextReceipts), null, 2)),
         )
-        const nextManifest = syncProjectVideoPresets(manifest, project)
-        await writeHostManifestRevision(
-          context.files,
-          nextManifest,
-          { touchedScopes: ['videos'] },
-        )
+        await syncVideoPresetManifestIfChanged(context, manifest, project)
         if (!await context.files.read(PROJECT_FILE)) {
           await context.files.write(
             PROJECT_FILE,
@@ -1939,11 +2196,238 @@ export function createGameVideoService(
         gameSlug: context.gameId,
       }
     },
+    async configureBlueprintNode(value) {
+      assertSchema('configureBlueprintNode', value)
+      const input = record(value) as Record<string, unknown> & ConfigureBlueprintNodeInput
+      const touchesUi = !!(
+        input.interfaces?.length
+        || input.removals?.interfaces?.length
+        || input.removals?.eventResponses?.length
+        || input.removals?.eventActions?.length
+      )
+      const graphActivities = touchesUi
+        ? ['ui.authoring', 'rules.binding', 'game.finalizing', 'playtest.validating'] as const
+        : ['rules.binding', 'ui.authoring', 'game.finalizing', 'playtest.validating'] as const
+      const { state: workflow, activityRevision } = await readWorkflowStateForMutation(
+        context,
+        graphActivities,
+        input.activityRevision,
+      )
+      const touchedScopes = [
+        'graph' as const,
+        ...(touchesUi ? ['ui' as const] : []),
+      ]
+      assertBlueprintMutationAllowed(
+        workflow,
+        activityRevision,
+        graphActivities,
+        touchedScopes,
+      )
+
+      const authored = authoredComponentContracts(await listAuthoredComponentManifests(context))
+      const contracts = new Map(
+        [...componentContracts(), ...authored].map((contract) => [contract.id, contract]),
+      )
+      type MountReceipt = { overlayId: string; mountId: string; created: boolean }
+      type ConfigureOutcome =
+        | {
+            ok: true
+            applied: number
+            revision: number
+            blueprintId: string
+            nodeId: string
+            mounts: MountReceipt[]
+            metrics: ConfigureBlueprintNodeMetrics
+            reusedPrimitives: string[]
+            replayed?: boolean
+          }
+        | {
+            ok: false
+            errors: string[]
+            errorCode?: string
+            failedPath?: string
+            currentRevision?: number
+            snapshotToken?: string
+          }
+        | { ok: false; conflict: RevisionConflict | IdempotencyConflict }
+      const expectedRevision = optionalRevision(input.expectedRevision)
+      const idempotencyKey = optionalIdempotencyKey(input.idempotencyKey)
+      const fingerprint = mutationFingerprint({
+        blueprintId: input.blueprintId,
+        nodeId: input.nodeId,
+        interfaces: input.interfaces,
+        settlements: input.settlements,
+        settlementUpdates: input.settlementUpdates,
+        removals: input.removals,
+      })
+      const outcome = await context.files.withLocks<ConfigureOutcome>(
+        [GRAPH_SAVE_LOCK, HOST_MANIFEST_LOCK],
+        async () => {
+          const bytes = await context.files.read(BLUEPRINT_FILE)
+          const current = parseGraph(bytes)
+          if (!current) return { ok: false, errors: ['缺少 blueprint.json'] }
+          const currentRevision = readDocumentRevision(bytes)
+          if (
+            typeof input.snapshotToken === 'string'
+            && input.snapshotToken !== graphSnapshotToken(context.gameId, currentRevision)
+          ) {
+            return {
+              ok: false,
+              errors: ['snapshot.stale：节点配置所基于的 blueprint revision 已过期，请重新读取该节点。'],
+              errorCode: 'snapshot.stale',
+            }
+          }
+          const receipts = readMutationReceipts(bytes)
+          const prior = resolveMutationReceipt(receipts, {
+            key: idempotencyKey,
+            operation: 'configure-blueprint-node',
+            fingerprint,
+            currentRevision,
+          })
+          if (prior && 'code' in prior) return { ok: false, conflict: prior }
+          if (prior) {
+            return {
+              ok: true,
+              applied: Number(prior.payload.applied ?? 0),
+              revision: prior.revision,
+              blueprintId: String(prior.payload.blueprintId ?? current.manifest.mainPackId),
+              nodeId: String(prior.payload.nodeId ?? input.nodeId),
+              mounts: (prior.payload.mounts ?? []) as MountReceipt[],
+              metrics: prior.payload.metrics as ConfigureBlueprintNodeMetrics,
+              reusedPrimitives: (prior.payload.reusedPrimitives ?? []) as string[],
+              replayed: true,
+            }
+          }
+          const conflict = scopedRevisionConflict(
+            expectedRevision,
+            currentRevision,
+            readScopeRevisions(bytes),
+            touchedScopes,
+          )
+          if (conflict) return { ok: false, conflict }
+
+          const applied = applyBlueprintNodeConfiguration(current, {
+            blueprintId: input.blueprintId,
+            nodeId: input.nodeId,
+            interfaces: input.interfaces,
+            settlements: input.settlements,
+            settlementUpdates: input.settlementUpdates,
+            removals: input.removals,
+          }, contracts)
+          if (!applied.ok) {
+            return { ok: false, errors: applied.errors, failedPath: applied.failedPath }
+          }
+          if (workflow && !allowsCompiledBlueprintRewrite(workflow)) {
+            const drift = workflow.outlineDesignSnapshot
+              ? outlineDesignDrift(applied.document, workflow.outlineDesignSnapshot)
+              : outlineDesignMutationDrift(current, applied.document)
+            if (drift.length > 0) {
+              return {
+                ok: false,
+                errors: ['节点事务试图改变已冻结的 outline 节点/边设计', ...drift],
+                errorCode: 'workflow.outline-design.frozen',
+              }
+            }
+          }
+          const errors = [
+            ...validateDocument(applied.document, { componentEvents: contracts }),
+            ...choiceConsequenceIssues(applied.document, { requireChoice: false })
+              .map((entry) => entry.message),
+          ]
+          if (errors.length > 0) {
+            return { ok: false, errors, errorCode: 'validation.failed' }
+          }
+
+          const revision = nextDocumentRevision(currentRevision)
+          const receiptPayload = {
+            applied: applied.applied,
+            blueprintId: applied.blueprintId,
+            nodeId: applied.nodeId,
+            mounts: applied.mounts,
+            metrics: applied.metrics,
+            reusedPrimitives: applied.reusedPrimitives,
+          }
+          const nextReceipts = appendMutationReceipt(receipts, mutationReceipt(
+            idempotencyKey,
+            'configure-blueprint-node',
+            fingerprint,
+            revision,
+            receiptPayload,
+          ))
+          await context.files.write(
+            BLUEPRINT_FILE,
+            encoder.encode(JSON.stringify(stampDocumentRevision(
+              applied.document,
+              revision,
+              nextReceipts,
+              { previous: readScopeRevisions(bytes), touched: touchedScopes },
+            ), null, 2)),
+          )
+          const currentManifest = await readHostManifest(context.files)
+          await syncVideoPresetManifestIfChanged(context, currentManifest, applied.document)
+          if (!await context.files.read(PROJECT_FILE)) {
+            await context.files.write(
+              PROJECT_FILE,
+              encoder.encode(JSON.stringify(projectMetadata(context.gameId), null, 2)),
+            )
+          }
+          return { ok: true, revision, ...receiptPayload }
+        },
+      )
+      if (!outcome.ok) {
+        if ('conflict' in outcome) return conflictResult(outcome.conflict, context.gameId)
+        return {
+          schemaVersion: 1,
+          ok: false,
+          errors: outcome.errors,
+          ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
+          ...(outcome.failedPath ? { failedPath: outcome.failedPath } : {}),
+          gameSlug: context.gameId,
+        }
+      }
+      const uiHint = {
+        location: {
+          kind: 'blueprint' as const,
+          blueprintId: outcome.blueprintId,
+          nodeId: outcome.nodeId,
+        },
+        reveal: 'select-and-expand' as const,
+      }
+      const result = {
+        schemaVersion: 1,
+        ok: true,
+        applied: outcome.applied,
+        revision: outcome.revision,
+        replayed: outcome.replayed ?? false,
+        mounts: outcome.mounts,
+        metrics: outcome.metrics,
+        reusedPrimitives: outcome.reusedPrimitives,
+        data: {
+          applied: outcome.applied,
+          mounts: outcome.mounts,
+          metrics: outcome.metrics,
+          reusedPrimitives: outcome.reusedPrimitives,
+        },
+        artifactRef: artifactRef(outcome.blueprintId, outcome.revision),
+        validation: validationSummary(outcome.revision),
+        uiHint,
+        versions: [],
+        gameSlug: context.gameId,
+      }
+      if (workflow && !isPostDeliveryAuthoringMaintenance(workflow)) {
+        await setWorkflowFocus(context, {
+          activityRevision: workflow.activityRevision,
+          location: uiHint.location,
+          reason: 'artifact-created',
+        }).catch(() => undefined)
+      }
+      return result
+    },
     async patchGraph(value) {
       assertSchema('patchGraph', value)
       const input = record(value)
       const graphActivities = [
-        'blueprint.outline', 'rules.binding', 'ui.authoring', 'game.finalizing',
+        'blueprint.outline', 'rules.binding', 'ui.authoring', 'game.finalizing', 'playtest.validating',
       ] as const
       const { state: workflow, activityRevision } = await readWorkflowStateForMutation(
         context,
@@ -1967,7 +2451,7 @@ export function createGameVideoService(
         ...(touchesFormulas ? ['rules' as const] : []),
         ...(touchesOverlays ? ['ui' as const] : []),
       ]
-      assertWorkflowMutationAllowed(
+      assertBlueprintMutationAllowed(
         workflow,
         activityRevision,
         graphActivities,
@@ -1984,6 +2468,21 @@ export function createGameVideoService(
             ],
             errorCode: 'workflow.outline.asset-detail-not-allowed',
           }
+        }
+      }
+      if (
+        workflow
+        && !allowsCompiledBlueprintRewrite(workflow)
+        && activeActivity !== 'blueprint.outline'
+        && graphOps.some(graphOpTouchesInteractionDesign)
+      ) {
+        return {
+          ok: false,
+          errors: [
+            `${activeActivity ?? '当前活动'} 只能编译和接线支柱已确认的玩法；`
+            + 'interaction 与 edge.data.design 只允许 blueprint.outline 写入。发现设计缺口时应返工支柱或总脉络。',
+          ],
+          errorCode: 'workflow.interaction-design.outline-owned',
         }
       }
       if (graphOps.some(graphOpTouchesNodeMedia)) {
@@ -2071,9 +2570,27 @@ export function createGameVideoService(
         if (!applied.ok) {
           return { ok: false, errors: applied.errors, failedOpIndex: applied.failedOpIndex }
         }
+        if (
+          workflow
+          && !allowsCompiledBlueprintRewrite(workflow)
+          && activeActivity !== 'blueprint.outline'
+        ) {
+          const drift = workflow.outlineDesignSnapshot
+            ? outlineDesignDrift(applied.document, workflow.outlineDesignSnapshot)
+            : outlineDesignMutationDrift(current, applied.document)
+          if (drift.length > 0) {
+            return {
+              ok: false,
+              errors: [
+                'blueprint.outline 设计已经冻结；后续活动只能写 UI、规则、reaction、settlement 和文案。',
+                ...drift,
+              ],
+              errorCode: 'workflow.outline-design.frozen',
+            }
+          }
+        }
         const errors = [
           ...validateDocument(applied.document),
-          ...choiceConsequenceIssues(applied.document, { requireChoice: false }).map((entry) => entry.message),
           ...choiceConsequenceIssues(applied.document, { requireChoice: false }).map((entry) => entry.message),
         ]
         if (errors.length) {
@@ -2092,12 +2609,7 @@ export function createGameVideoService(
           encoder.encode(JSON.stringify(stampDocumentRevision(applied.document, revision, nextReceipts, { previous: readScopeRevisions(bytes), touched: touchedScopes }), null, 2)),
         )
         const currentManifest = await readHostManifest(context.files)
-        const nextManifest = syncProjectVideoPresets(currentManifest, applied.document)
-        await writeHostManifestRevision(
-          context.files,
-          nextManifest,
-          { touchedScopes: ['videos'] },
-        )
+        await syncVideoPresetManifestIfChanged(context, currentManifest, applied.document)
         if (!await context.files.read(PROJECT_FILE)) {
           await context.files.write(
             PROJECT_FILE,
@@ -2131,10 +2643,702 @@ export function createGameVideoService(
         versions: [],
         gameSlug: context.gameId,
       }
-      if (workflow) {
+      if (workflow && !isPostDeliveryAuthoringMaintenance(workflow)) {
         await setWorkflowFocus(context, {
           activityRevision: workflow.activityRevision,
           location: result.uiHint.location as PageLocation,
+          reason: 'artifact-created',
+        }).catch(() => undefined)
+      }
+      return result
+    },
+    async createBlueprintOutlineSkeleton(value) {
+      assertSchema('createBlueprintOutlineSkeleton', value)
+      const input = record(value)
+      const { state: workflow, activityRevision } = await readWorkflowStateForMutation(
+        context,
+        ['blueprint.outline'],
+        input.activityRevision,
+      )
+      assertBlueprintMutationAllowed(workflow, activityRevision, ['blueprint.outline'], ['graph'])
+      type SkeletonOutcome =
+        | {
+            ok: true
+            document: GraphLibraryDocument
+            receipts: MutationReceipt[]
+            revision: number
+            blueprintId: string
+            nodeCount: number
+            commandCount: number
+            replayed?: boolean
+          }
+        | { ok: false; errors: string[]; errorCode?: string; failedPath?: string; currentRevision?: number; snapshotToken?: string }
+        | { ok: false; conflict: RevisionConflict | IdempotencyConflict }
+      const expectedRevision = optionalRevision(input.expectedRevision)
+      const idempotencyKey = optionalIdempotencyKey(input.idempotencyKey)
+      const fingerprint = mutationFingerprint({
+        blueprintId: input.blueprintId,
+        title: input.title,
+        entry: input.entry,
+        chapters: input.chapters,
+      })
+      const outcome = await context.files.withLocks<SkeletonOutcome>(
+        [GRAPH_SAVE_LOCK, HOST_MANIFEST_LOCK],
+        async () => {
+          const bytes = await context.files.read(BLUEPRINT_FILE)
+          const current = parseGraph(bytes)
+          if (!current) return { ok: false, errors: ['缺少 blueprint.json'] }
+          const currentRevision = readDocumentRevision(bytes)
+          if (
+            typeof input.snapshotToken === 'string'
+            && input.snapshotToken !== graphSnapshotToken(context.gameId, currentRevision)
+          ) {
+            return {
+              ok: false,
+              errors: ['snapshot.stale：骨架基于的 blueprint revision 已过期，请重新读取后重试。'],
+              errorCode: 'snapshot.stale',
+              currentRevision,
+              snapshotToken: graphSnapshotToken(context.gameId, currentRevision),
+            }
+          }
+          const requestedBlueprintId = typeof input.blueprintId === 'string'
+            ? input.blueprintId
+            : current.manifest.mainPackId
+          const existingPack = current.manifest.packs[requestedBlueprintId]
+          const hasOutlineNodes = Boolean(existingPack?.graph.nodes.some((node) => (
+            Boolean(node.data.interaction?.sourcePillarBeatId)
+          )))
+          let receipts = readMutationReceipts(bytes)
+          // A destructive external graph reset can leave mutation receipts behind.
+          // Receipts are only meaningful while the corresponding skeleton exists;
+          // clear orphaned outline receipts so recovery does not require workflow rework.
+          if (!hasOutlineNodes) {
+            receipts = receipts.filter((receipt) => ![
+              'create-blueprint-outline-skeleton',
+              'configure-blueprint-outline-node',
+            ].includes(receipt.operation))
+          }
+          const prior = resolveMutationReceipt(receipts, {
+            key: idempotencyKey,
+            operation: 'create-blueprint-outline-skeleton',
+            fingerprint,
+            currentRevision,
+          })
+          if (prior && 'code' in prior) return { ok: false, conflict: prior }
+          if (prior) {
+            return {
+              ok: true,
+              document: current,
+              receipts,
+              revision: prior.revision,
+              blueprintId: String(prior.payload.blueprintId ?? current.manifest.mainPackId),
+              nodeCount: Number(prior.payload.nodeCount ?? current.graph.nodes.length),
+              commandCount: Number(prior.payload.commandCount ?? 0),
+              replayed: true,
+            }
+          }
+          const conflict = scopedRevisionConflict(
+            expectedRevision,
+            currentRevision,
+            readScopeRevisions(bytes),
+            ['graph'],
+          )
+          if (conflict) return { ok: false, conflict }
+          const skeletonAlreadyExists = receipts.some((receipt) => (
+            receipt.operation === 'create-blueprint-outline-skeleton'
+          )) || hasOutlineNodes
+          if (skeletonAlreadyExists) {
+            return {
+              ok: false,
+              errors: [
+                'outline.skeleton-already-created：当前总脉络已经创建过节点骨架；请继续配置 pendingNodeIds，禁止再次提交骨架。',
+              ],
+              errorCode: 'outline.skeleton-already-created',
+              failedPath: 'chapters',
+              currentRevision,
+            }
+          }
+          const pillarResult = await readOutlinePillarContract(context)
+          if (!pillarResult.ok) {
+            return {
+              ok: false,
+              errors: [pillarResult.error],
+              errorCode: 'workflow.outline.pillar-contract-invalid',
+              failedPath: 'pillar',
+            }
+          }
+          const chapterCount = Array.isArray(input.chapters) ? input.chapters.length : 0
+          const scaleFailure = pillarResult.pillar
+            ? outlineScaleBudgetFailure(
+              pillarResult.pillar,
+              chapterCount,
+              workScaleBudgetFromContract(workflow?.requirementContract),
+            )
+            : null
+          if (scaleFailure) {
+            return {
+              ok: false,
+              errors: [scaleFailure.message],
+              errorCode: scaleFailure.errorCode,
+              failedPath: 'chapters',
+            }
+          }
+          const created = applyBlueprintOutlineSkeleton(current, {
+            blueprintId: typeof input.blueprintId === 'string' ? input.blueprintId : undefined,
+            title: typeof input.title === 'string' ? input.title : undefined,
+            entry: String(input.entry),
+            chapters: input.chapters as never,
+          }, pillarResult.pillar)
+          if (!created.ok) return created
+          const revision = nextDocumentRevision(currentRevision)
+          const resetReceipts = receipts.filter((receipt) => ![
+            'create-blueprint-outline-skeleton',
+            'configure-blueprint-outline-node',
+          ].includes(receipt.operation))
+          const nextReceipts = appendMutationReceipt(resetReceipts, mutationReceipt(
+            idempotencyKey,
+            'create-blueprint-outline-skeleton',
+            fingerprint,
+            revision,
+            {
+              blueprintId: created.blueprintId,
+              nodeCount: created.nodeCount,
+              commandCount: created.commandCount,
+            },
+          ))
+          await context.files.write(
+            BLUEPRINT_FILE,
+            encoder.encode(JSON.stringify(stampDocumentRevision(
+              created.document,
+              revision,
+              nextReceipts,
+              { previous: readScopeRevisions(bytes), touched: ['graph'] },
+            ), null, 2)),
+          )
+          const currentManifest = await readHostManifest(context.files)
+          await syncVideoPresetManifestIfChanged(context, currentManifest, created.document)
+          return {
+            ok: true,
+            document: created.document,
+            receipts: nextReceipts,
+            revision,
+            blueprintId: created.blueprintId,
+            nodeCount: created.nodeCount,
+            commandCount: created.commandCount,
+          }
+        },
+      )
+      if (!outcome.ok) {
+        if ('conflict' in outcome) return conflictResult(outcome.conflict, context.gameId)
+        return {
+          schemaVersion: 1,
+          ok: false,
+          errors: outcome.errors,
+          ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
+          ...(outcome.failedPath ? { failedPath: outcome.failedPath } : {}),
+          ...(outcome.currentRevision === undefined ? {} : { currentRevision: outcome.currentRevision }),
+          ...(outcome.snapshotToken ? { snapshotToken: outcome.snapshotToken } : {}),
+          gameSlug: context.gameId,
+        }
+      }
+      const progress = progressiveOutlineProgress(outcome.document, outcome.receipts, outcome.blueprintId)
+      const result = {
+        schemaVersion: 1,
+        ok: true,
+        revision: outcome.revision,
+        replayed: outcome.replayed ?? false,
+        nodeCount: outcome.nodeCount,
+        edgeCount: 0,
+        commandCount: outcome.commandCount,
+        progress,
+        readyToComplete: false,
+        artifactRef: artifactRef(outcome.blueprintId, outcome.revision),
+        validation: validationSummary(outcome.revision),
+        uiHint: {
+          location: { kind: 'blueprint', blueprintId: outcome.blueprintId, nodeId: String(input.entry) } as PageLocation,
+          reveal: 'select-and-expand',
+        },
+        versions: [],
+        gameSlug: context.gameId,
+      }
+      if (workflow) {
+        await setWorkflowFocus(context, {
+          activityRevision: workflow.activityRevision,
+          location: result.uiHint.location,
+          reason: 'artifact-created',
+        }).catch(() => undefined)
+      }
+      return result
+    },
+    async configureBlueprintOutlineNode(value) {
+      assertSchema('configureBlueprintOutlineNode', value)
+      const input = record(value)
+      const { state: workflow, activityRevision } = await readWorkflowStateForMutation(
+        context,
+        ['blueprint.outline'],
+        input.activityRevision,
+      )
+      assertBlueprintMutationAllowed(workflow, activityRevision, ['blueprint.outline'], ['graph'])
+      type NodeOutcome =
+        | {
+            ok: true
+            document: GraphLibraryDocument
+            receipts: MutationReceipt[]
+            revision: number
+            blueprintId: string
+            nodeId: string
+            nodeCount: number
+            edgeCount: number
+            commandCount: number
+            replayed?: boolean
+          }
+        | { ok: false; errors: string[]; errorCode?: string; failedPath?: string; currentRevision?: number; snapshotToken?: string }
+        | { ok: false; conflict: RevisionConflict | IdempotencyConflict }
+      const expectedRevision = optionalRevision(input.expectedRevision)
+      const idempotencyKey = optionalIdempotencyKey(input.idempotencyKey)
+      const fingerprint = mutationFingerprint({
+        blueprintId: input.blueprintId,
+        nodeId: input.nodeId,
+        beat: input.beat,
+        actions: input.actions,
+        settlements: input.settlements,
+        resolvesActions: input.resolvesActions,
+        outgoingRoutes: input.outgoingRoutes,
+        cast: input.cast,
+        scenes: input.scenes,
+        loop: input.loop,
+        terminals: input.terminals,
+      })
+      const outcome = await context.files.withLocks<NodeOutcome>(
+        [GRAPH_SAVE_LOCK, HOST_MANIFEST_LOCK],
+        async () => {
+          const bytes = await context.files.read(BLUEPRINT_FILE)
+          const current = parseGraph(bytes)
+          if (!current) return { ok: false, errors: ['缺少 blueprint.json'] }
+          const currentRevision = readDocumentRevision(bytes)
+          if (
+            typeof input.snapshotToken === 'string'
+            && input.snapshotToken !== graphSnapshotToken(context.gameId, currentRevision)
+          ) {
+            return {
+              ok: false,
+              errors: ['snapshot.stale：节点配置基于的 blueprint revision 已过期，请重新读取该节点后重试。'],
+              errorCode: 'snapshot.stale',
+              currentRevision,
+              snapshotToken: graphSnapshotToken(context.gameId, currentRevision),
+            }
+          }
+          const receipts = readMutationReceipts(bytes)
+          const prior = resolveMutationReceipt(receipts, {
+            key: idempotencyKey,
+            operation: 'configure-blueprint-outline-node',
+            fingerprint,
+            currentRevision,
+          })
+          if (prior && 'code' in prior) return { ok: false, conflict: prior }
+          if (prior) {
+            const blueprintId = String(prior.payload.blueprintId ?? current.manifest.mainPackId)
+            const graph = current.manifest.packs[blueprintId]?.graph ?? current.graph
+            return {
+              ok: true,
+              document: current,
+              receipts,
+              revision: prior.revision,
+              blueprintId,
+              nodeId: String(prior.payload.nodeId ?? input.nodeId),
+              nodeCount: graph.nodes.length,
+              edgeCount: graph.edges.length,
+              commandCount: Number(prior.payload.commandCount ?? 0),
+              replayed: true,
+            }
+          }
+          const conflict = scopedRevisionConflict(
+            expectedRevision,
+            currentRevision,
+            readScopeRevisions(bytes),
+            ['graph'],
+          )
+          if (conflict) return { ok: false, conflict }
+          const pillarResult = await readOutlinePillarContract(context)
+          if (!pillarResult.ok) {
+            return {
+              ok: false,
+              errors: [pillarResult.error],
+              errorCode: 'workflow.outline.pillar-contract-invalid',
+              failedPath: 'pillar',
+            }
+          }
+          const configured = applyProgressiveOutlineNodeConfiguration(current, {
+            blueprintId: typeof input.blueprintId === 'string' ? input.blueprintId : undefined,
+            nodeId: String(input.nodeId),
+            beat: input.beat as never,
+            pillarBeatId: typeof input.pillarBeatId === 'string' ? input.pillarBeatId : undefined,
+            actions: input.actions as never,
+            settlements: input.settlements as never,
+            resolvesActions: input.resolvesActions as never,
+            outgoingRoutes: input.outgoingRoutes as never,
+            cast: input.cast as never,
+            scenes: input.scenes as never,
+            loop: input.loop as never,
+            terminals: input.terminals as never,
+          }, pillarResult.pillar)
+          if (!configured.ok) return configured
+          const revision = nextDocumentRevision(currentRevision)
+          const nextReceipts = appendMutationReceipt(receipts, mutationReceipt(
+            idempotencyKey,
+            'configure-blueprint-outline-node',
+            fingerprint,
+            revision,
+            {
+              blueprintId: configured.blueprintId,
+              nodeId: configured.nodeId!,
+              commandCount: configured.commandCount,
+            },
+          ))
+          await context.files.write(
+            BLUEPRINT_FILE,
+            encoder.encode(JSON.stringify(stampDocumentRevision(
+              configured.document,
+              revision,
+              nextReceipts,
+              { previous: readScopeRevisions(bytes), touched: ['graph'] },
+            ), null, 2)),
+          )
+          const currentManifest = await readHostManifest(context.files)
+          await syncVideoPresetManifestIfChanged(context, currentManifest, configured.document)
+          return {
+            ok: true,
+            document: configured.document,
+            receipts: nextReceipts,
+            revision,
+            blueprintId: configured.blueprintId,
+            nodeId: configured.nodeId!,
+            nodeCount: configured.nodeCount,
+            edgeCount: configured.edgeCount,
+            commandCount: configured.commandCount,
+          }
+        },
+      )
+      if (!outcome.ok) {
+        if ('conflict' in outcome) return conflictResult(outcome.conflict, context.gameId)
+        return {
+          schemaVersion: 1,
+          ok: false,
+          errors: outcome.errors,
+          ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
+          ...(outcome.failedPath ? { failedPath: outcome.failedPath } : {}),
+          ...(outcome.currentRevision === undefined ? {} : { currentRevision: outcome.currentRevision }),
+          ...(outcome.snapshotToken ? { snapshotToken: outcome.snapshotToken } : {}),
+          gameSlug: context.gameId,
+        }
+      }
+      const progress = progressiveOutlineProgress(outcome.document, outcome.receipts, outcome.blueprintId)
+      const validation = await validateProjectForActivity(
+        context,
+        'blueprint.outline',
+        workflow?.activityRevision ?? 0,
+        activityContract('blueprint.outline').hardChecks,
+        workflow,
+      )
+      const result = {
+        schemaVersion: 1,
+        ok: true,
+        revision: outcome.revision,
+        replayed: outcome.replayed ?? false,
+        nodeId: outcome.nodeId,
+        nodeCount: outcome.nodeCount,
+        edgeCount: outcome.edgeCount,
+        commandCount: outcome.commandCount,
+        progress,
+        readyToComplete: progress.pendingNodeIds.length === 0 && validation.ok,
+        artifactRef: artifactRef(outcome.blueprintId, outcome.revision),
+        validation: validation.summary,
+        failedChecks: validation.evidence.filter((entry) => entry.status === 'fail').map((entry) => entry.checkId),
+        uiHint: {
+          location: { kind: 'blueprint', blueprintId: outcome.blueprintId, nodeId: outcome.nodeId } as PageLocation,
+          reveal: 'select-and-expand',
+        },
+        versions: [],
+        gameSlug: context.gameId,
+      }
+      if (workflow) {
+        await setWorkflowFocus(context, {
+          activityRevision: workflow.activityRevision,
+          location: result.uiHint.location,
+          reason: 'artifact-created',
+        }).catch(() => undefined)
+      }
+      return result
+    },
+    async compileBlueprintOutline(value) {
+      assertSchema('compileBlueprintOutline', value)
+      let input = record(value)
+      const { state: workflow, activityRevision } = await readWorkflowStateForMutation(
+        context,
+        ['blueprint.outline'],
+        input.activityRevision,
+      )
+      assertBlueprintMutationAllowed(
+        workflow,
+        activityRevision,
+        ['blueprint.outline'],
+        ['graph'],
+      )
+
+      let stagedPlan: { planId: string; fingerprint: string } | undefined
+      const stagingRequested = ['planId', 'batchIndex', 'batchCount', 'commit']
+        .some((field) => input[field] !== undefined)
+      if (stagingRequested) {
+        if (typeof input.planId !== 'string') {
+          return {
+            schemaVersion: 1,
+            ok: false,
+            errorCode: 'outline.plan-id-required',
+            errors: ['使用分批字段时必须提供 planId。'],
+            failedPath: 'planId',
+            gameSlug: context.gameId,
+          }
+        }
+        const staged = await stageBlueprintOutlineBatch(context, input)
+        if (!staged.ok) {
+          return { schemaVersion: 1, ...staged, gameSlug: context.gameId }
+        }
+        if (input.commit !== true) {
+          return {
+            schemaVersion: 1,
+            ok: true,
+            staged: true,
+            planId: staged.planId,
+            batchIndex: staged.batchIndex,
+            batchCount: staged.batchCount,
+            receivedBatches: staged.receivedBatches,
+            remainingBatches: staged.remainingBatches,
+            stagedBytes: staged.stagedBytes,
+            replayed: staged.replayed,
+            readyToCommit: staged.readyToCommit,
+            revisionChanged: false,
+            gameSlug: context.gameId,
+          }
+        }
+        if (!staged.readyToCommit || !staged.compileInput) {
+          return {
+            schemaVersion: 1,
+            ok: false,
+            errorCode: 'outline.plan-incomplete',
+            errors: [`计划仍缺少批次：${staged.remainingBatches.join(', ')}`],
+            planId: staged.planId,
+            receivedBatches: staged.receivedBatches,
+            remainingBatches: staged.remainingBatches,
+            revisionChanged: false,
+            gameSlug: context.gameId,
+          }
+        }
+        stagedPlan = { planId: staged.planId, fingerprint: staged.planFingerprint }
+        input = {
+          ...staged.compileInput,
+          ...(input.activityRevision !== undefined ? { activityRevision: input.activityRevision } : {}),
+          ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}),
+          ...(input.snapshotToken !== undefined ? { snapshotToken: input.snapshotToken } : {}),
+        }
+      } else {
+        const requestBytes = outlineRequestBytes(input)
+        if (requestBytes > OUTLINE_REQUEST_MAX_BYTES) {
+          return {
+            schemaVersion: 1,
+            ok: false,
+            errorCode: 'outline.payload-over-budget',
+            errors: [`单次总脉络请求为 ${requestBytes} bytes，超过 ${OUTLINE_REQUEST_MAX_BYTES} bytes。请使用 planId/batchIndex/batchCount 有限分批。`],
+            revisionChanged: false,
+            gameSlug: context.gameId,
+          }
+        }
+      }
+
+      type CompileOutcome =
+        | {
+            ok: true
+            revision: number
+            blueprintId: string
+            nodeCount: number
+            edgeCount: number
+            commandCount: number
+            replayed?: boolean
+          }
+        | { ok: false; errors: string[]; errorCode?: string; failedPath?: string }
+        | { ok: false; conflict: RevisionConflict | IdempotencyConflict }
+      const expectedRevision = optionalRevision(input.expectedRevision)
+      const idempotencyKey = optionalIdempotencyKey(input.idempotencyKey)
+      const fingerprint = mutationFingerprint({
+        blueprintId: input.blueprintId,
+        title: input.title,
+        entry: input.entry,
+        chapters: input.chapters,
+        routes: input.routes,
+      })
+      const outcome = await context.files.withLocks<CompileOutcome>(
+        [GRAPH_SAVE_LOCK, HOST_MANIFEST_LOCK],
+        async () => {
+          const bytes = await context.files.read(BLUEPRINT_FILE)
+          const current = parseGraph(bytes)
+          if (!current) return { ok: false, errors: ['缺少 blueprint.json'] }
+          const currentRevision = readDocumentRevision(bytes)
+          if (
+            typeof input.snapshotToken === 'string'
+            && input.snapshotToken !== graphSnapshotToken(context.gameId, currentRevision)
+          ) {
+            return {
+              ok: false,
+              errors: ['snapshot.stale：总脉络基于的 blueprint revision 已过期，请重新读取后重新编译。'],
+              errorCode: 'snapshot.stale',
+              currentRevision,
+              snapshotToken: graphSnapshotToken(context.gameId, currentRevision),
+            }
+          }
+          const receipts = readMutationReceipts(bytes)
+          const prior = resolveMutationReceipt(receipts, {
+            key: idempotencyKey,
+            operation: 'compile-blueprint-outline',
+            fingerprint,
+            currentRevision,
+          })
+          if (prior && 'code' in prior) return { ok: false, conflict: prior }
+          if (prior) {
+            return {
+              ok: true,
+              revision: prior.revision,
+              blueprintId: String(prior.payload.blueprintId ?? current.manifest.mainPackId),
+              nodeCount: Number(prior.payload.nodeCount ?? 0),
+              edgeCount: Number(prior.payload.edgeCount ?? 0),
+              commandCount: Number(prior.payload.commandCount ?? 0),
+              replayed: true,
+            }
+          }
+          const conflict = scopedRevisionConflict(
+            expectedRevision,
+            currentRevision,
+            readScopeRevisions(bytes),
+            ['graph'],
+          )
+          if (conflict) return { ok: false, conflict }
+
+          const pillarDocument = await readHostDocument(context, 'doc-pillar')
+          let pillarContract
+          try {
+            pillarContract = pillarDocument
+              ? parsePillarInteractionContract(pillarDocument.content)
+              : undefined
+          } catch (error) {
+            return {
+              ok: false,
+              errors: [`支柱互动契约无法编译：${error instanceof Error ? error.message : String(error)}`],
+              errorCode: 'workflow.outline.pillar-contract-invalid',
+              failedPath: 'pillar',
+            }
+          }
+          const compiled = applyBlueprintOutlineCompilation(current, {
+            blueprintId: typeof input.blueprintId === 'string' ? input.blueprintId : undefined,
+            title: typeof input.title === 'string' ? input.title : undefined,
+            entry: String(input.entry),
+            chapters: input.chapters as never,
+            routes: input.routes as never,
+          }, pillarContract)
+          if (!compiled.ok) return compiled
+          const errors = [
+            // Outline freezes graph intent before the rules catalog exists;
+            // defer entity/variable/formula reference checks to rules.binding.
+            ...validateDocument(compiled.document, { deferReferenceErrors: true }),
+            ...choiceConsequenceIssues(compiled.document, { requireChoice: false })
+              .map((entry) => entry.message),
+          ]
+          if (errors.length > 0) {
+            return { ok: false, errors, errorCode: 'validation.failed' }
+          }
+          const revision = nextDocumentRevision(currentRevision)
+          const nextReceipts = appendMutationReceipt(receipts, mutationReceipt(
+            idempotencyKey,
+            'compile-blueprint-outline',
+            fingerprint,
+            revision,
+            {
+              blueprintId: compiled.blueprintId,
+              nodeCount: compiled.nodeCount,
+              edgeCount: compiled.edgeCount,
+              commandCount: compiled.commandCount,
+            },
+          ))
+          await context.files.write(
+            BLUEPRINT_FILE,
+            encoder.encode(JSON.stringify(stampDocumentRevision(
+              compiled.document,
+              revision,
+              nextReceipts,
+              { previous: readScopeRevisions(bytes), touched: ['graph'] },
+            ), null, 2)),
+          )
+          const currentManifest = await readHostManifest(context.files)
+          await syncVideoPresetManifestIfChanged(context, currentManifest, compiled.document)
+          return {
+            ok: true,
+            revision,
+            blueprintId: compiled.blueprintId,
+            nodeCount: compiled.nodeCount,
+            edgeCount: compiled.edgeCount,
+            commandCount: compiled.commandCount,
+          }
+        },
+      )
+      if (!outcome.ok) {
+        if ('conflict' in outcome) return conflictResult(outcome.conflict, context.gameId)
+        return {
+          schemaVersion: 1,
+          ok: false,
+          errors: outcome.errors,
+          ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
+          ...(outcome.failedPath ? { failedPath: outcome.failedPath } : {}),
+          ...(!('currentRevision' in outcome) || outcome.currentRevision === undefined
+            ? {}
+            : { currentRevision: outcome.currentRevision }),
+          ...('snapshotToken' in outcome && outcome.snapshotToken
+            ? { snapshotToken: outcome.snapshotToken }
+            : {}),
+          gameSlug: context.gameId,
+        }
+      }
+      if (stagedPlan) {
+        await clearBlueprintOutlineStage(context, stagedPlan.planId, stagedPlan.fingerprint)
+      }
+      const validation = await validateProjectForActivity(
+        context,
+        'blueprint.outline',
+        workflow?.activityRevision ?? 0,
+        activityContract('blueprint.outline').hardChecks,
+        workflow,
+      )
+      const result = {
+        schemaVersion: 1,
+        ok: true,
+        revision: outcome.revision,
+        replayed: outcome.replayed ?? false,
+        nodeCount: outcome.nodeCount,
+        edgeCount: outcome.edgeCount,
+        commandCount: outcome.commandCount,
+        readyToComplete: validation.ok,
+        artifactRef: artifactRef(outcome.blueprintId, outcome.revision),
+        validation: validation.summary,
+        failedChecks: validation.evidence
+          .filter((entry) => entry.status === 'fail')
+          .map((entry) => entry.checkId),
+        uiHint: {
+          location: { kind: 'blueprint', blueprintId: outcome.blueprintId } as PageLocation,
+          reveal: 'select-and-expand',
+        },
+        versions: [],
+        gameSlug: context.gameId,
+      }
+      if (workflow) {
+        await setWorkflowFocus(context, {
+          activityRevision: workflow.activityRevision,
+          location: result.uiHint.location,
           reason: 'artifact-created',
         }).catch(() => undefined)
       }
@@ -2152,7 +3356,7 @@ export function createGameVideoService(
         workflow,
         activityRevision,
         ['video.presets.binding'],
-        ['node.media'],
+        ['node.media', 'videos'],
       )
 
       const bindings = input.bindings as NodeMediaBinding[]
@@ -2229,29 +3433,32 @@ export function createGameVideoService(
             }
           }
 
+          const expectedGraphRevision = input.expectedGraphRevision as number
           if (
             input.graphSnapshotToken
-            !== graphSnapshotToken(context.gameId, currentGraphRevision)
+            !== graphSnapshotToken(context.gameId, expectedGraphRevision)
           ) {
             return failed('snapshot.stale', [
-              'snapshot.stale：节点媒体绑定所依据的 blueprint snapshot 已过期，请重新 get_graph 读取目标节点。',
+              'snapshot.stale：graphSnapshotToken 与 expectedGraphRevision 不是同一次 get_graph 读取结果。',
             ])
           }
-          const graphConflict = revisionConflict(
-            input.expectedGraphRevision as number,
+          const graphConflict = scopedRevisionConflict(
+            expectedGraphRevision,
             currentGraphRevision,
+            readScopeRevisions(bytes),
+            ['node.media'],
           )
           if (graphConflict) {
             return failed(graphConflict.code, [graphConflict.message])
           }
-          const assetConflict = revisionConflict(
+          const assetConflict = assetManifestScopedRevisionConflict(
             input.expectedAssetRevision as number,
             currentAssetRevision,
+            assetSnapshot.scopeRevisions,
+            ['videos'],
           )
           if (assetConflict) {
-            return failed(assetConflict.code, [
-              assetConflict.message.replace('蓝图', '资产清单'),
-            ])
+            return failed(assetConflict.code, [assetConflict.message])
           }
 
           const bindingErrors = bindings.flatMap((binding) => (
@@ -2367,12 +3574,18 @@ export function createGameVideoService(
     async patchRules(value) {
       assertSchema('patchRules', value)
       const input = record(value)
+      const ruleActivities = ['rules.catalog', 'game.finalizing', 'playtest.validating'] as const
       const { state: workflow, activityRevision } = await readWorkflowStateForMutation(
         context,
-        ['rules.catalog', 'game.finalizing'],
+        ruleActivities,
         input.activityRevision,
       )
-      assertWorkflowMutationAllowed(workflow, activityRevision, ['rules.catalog', 'game.finalizing'], ['rules'])
+      assertBlueprintMutationAllowed(
+        workflow,
+        activityRevision,
+        ruleActivities,
+        ['rules'],
+      )
       const expectedRevision = optionalRevision(input.expectedRevision)
       const idempotencyKey = optionalIdempotencyKey(input.idempotencyKey)
       const ops = input.ops as RuleOp[]
@@ -2488,7 +3701,7 @@ export function createGameVideoService(
         uiHint: rulesUiHint(ops, outcome.results),
         gameSlug: context.gameId,
       }
-      if (workflow) {
+      if (workflow && !isPostDeliveryAuthoringMaintenance(workflow)) {
         await setWorkflowFocus(context, {
           activityRevision: workflow.activityRevision,
           location: result.uiHint.location as PageLocation,
@@ -2501,7 +3714,7 @@ export function createGameVideoService(
       assertSchema('listVideos', value)
       record(value)
       return {
-        videos: NODIA_ASSETS_MANIFEST.assets.map((asset) => asset.id),
+        videos: [],
       }
     },
     async listAssets(value) {
@@ -2858,19 +4071,189 @@ export function createGameVideoService(
       const slug = stringValue(input.slug, 'slug', true)!
       try {
         const previous = await readHostDocument(context, `doc-${documentType}`)
-        const nextContent = input.content === undefined ? undefined : String(input.content)
+        if (documentType === 'core' && previous?.content) {
+          const workflow = await readWorkflowState(context)
+          const coreApproved = workflow?.gates.core?.status === 'approved'
+          const pillarActive = workflow?.activity === 'document.pillar'
+            || workflow?.activities['document.pillar']?.status === 'working'
+          const hasSelectedOption = /(?:^|\n)[ \t]{0,4}selected_option:\s*[A-C]\b/u.test(previous.content)
+          if ((coreApproved || pillarActive) && hasSelectedOption) {
+            const existingRef = previous.document.provider.ref
+            return {
+              document: null,
+              error: `document.core.rewrite-forbidden: a valid core already exists at ${existingRef}; reuse it during pillar design and do not upsert_document(core) or change the slug`,
+              failedChecks: ['document.core.rewrite-forbidden'],
+            }
+          }
+        }
+        let nextContent = input.content === undefined ? undefined : String(input.content)
+        let pillarWorkflow: VideoGameWorkflowState | null | undefined
+        let pillarIncomplete: { missingBeatIds: string[]; nextBeatIds: string[] } | undefined
+        let mergedContract: PillarInteractionContract | undefined
+        if (documentType === 'pillar') {
+          // A pillar belongs to one activity generation. Requiring the caller
+          // to echo that generation prevents a delayed retry from overwriting
+          // the document produced by a newer rework.
+          const { state: workflow, activityRevision } = await readWorkflowStateForMutation(
+            context,
+            ['document.pillar'],
+            input.activityRevision,
+          )
+          pillarWorkflow = workflow
+          if (workflow && input.activityRevision === undefined) {
+            return {
+              document: null,
+              error: 'pillar upsert requires the current activityRevision; read get_workflow_state and retry',
+              failedChecks: ['workflow.activity.stale'],
+            }
+          }
+          assertWorkflowMutationAllowed(workflow, activityRevision, ['document.pillar'], ['documents'])
+          if (input.contract !== undefined || nextContent !== undefined) {
+            const incoming = input.contract !== undefined && input.contract !== null
+              ? JSON.stringify(input.contract)
+              : (nextContent ?? '')
+            if (incoming.length > PILLAR_CONTENT_HARD_LIMIT) {
+              return { document: null, error: pillarContentOversizeError(incoming.length) }
+            }
+            const patchSource = input.contract !== undefined && input.contract !== null
+              ? `\`\`\`pillar-interaction-contract\n${JSON.stringify(input.contract)}\n\`\`\``
+              : nextContent!
+            let patch: PillarInteractionContract
+            try {
+              patch = parsePillarInteractionContract(patchSource, { authoring: true })
+            } catch (error) {
+              const messages = error instanceof PillarContractError
+                ? error.issues
+                : [publicErrorMessage(error)]
+              return {
+                document: null,
+                error: messages.join('; '),
+                failedChecks: ['document.pillar.ready'],
+                issues: messages.map((message) => ({
+                  level: 'error' as const,
+                  code: 'document.pillar.interaction-contract-invalid',
+                  message,
+                })),
+              }
+            }
+            const base = parseAuthoringPillar(previous?.content)
+            const skeleton = derivePillarSkeleton(pillarWorkflow?.requirementContract)
+            const offBatch = rejectOffBatchPillarPatch(
+              skeleton,
+              base,
+              patch.beats.map((beat) => beat.id),
+            )
+            if (offBatch) {
+              return {
+                document: null,
+                error: offBatch.error,
+                nextBeatIds: [...offBatch.nextBeatIds],
+                failedChecks: ['document.pillar.batch-too-wide'],
+              }
+            }
+            mergedContract = mergePillarContracts(base, patch)
+            nextContent = composePillarDocument(mergedContract)
+          }
+        }
+        // Per-call IR size is gated above. The composed author document plus fence
+        // may grow past that as patches merge; that is Host output, not a tool argument.
+        const registerOnlyRef = documentType === 'design-options'
+          ? `docs/${slug}_design_options.md`
+          : `docs/${slug}_${documentType}.md`
+        const registerOnlyBytes = nextContent === undefined && !previous
+          ? await context.files.read(registerOnlyRef)
+          : null
+        const candidateContent = nextContent
+          ?? previous?.content
+          ?? (registerOnlyBytes ? decoder.decode(registerOnlyBytes) : undefined)
+        const preflightIssues = documentType === 'pillar'
+          ? documentSubstanceIssues('pillar', candidateContent, pillarWorkflow)
+          : []
+        const hardIssues = preflightIssues.filter((item) => item.level === 'error')
+        const persistableIncomplete = hardIssues.length > 0
+          && hardIssues.every((item) => item.code === 'document.pillar.incomplete')
+        if (hardIssues.length > 0 && !persistableIncomplete) {
+          // 终局拍一旦写进合并结果，骨架就齐了，编译失败也会走到这里。
+          // 若因此 document:null，B10 永远落不了盘，peer 只能对着缺拍的旧稿重试。
+          // 合并后的 IR 先落盘，编译/可玩性问题作为 issues 返回，不推进活动。
+          if (documentType === 'pillar' && nextContent !== undefined) {
+            const document = await upsertHostDocument(context, {
+              documentType: documentType as DocumentType,
+              slug,
+              content: nextContent,
+              ...(input.name === undefined ? {} : { name: stringValue(input.name, 'name') }),
+            })
+            return {
+              document: {
+                id: document.id,
+                name: document.name,
+                documentType: document.meta.documentType,
+                updatedAt: document.updatedAt,
+              },
+              error: hardIssues.map((item) => `${item.code}: ${item.message}`).join('; '),
+              failedChecks: ['document.pillar.ready'],
+              issues: hardIssues,
+            }
+          }
+          return {
+            document: null,
+            error: hardIssues.map((item) => `${item.code}: ${item.message}`).join('; '),
+            failedChecks: ['document.pillar.ready'],
+            issues: hardIssues,
+          }
+        }
+        if (persistableIncomplete) {
+          const skeleton = derivePillarSkeleton(pillarWorkflow?.requirementContract)
+          const source = mergedContract ?? parseAuthoringPillar(candidateContent) ?? {
+            schemaVersion: 4 as const,
+            beats: [],
+          }
+          const next = nextPillarWriteBatch(skeleton, source)
+          pillarIncomplete = {
+            missingBeatIds: missingBeatIds(source, skeleton.beats.map((beat) => beat.id)),
+            nextBeatIds: [...(next?.beatIds ?? [])],
+          }
+        }
         const document = await upsertHostDocument(context, {
           documentType: documentType as DocumentType,
           slug,
           ...(nextContent === undefined ? {} : { content: nextContent }),
           ...(input.name === undefined ? {} : { name: stringValue(input.name, 'name') }),
         })
-        // 产物落盘即凭据:阶段推进不依赖 Agent 记得单独调 begin_activity。
-        await autoAdvanceWorkflowForDocument(context, document.meta.documentType, {
-          reworkCompletedTarget: documentType === 'pillar'
-            && nextContent !== undefined
-            && previous?.content !== nextContent,
-        })
+        // 骨架未写齐的 IR 只落盘，不推进活动、不编译。
+        if (!pillarIncomplete) {
+          await autoAdvanceWorkflowForDocument(context, document.meta.documentType, {
+            reworkCompletedTarget: documentType === 'pillar'
+              && nextContent !== undefined
+              && previous?.content !== nextContent,
+          })
+        }
+        // 支柱通过验收就等于「编译得出蓝图」，此刻把那张图落盘。作者确认的因此是
+        // 一份已经建好的图，而不是一份等着下游 LLM 重画的承诺。
+        let compiledBlueprint: { revision: number; nodeCount: number; edgeCount: number } | undefined
+        if (documentType === 'pillar' && !pillarIncomplete) {
+          const contentForCompile = nextContent ?? previous?.content
+          if (contentForCompile !== undefined) {
+            const committed = await commitCompiledPillar(context, contentForCompile)
+            if (committed.ok) {
+              compiledBlueprint = {
+                revision: committed.revision,
+                nodeCount: committed.nodeCount,
+                edgeCount: committed.edgeCount,
+              }
+            }
+            // 编译失败不推翻这次文档写入：上面的 `document.pillar.ready` 已经拦下
+            // 不可编译的支柱，能走到这里的失败属于编译器缺陷，作为 issue 暴露。
+            else {
+              preflightIssues.push(...committed.issues.map((item) => ({
+                level: 'error' as const,
+                code: item.code,
+                message: item.message,
+                location: { kind: 'document' as const, documentType: 'pillar' as const },
+              })))
+            }
+          }
+        }
         return {
           document: {
             id: document.id,
@@ -2878,6 +4261,16 @@ export function createGameVideoService(
             documentType: document.meta.documentType,
             updatedAt: document.updatedAt,
           },
+          ...(compiledBlueprint ? { blueprint: compiledBlueprint } : {}),
+          ...(preflightIssues.length > 0 ? { issues: preflightIssues } : {}),
+          ...(pillarIncomplete
+            ? {
+              incomplete: true,
+              missingBeatIds: pillarIncomplete.missingBeatIds,
+              nextBeatIds: pillarIncomplete.nextBeatIds,
+              error: hardIssues.map((item) => `${item.code}: ${item.message}`).join('; '),
+            }
+            : {}),
         }
       } catch (error) {
         return { document: null, error: publicErrorMessage(error) }

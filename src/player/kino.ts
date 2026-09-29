@@ -2,7 +2,8 @@ import type { RuntimeAsset } from './package'
 
 export const ARRIVAL_KINO_BASE = 'http://localhost:10005/api/v1/kino'
 
-const MEDIA_TYPES = ['video', 'audio', 'image'] as const
+export const KINO_MEDIA_TYPES = ['video', 'audio', 'image'] as const
+export type KinoMediaType = typeof KINO_MEDIA_TYPES[number]
 const PAGE_SIZE = 100
 const PLAYABLE_LOCATOR = /^(?:https?:|blob:|data:|\/)/
 
@@ -28,7 +29,7 @@ function parsePage(value: unknown): RuntimeAsset[] {
 
 async function loadMediaType(
   gameId: string,
-  mediaType: typeof MEDIA_TYPES[number],
+  mediaType: KinoMediaType,
   request: typeof fetch,
   signal?: AbortSignal,
 ): Promise<RuntimeAsset[]> {
@@ -56,8 +57,9 @@ export async function loadKinoAssetLocators(
   gameId: string,
   request: typeof fetch = globalThis.fetch,
   signal?: AbortSignal,
+  mediaTypes: readonly KinoMediaType[] = KINO_MEDIA_TYPES,
 ): Promise<RuntimeAsset[]> {
   return (await Promise.all(
-    MEDIA_TYPES.map((mediaType) => loadMediaType(gameId, mediaType, request, signal)),
+    mediaTypes.map((mediaType) => loadMediaType(gameId, mediaType, request, signal)),
   )).flat()
 }

@@ -8,10 +8,11 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { useT } from '../../../i18n'
-import {
-  gvaImageUrl,
-  uploadReferenceImage,
-} from '../image-assets'
+import closeIcon from '@/editor/shell/rule-dialog-close.svg?url'
+import { createAssetCatalogOperations } from '../asset-catalog-operations'
+import { catalogRootTarget, type CatalogTabKind } from '../asset-catalog'
+import { gvaImageUrl } from '../image-assets'
+import { useAdaptiveCatalogGrid } from '../../shell/useAdaptiveCatalogGrid'
 import type { MediaAsset } from '@/authoring/assets/registry-types'
 
 export type VgenImageKind = 'character_ref' | 'scene_ref' | 'keyframe'
@@ -35,16 +36,18 @@ export interface VgenImagePickerProps {
   onClose: () => void
   /** Keeps the parent dialog's dismissal guard in sync with an in-flight upload. */
   onUploadingChange?: (uploading: boolean) => void
-  uploadRegistryImage?: (gameSlug: string, file: File) => Promise<MediaAsset>
+  uploadRegistryImage?: (gameSlug: string, file: File, kind: VgenImageKind) => Promise<MediaAsset>
 }
 
-type PickerTab = 'all' | VgenImageKind
+type PickerTab = VgenImageKind
 
 const IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp'
 const ALLOWED_IMAGE_MIMES = new Set(IMAGE_ACCEPT.split(','))
 
-function uploadSceneReference(gameSlug: string, file: File): Promise<MediaAsset> {
-  return uploadReferenceImage(gameSlug, file, 'scene')
+function catalogTabFor(kind: VgenImageKind): Extract<CatalogTabKind, 'image' | 'character' | 'scene'> {
+  if (kind === 'character_ref') return 'character'
+  if (kind === 'scene_ref') return 'scene'
+  return 'image'
 }
 
 export function VgenImagePicker({
@@ -55,11 +58,12 @@ export function VgenImagePicker({
   onPick,
   onClose,
   onUploadingChange,
-  uploadRegistryImage = uploadSceneReference,
+  uploadRegistryImage,
 }: VgenImagePickerProps): JSX.Element | null {
   const t = useT()
   const titleId = useId()
-  const [tab, setTab] = useState<PickerTab>('all')
+  const catalogOperations = useMemo(() => createAssetCatalogOperations(), [])
+  const [tab, setTab] = useState<PickerTab>('keyframe')
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const closeRef = useRef<HTMLButtonElement | null>(null)
@@ -75,7 +79,7 @@ export function VgenImagePicker({
     ) {
       previousFocusRef.current = activeElement
     }
-    setTab('all')
+    setTab('keyframe')
     setError(null)
     onUploadingChange?.(false)
     closeRef.current?.focus()
@@ -105,9 +109,14 @@ export function VgenImagePicker({
   }, [onClose, open, uploading])
 
   const filteredAssets = useMemo(
-    () => tab === 'all' ? imageAssets : imageAssets.filter((asset) => asset.kind === tab),
+    () => imageAssets.filter((asset) => asset.kind === tab),
     [imageAssets, tab],
   )
+  const grid = useAdaptiveCatalogGrid({
+    itemCount: filteredAssets.length,
+    cardWidth: 140,
+    minColumnGap: 47,
+  })
   const hasUnavailableAssets = requireResourceId
     && filteredAssets.some((asset) => !asset.resourceId)
 
@@ -125,7 +134,20 @@ export function VgenImagePicker({
     setUploading(true)
     onUploadingChange?.(true)
     try {
-      const registered = await uploadRegistryImage(gameSlug, file)
+      const targetTabKind = catalogTabFor(tab)
+      const registered = uploadRegistryImage
+        ? await uploadRegistryImage(gameSlug, file, tab)
+        : await catalogOperations.uploadAndRegister({
+          gameId: gameSlug,
+          location: {
+            kind: 'tab-root',
+            tabKind: targetTabKind,
+            target: catalogRootTarget(targetTabKind) as `root:${typeof targetTabKind}`,
+          },
+          file,
+          kind: 'image',
+          targetTabKind,
+        })
       const pickerAsset = toVgenImageAsset(registered, gameSlug)
       if (requireResourceId && !pickerAsset.resourceId) {
         throw new Error(t('videoAssets.generate.uploadReferenceFailed'))
@@ -165,35 +187,60 @@ export function VgenImagePicker({
             disabled={uploading}
             onClick={onClose}
           >
-            ✕
+            <img src={closeIcon} alt="" />
           </button>
         </div>
-        <div className="vgen-picker-tabs" role="tablist" aria-label={t('videoAssets.generate.picker.categories')}>
-          {([
-            ['all', 'videoAssets.generate.picker.all'],
-            ['character_ref', 'videoAssets.generate.picker.character'],
-            ['scene_ref', 'videoAssets.generate.picker.scene'],
-            ['keyframe', 'videoAssets.generate.picker.keyframe'],
-          ] as const).map(([value, key]) => (
-            <button
-              key={value}
-              type="button"
-              className="vgen-picker-tab"
-              role="tab"
-              aria-selected={tab === value}
-              onClick={() => setTab(value)}
-            >
-              {t(key)}
-            </button>
-          ))}
+        <div className="vgen-picker-divider" />
+        <div className="vgen-picker-toolbar">
+          <div className="vgen-picker-tabs" role="tablist" aria-label={t('videoAssets.generate.picker.categories')}>
+            {([
+              ['keyframe', 'videoAssets.generate.picker.keyframe'],
+              ['character_ref', 'videoAssets.generate.picker.character'],
+              ['scene_ref', 'videoAssets.generate.picker.scene'],
+            ] as const).map(([value, key]) => (
+              <button
+                key={value}
+                type="button"
+                className="vgen-picker-tab"
+                role="tab"
+                aria-selected={tab === value}
+                onClick={() => setTab(value)}
+              >
+                {t(key)}
+              </button>
+            ))}
+          </div>
+          <div className="vgen-picker-foot">
+            <label className="vgen-import" aria-disabled={uploading}>
+              {uploading ? (
+                <span>{t('videoAssets.generate.uploadingReference')}</span>
+              ) : (
+                <>
+                  <span className="vgen-import-icon" aria-hidden="true">+</span>
+                  <span>{t('videoAssets.generate.picker.import')}</span>
+                </>
+              )}
+              <input
+                type="file"
+                accept={IMAGE_ACCEPT}
+                aria-label={t('videoAssets.generate.picker.import')}
+                disabled={uploading}
+                onChange={(event) => void onFileChange(event)}
+              />
+            </label>
+          </div>
         </div>
-        <div className="vgen-picker-grid" role="tabpanel">
+        <div
+          ref={grid.ref}
+          style={grid.style}
+          className={`vgen-picker-grid${filteredAssets.length === 0 ? ' is-empty' : ''}`}
+          role="tabpanel"
+        >
           {filteredAssets.map((asset) => (
             <button
               key={asset.id}
               type="button"
               className="vgen-picker-item"
-              style={asset.thumbUrl ? { backgroundImage: `url(${JSON.stringify(asset.thumbUrl)})` } : undefined}
               aria-label={asset.label}
               disabled={requireResourceId && !asset.resourceId}
               title={requireResourceId && !asset.resourceId
@@ -201,7 +248,8 @@ export function VgenImagePicker({
                 : undefined}
               onClick={() => onPick(asset)}
             >
-              <span>{asset.label}</span>
+              <span className="vgen-picker-item-thumb" style={asset.thumbUrl ? { backgroundImage: `url(${JSON.stringify(asset.thumbUrl)})` } : undefined} />
+              <span className="vgen-picker-item-label">{asset.label}</span>
             </button>
           ))}
           {filteredAssets.length === 0 ? (
@@ -213,19 +261,7 @@ export function VgenImagePicker({
             {t('videoAssets.generate.referenceUnavailable')}
           </div>
         ) : null}
-        <div className="vgen-picker-foot">
-          <label className="vgen-import" aria-disabled={uploading}>
-            <span>{uploading ? t('videoAssets.generate.uploadingReference') : `＋ ${t('videoAssets.generate.picker.import')}`}</span>
-            <input
-              type="file"
-              accept={IMAGE_ACCEPT}
-              aria-label={t('videoAssets.generate.picker.import')}
-              disabled={uploading}
-              onChange={(event) => void onFileChange(event)}
-            />
-          </label>
-          {error ? <div className="vgen-import-error vgen-error" role="alert">{error}</div> : null}
-        </div>
+        {error ? <div className="vgen-import-error vgen-error" role="alert">{error}</div> : null}
       </section>
     </div>
   )

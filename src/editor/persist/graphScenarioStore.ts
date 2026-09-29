@@ -4,7 +4,6 @@
  *
  * 持久化模型：SSOT = 远端 tip（`blueprint.json` + Host package）。
  * 进入只信 tip；平时 debounce Flush tip；关页 Flush tip + 内部 checkpoint。
- * 用户版本仅主动打 tag；恢复旧版走 restore 写回 tip。
  */
 import { create, useStore } from 'zustand'
 import { temporal } from 'zundo'
@@ -14,28 +13,32 @@ import type {
   BlueprintDoc, GameGraph, GameScenario, GraphLibraryDocument, GraphTextStylePreset, Overlay, ScenarioMetaFields, UiTree, UiTreeNode,
 } from '@/runtime/core/schema/graph-schema'
 import type { TextStyleGroup } from '../text/text-style'
-import { loadStore, saveProject, clearDraft, loadDraft, commitVersion, checkpointTip, currentVersion, listVersions, restoreVersionToTip, type VersionEntry, type GameVersion } from './persist-client'
+import { loadStore, saveProject, checkpointTip } from './persist-client'
 import { computeGraphLayout } from '@/authoring/graph/graph-layout'
 import { validateGraph } from '@/runtime/core/validate/validate'
-import { ensureBuiltinSchemes } from '@/authoring/demo/builtin-schemes'
+import { ensureBuiltinSchemes } from '@/authoring/overlays/builtin-schemes'
 import { recompileFormulaUsages } from '@/authoring/formulas/formula-apply'
 import type { Formula } from '@/authoring/blueprint/formula-authoring'
-import { toEditorScenarioDocument, toRuntimeScenario } from '@/authoring/blueprint/formula-authoring'
+import { toRuntimeScenario } from '@/authoring/blueprint/formula-authoring'
 import { renameScenarioId, type ScenarioIdRename } from './scenario-id'
 import {
-  documentFromBlueprints, documentFromScenario, emptyBlueprintDoc,
+  documentFromBlueprints,
   metaFromDocument, normalizeDocument as normalizeAuthoringDocument, playDocument,
 } from '@/authoring/blueprint/blueprint-project'
-import { isBlueprintTitleTaken } from './blueprint-title'
+import {
+  createBlueprint as createBlueprintInLibrary,
+  deleteBlueprint as deleteBlueprintInLibrary,
+  renameBlueprint as renameBlueprintInLibrary,
+  setMainBlueprint as setMainBlueprintInLibrary,
+} from '@/authoring/blueprint/blueprint-library-edit'
 import { resolveGraphEntry } from '@/runtime/core/schema/graph-schema'
-import { blueprintsReferencing, findReferenceCycle } from '@/authoring/graph/blueprint-refs'
+import { findReferenceCycle } from '@/authoring/graph/blueprint-refs'
 import { resolveEntryAfterGraphChange } from '@/authoring/graph/graph-scope'
 import { bootComponents } from '@/runtime/react/component-host'
-import { NODIA_DEMO_PROJECT } from '@/authoring/demo/demo'
+import { EMPTY_LIBRARY_DOCUMENT } from '@/authoring/blueprint/empty-library'
 import {
   addUiTreeFolder as addTreeFolder,
   addUiTreeScheme as addTreeScheme,
-  BASIC_UI_FOLDER_ID,
   collectUiTreeNodeIds,
   ensureUiTree,
   findUiTreeNode,
@@ -62,16 +65,6 @@ function normalizeDocument(
   return normalizeAuthoringDocument(document, {
     legacyMainTitle: translateUi('ui.object.ecd1fd7c870b'),
   })
-}
-
-/** 载入 demo / 文档时保证基础覆盖物存在——用于 reset()/首次落座。 */
-function withBuiltinSchemes<T extends GameScenario>(s: T): T {
-  const overlays = ensureBuiltinSchemes(s.ui?.overlays)
-  return {
-    ...s,
-    ui: { ...s.ui, overlays },
-    uiTree: ensureUiTree((s as T & { uiTree?: UiTree }).uiTree, overlays),
-  } as T
 }
 
 /** 位置全 0（未布局）→ dagre 自动排一版；只对当前蓝图根图生效。 */
@@ -153,15 +146,6 @@ function isLibraryDocument(v: unknown): v is GraphLibraryDocument {
   return !!d && typeof d === 'object' && !!d.manifest?.packs && typeof d.manifest.mainPackId === 'string'
 }
 
-/** 出厂 demo → 库文档。已是库文档则规范化；否则把根 graph 收成仅含 main 的 manifest。 */
-function seedDocumentFromDemo(demo: GameScenario): GraphLibraryDocument {
-  if (isLibraryDocument(demo)) return normalizeLoadedDocument(demo, demo)
-  const laid = withBuiltinSchemes(layoutIfUnset(structuredClone(demo)))
-  return documentFromScenario(toEditorScenarioDocument(laid)!, {
-    mainTitle: translateUi('ui.object.ecd1fd7c870b'),
-  })
-}
-
 interface GraphScenarioStore {
   game: string
   demo: GameScenario | null
@@ -174,16 +158,9 @@ interface GraphScenarioStore {
   /** 当前选中蓝图的图（= `blueprints[activeBlueprintId].graph`，随选中/编辑同步维护）。 */
   graph: GameGraph
   meta: ScenarioMetaFields
-  versions: VersionEntry[]
-  /** 当前基于的已保存版本 id（草稿态时仍指其基版本，供下拉高亮"当前"）。 */
-  currentVersionId: string | null
-  /** 游戏仓当前最新版本 tag（game-host git，如 `v3`）；无仓/无版本为 null。 */
-  currentTag: string | null
-  /** 该游戏所有 git 版本（vN，最新在前）；供版本下拉。 */
-  gameVersions: GameVersion[]
   isDraft: boolean
   booted: boolean
-  /** 每次「载入内容」（boot / 切版本 / 重置）自增；宿主据此清空撤销历史，避免撤销穿越版本。 */
+  /** 每次「载入内容」（boot / tip 同步）自增；宿主据此清空撤销历史，避免撤销穿越远端内容。 */
   loadEpoch: number
   savedTip: string
   fitSignal: number
@@ -202,7 +179,7 @@ interface GraphScenarioStore {
    * 落盘不要用这个。
    */
   playScn: (rootBlueprintId?: string) => GameScenario
-  /** 首次进入某 game 时载入远端 tip；已 boot 同 game 则跳过。demo 仅供「重置」。 */
+  /** 首次进入某 game 时载入远端 tip；已 boot 同 game 则跳过。empty library 供 entities/variables 缺省回填。 */
   ensureBoot: (game: string, demo?: GameScenario) => Promise<void>
   setGraph: (g: GameGraph | ((g: GameGraph) => GameGraph)) => void
   setMeta: (m: ScenarioMetaFields | ((m: ScenarioMetaFields) => ScenarioMetaFields)) => void
@@ -244,14 +221,6 @@ interface GraphScenarioStore {
   /** 改写指定蓝图的图（不要求它是当前选中）——供画布下钻编辑子蓝图包用。 */
   updateBlueprintGraph: (id: string, g: GameGraph | ((g: GameGraph) => GameGraph)) => void
   save: () => number
-  /** 保存并对游戏仓打新版本（annotated tag vN）；返回新 tag 或 null。 */
-  commit: (message?: string) => Promise<string | null>
-  /** 刷新版本列表（游戏仓 git tags）。 */
-  refreshVersions: () => Promise<void>
-  /** 将用户版本 restore 写回 tip，再载入编辑器（SSOT 变为该内容）。 */
-  loadVersion: (tag: string) => Promise<void>
-  pick: (value: string) => void
-  reset: () => void
   applyLayout: () => void
   bumpRun: () => void
   /** Reload Host tip into the store when clean and revision changed (agent patch_graph). */
@@ -441,10 +410,6 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     activeBlueprintId: '',
     graph: EMPTY_GRAPH,
     meta: {},
-    versions: [],
-    currentVersionId: null,
-    currentTag: null,
-    gameVersions: [],
     isDraft: false,
     booted: false,
     loadEpoch: 0,
@@ -466,7 +431,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       return toRuntimeScenario(playDocument(st.authoringProject(), rootId))
     },
 
-    ensureBoot: (game, demo = NODIA_DEMO_PROJECT) => {
+    ensureBoot: (game, demo = EMPTY_LIBRARY_DOCUMENT) => {
       const st = get()
       if (st.booted && st.game === game) {
         // 已 boot：补 demo 引用；旧草稿曾把 entities 抹成 undefined 的，从 demo 填回 meta。
@@ -502,8 +467,6 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
               activeBlueprintId: mainId,
               meta: metaFromDocument(norm),
               graph: norm.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
-              versions: s.versions,
-              currentVersionId: s.versions[0]?.id ?? null,
               loadEpoch: cur.loadEpoch + 1,
             }))
           }
@@ -515,8 +478,6 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
           applyDoc(s.project)
           cleanFingerprint = projectFingerprint(get().authoringProject())
           set({ isDraft: false, booted: true })
-          void currentVersion(game).then((cv) => set({ currentTag: cv.tag }))
-          void listVersions(game).then((vs) => set({ gameVersions: vs }))
         } catch (cause) {
           if (get().game === game) set({ booted: false })
           throw cause
@@ -640,12 +601,13 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     createBlueprint: (title) => {
       const st = get()
       const resolved = (title ?? '新蓝图').trim() || '新蓝图'
-      if (isBlueprintTitleTaken(st.blueprints, resolved)) {
+      const created = createBlueprintInLibrary(st.blueprints, { title: resolved })
+      if (!created.ok) {
         return { ok: false, reason: 'duplicate_title' }
       }
-      const doc = emptyBlueprintDoc({ title: resolved })
+      const doc = created.blueprint
       set((s) => ({
-        blueprints: { ...s.blueprints, [doc.id]: doc },
+        blueprints: created.blueprints,
         activeBlueprintId: doc.id,
         graph: doc.graph,
         selectedNodeId: null,
@@ -658,13 +620,15 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     },
     renameBlueprint: (id, title) => {
       const st = get()
-      if (!st.blueprints[id]) return { ok: false, reason: 'not_found' }
-      const nextTitle = title.trim()
-      if (!nextTitle) return { ok: false, reason: 'not_found' }
-      if (isBlueprintTitleTaken(st.blueprints, nextTitle, id)) {
-        return { ok: false, reason: 'duplicate_title' }
+      const renamed = renameBlueprintInLibrary(st.blueprints, id, title)
+      if (!renamed.ok) {
+        return {
+          ok: false,
+          reason: renamed.reason === 'duplicate_title' ? 'duplicate_title' : 'not_found',
+        }
       }
-      set({ blueprints: { ...st.blueprints, [id]: { ...st.blueprints[id]!, title: nextTitle } } })
+      const nextTitle = renamed.blueprints[id]!.title
+      set({ blueprints: renamed.blueprints })
       scheduleDraft()
       broadcastBlueprintIntent({ type: 'renamed', id, title: nextTitle })
       return { ok: true }
@@ -688,9 +652,10 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     setMainBlueprint: (id) => {
       let changed = false
       set((st) => {
-        if (!st.blueprints[id] || st.mainBlueprintId === id) return {}
+        const result = setMainBlueprintInLibrary(st.blueprints, id)
+        if (!result.ok || st.mainBlueprintId === id) return {}
         changed = true
-        return { mainBlueprintId: id }
+        return { mainBlueprintId: result.mainBlueprintId }
       })
       if (changed) {
         scheduleDraft()
@@ -699,11 +664,9 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     },
     deleteBlueprint: (id) => {
       const st = get()
-      if (id === st.mainBlueprintId) return { ok: false, blockedBy: ['__main__'] }
-      const refs = blueprintsReferencing(st.authoringProject(), id)
-      if (refs.length) return { ok: false, blockedBy: refs }
-      const next = { ...st.blueprints }
-      delete next[id]
+      const deleted = deleteBlueprintInLibrary(st.blueprints, st.mainBlueprintId, id)
+      if (!deleted.ok) return { ok: false, blockedBy: deleted.blockedBy }
+      const next = deleted.blueprints
       const nextActive = st.activeBlueprintId === id ? st.mainBlueprintId : st.activeBlueprintId
       set({ blueprints: next, activeBlueprintId: nextActive, graph: next[nextActive]?.graph ?? EMPTY_GRAPH })
       scheduleDraft()
@@ -774,7 +737,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       const overlays = st.meta.ui?.overlays ?? {}
       const tree = ensureUiTree(st.meta.uiTree, overlays)
       const node = findUiTreeNode(tree, nodeId)
-      if (!node || node.id === BASIC_UI_FOLDER_ID) return false
+      if (!node) return false
       if (node.kind === 'folder') {
         const nextTree = renameTreeFolder(tree, node.id, trimmed)
         if (nextTree === tree) return false
@@ -807,7 +770,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       if (!node) return false
       const removedOverlayIds = collectOverlayIdsFrom(node)
       const removedNodeIds = collectNodeIdsFrom(node)
-      if (node.id === BASIC_UI_FOLDER_ID || removedOverlayIds.some((id) => id.startsWith('base:'))) return false
+      if (removedOverlayIds.some((id) => id.startsWith('base:'))) return false
       const nextTree = removeTreeNode(tree, node.id)
       if (nextTree === tree) return false
       const nextOverlays = { ...overlays }
@@ -835,111 +798,6 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     save: () => {
       const r = runSave()
       return r.blocked ? -1 : r.errs
-    },
-
-    pick: (value) => {
-      // 从「未保存草稿」切到别的版本 → 提示会丢失。
-      if (get().isDraft && value !== '__draft__' && typeof confirm === 'function') {
-        if (!confirm('当前有未保存的修改，切换版本后会丢失。继续？')) return
-      }
-      const apply = (doc: GraphLibraryDocument | null) => {
-        if (!isLibraryDocument(doc)) return
-        clearDraftTimer()
-        const demo = get().demo
-        const norm = demo ? normalizeLoadedDocument(doc, demo) : normalizeDocument(doc)
-        const mainId = norm.manifest.mainPackId
-        set((st) => ({
-          blueprints: norm.manifest.packs,
-          mainBlueprintId: mainId,
-          activeBlueprintId: mainId,
-          meta: metaFromDocument(norm),
-          graph: norm.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
-          loadEpoch: st.loadEpoch + 1,
-          ...(value !== '__draft__' ? { currentVersionId: value } : {}),
-        }))
-        scheduleDraft()
-      }
-      // game-host 下产品不做版本回退（版本=git tag，入口只用最新）：仅支持回到未保存草稿。
-      if (value === '__draft__') apply(loadDraft(get().game))
-    },
-
-    // 打一个新版本：先保存当前包（await 落盘完成），再对游戏仓打 annotated tag vN（git add -A 会把
-    // 已 seed 的 components/ 一并纳入版本）。产品只用最新，不回退。
-    commit: async (message?: string) => {
-      const r = runSave()
-      if (r.blocked) return null
-      const ok = await r.done // 等 blueprint 真落盘，避免 git 提交漏掉最新内容
-      if (!ok) {
-        set({ savedTip: '打版本中止 · 保存失败' })
-        return null
-      }
-      const cv = await commitVersion(get().game, message)
-      if (cv?.tag) {
-        set({ currentTag: cv.tag, savedTip: `已打版本 ${cv.tag}` })
-        void listVersions(get().game).then((vs) => set({ gameVersions: vs }))
-      } else set({ savedTip: '打版本失败 · 请检查 game-host 端点' })
-      return cv?.tag ?? null
-    },
-
-    refreshVersions: async () => {
-      set({ gameVersions: await listVersions(get().game) })
-    },
-
-    // Restore user version onto tip, then reload editor from restored tip.
-    loadVersion: async (tag: string) => {
-      const game = get().game
-      const doc = await restoreVersionToTip(game, tag)
-      if (!isLibraryDocument(doc)) {
-        set({ savedTip: `恢复 ${tag} 失败` })
-        return
-      }
-      clearDraftTimer()
-      // Refresh tip revision after restore mutated Host tip.
-      try {
-        const reloaded = await loadStore(game)
-        tipRevision = reloaded.revision
-      } catch {
-        tipRevision = null
-      }
-      const demo = get().demo
-      const norm = demo ? normalizeLoadedDocument(doc, demo) : normalizeDocument(doc)
-      const mainId = norm.manifest.mainPackId
-      set((st) => ({
-        blueprints: norm.manifest.packs,
-        mainBlueprintId: mainId,
-        activeBlueprintId: mainId,
-        meta: metaFromDocument(norm),
-        graph: norm.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
-        currentTag: tag,
-        isDraft: false,
-        loadEpoch: st.loadEpoch + 1,
-        fitSignal: st.fitSignal + 1,
-        savedTip: `已恢复版本 ${tag} 为当前 tip`,
-      }))
-      cleanFingerprint = projectFingerprint(get().authoringProject())
-      void listVersions(game).then((vs) => set({ gameVersions: vs }))
-    },
-
-    // 重置：用内置 demo 替换当前内容（含全部子蓝图）。若与当前版本不同则标未保存草稿。
-    reset: () => {
-      const demo = get().demo
-      if (!demo) return
-      const seed = seedDocumentFromDemo(demo)
-      const mainId = seed.manifest.mainPackId
-      clearDraftTimer()
-      set((st) => ({
-        blueprints: seed.manifest.packs,
-        mainBlueprintId: mainId,
-        activeBlueprintId: mainId,
-        meta: metaFromDocument(seed),
-        graph: seed.manifest.packs[mainId]?.graph ?? EMPTY_GRAPH,
-        currentVersionId: null,
-        savedTip: '已重置为 demo',
-        fitSignal: st.fitSignal + 1,
-        runKey: st.runKey + 1,
-        loadEpoch: st.loadEpoch + 1,
-      }))
-      scheduleDraft()
     },
 
     applyLayout: () => {

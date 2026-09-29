@@ -61,7 +61,7 @@ export function VideoParameters({
     value: option.value,
     label: t(option.labelKey),
   }))
-  const sizeOptions = KINO_VIDEO_SIZES.map((size) => ({ value: size, label: t(sizeKey(size)) }))
+  const sizeOptions = KINO_VIDEO_SIZES.map((size) => ({ value: size, label: sizeLabel(size) }))
   const resolutionOptions = KINO_VIDEO_RESOLUTIONS.map((resolution) => ({
     value: resolution,
     label: t(`generation.parameters.resolution.${resolution}`),
@@ -97,6 +97,7 @@ export function VideoParameters({
           options={resolutionOptions}
           interaction={interaction}
           onChange={(resolution) => onChange({ ...value, resolution })}
+          className="generation-resolution-options"
         />
       </GenerationParameterField>
       <GenerationParameterField label={t('videoAssets.generate.durationShort')} interaction={interaction}>
@@ -219,12 +220,12 @@ function clampDuration(value: number): number {
   )
 }
 
-function sizeKey(size: KinoVideoSize): string {
-  const keys: Record<KinoVideoSize, string> = {
-    '2560x1440': 'videoAssets.generate.ratio16x9',
-    '1440x2560': 'videoAssets.generate.ratio9x16',
-    '2496x1664': 'videoAssets.generate.ratio3x2',
-    '1664x2496': 'videoAssets.generate.ratio2x3',
+function sizeLabel(size: KinoVideoSize): string {
+  const labels: Record<KinoVideoSize, string> = {
+    '2560x1440': '16:9',
+    '1440x2560': '9:16',
+    '2496x1664': '3:2',
+    '1664x2496': '2:3',
   }
-  return keys[size]
+  return labels[size]
 }

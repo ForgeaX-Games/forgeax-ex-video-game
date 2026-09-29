@@ -204,7 +204,7 @@ describe('playtest.validating 硬门集合', () => {
     ])
   })
 
-  it('干净线性蓝图通过全部硬门', async () => {
+  it('结构干净但没有互动选择的线性蓝图不能冒充高质量互动影游', async () => {
     const document = doc({ entry: 'a', nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ id: 'e1', source: 'a', target: 'b' }] })
     const result = await validateProjectForActivity(
       context(document),
@@ -212,7 +212,9 @@ describe('playtest.validating 硬门集合', () => {
       1,
       activityContract('playtest.validating').hardChecks,
     )
-    expect(result.ok, JSON.stringify(result.evidence)).toBe(true)
+    expect(result.ok).toBe(false)
+    expect(result.evidence.flatMap((item) => item.issues ?? []).map((item) => item.code))
+      .toContain('graph.choice.missing')
   })
 
   it('存在死分支时被拦截', async () => {

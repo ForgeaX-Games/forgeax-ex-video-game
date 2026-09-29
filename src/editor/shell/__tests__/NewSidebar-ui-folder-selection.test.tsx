@@ -38,7 +38,7 @@ beforeEach(() => {
       uiTree: {
         root: [
           { kind: 'folder', id: 'ui-folder:basic', name: '基础界面', children: [{ kind: 'scheme', id: 'ui-scheme:scheme-a', overlayId: 'scheme-a' }] },
-          { kind: 'folder', id: 'ui-folder:custom', name: '自定义界面', children: [{ kind: 'scheme', id: 'ui-scheme:scheme-b', overlayId: 'scheme-b' }] },
+          { kind: 'folder', id: 'ui-folder:custom', name: '界面模板', children: [{ kind: 'scheme', id: 'ui-scheme:scheme-b', overlayId: 'scheme-b' }] },
           { kind: 'folder', id: 'ui-folder:test', name: 'test', children: [{ kind: 'scheme', id: 'ui-scheme:scheme-c', overlayId: 'scheme-c' }] },
         ],
       },
@@ -59,7 +59,7 @@ function GraphConfigViewScenario(): JSX.Element {
   const view = useGraphView((state) => state.view)
   const scenario = useGraphScenario.getState().scn()
   if (view === 'ui') {
-    return <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '自定义界面' }]} scenario={scenario} />
+    return <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '界面模板' }]} scenario={scenario} />
   }
   if (view === 'rule') {
     return (
@@ -101,9 +101,10 @@ describe('NewSidebar interface folder selection', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '展开 界面' }))
-    // 展开「基础界面」文件夹（文件夹行点击只展开，不选中），再选中其下方案。
-    fireEvent.click(screen.getByRole('button', { name: '基础界面 文件夹' }))
-    fireEvent.click(screen.getByRole('button', { name: '选择界面方案 方案A' }))
+    // 旧基础界面目录不会再渲染；从界面模板选择方案。
+    expect(screen.queryByRole('button', { name: '基础界面 文件夹' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '展开界面模板' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择界面方案 方案B' }))
 
     // 切到规则 → 公式：每次切走都应清空界面选中。
     fireEvent.click(screen.getByText('规则'))
@@ -114,7 +115,7 @@ describe('NewSidebar interface folder selection', () => {
     // 末态：界面选中被清空。
     expect(useUiSelection.getState().selectedTreeNodeId).toBeNull()
     // 选中方案后到清空之间，不应出现回跳到别的 scheme id（无闪烁）。
-    const schemeIndex = trace.indexOf('ui-scheme:scheme-a')
+    const schemeIndex = trace.indexOf('ui-scheme:scheme-b')
     expect(schemeIndex).toBeGreaterThan(-1)
     expect(trace.slice(schemeIndex + 1)).toEqual([null])
   })

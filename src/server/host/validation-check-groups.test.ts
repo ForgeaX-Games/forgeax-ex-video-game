@@ -14,6 +14,8 @@ describe('validation-check-groups', () => {
       'playtest.paths-not-illegally-stuck',
       'playtest.rules-executable',
       'playtest.numeric-sanity',
+      'finalization.causal-quality',
+      'playtest.semantic-quality',
     ])
   })
 

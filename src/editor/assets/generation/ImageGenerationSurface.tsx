@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import generationEmptyIcon from '@/editor/ui-assets/video-generation-empty.svg?url'
 import generationStyleSwapIcon from '@/editor/ui-assets/video-generation-style-swap.svg?url'
 import generationUndoIcon from '@/editor/ui-assets/video-generation-undo.svg?url'
-import generationSendIcon from '@/editor/ui-assets/video-generation-send.svg?url'
+import generationSubmitIcon from '@/editor/ui-assets/video-generation-submit.svg?url'
+import generationMentionIcon from '@/editor/ui-assets/generation-mention.svg?url'
 import { useT } from '../../../i18n'
 import type { KinoGenerationTask, KinoPromptContentItem } from './generation-api'
 import {
@@ -194,7 +195,7 @@ export function ImageGenerationSurface({
       .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0)),
     [historyAssets, previewKind],
   )
-  const showHistory = historyItems.length > 0
+  const showHistory = targetRoot !== 'image' && targetRoot !== 'icon' && historyItems.length > 0
   const selectedHistoryItem = resultSelection.selectedAssetId
     ? historyItems.find((item) => item.id === resultSelection.selectedAssetId)
     : undefined
@@ -308,7 +309,7 @@ export function ImageGenerationSurface({
         styleIcon={<img src={generationStyleSwapIcon} alt="" />}
         clearIcon={<img src={generationUndoIcon} alt="" />}
         cancelIcon={<img src={generationUndoIcon} alt="" />}
-        submitIcon={<img src={generationSendIcon} alt="" />}
+        submitIcon={<img src={generationSubmitIcon} alt="" />}
         polishSuffix={<i className="igen-polish-chevron" aria-hidden />}
         interaction={{ busy: submissionBusy }}
         cancelWhileEditing={state.tracking && !submissionBusy}
@@ -320,6 +321,7 @@ export function ImageGenerationSurface({
         mentionButtonLabel={t('imageGeneration.mentionButton')}
         mentionPresentation={layout === 'page' ? 'dialog' : 'menu'}
         submitLabel={t('imageGeneration.submit')}
+        mentionIcon={<img src={generationMentionIcon} alt="" />}
         clearLabel={t('imageGeneration.clearPrompt')}
         polishLabel={t('imageGeneration.polishPrompt')}
         polishingLabel={t('imageGeneration.polishingPrompt')}

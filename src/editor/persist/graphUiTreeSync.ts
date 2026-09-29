@@ -25,9 +25,11 @@ import { gameKeySuffix } from './gameScope'
 // 按 game 隔离频道：与 graphBlueprintSync / graphViewSync 同源跨 tab 隔离一致。
 // 后缀在 install 时才求值：进程内挂载的 game 标识由宿主注入，晚于本模块求值。
 const CHANNEL_BASE = 'game-video:graph:ui-tree-sync'
+export const UI_TEMPLATE_COMPOSE_EVENT = 'game-video:ui-template-compose'
 
 export type UiTreeSyncMsg =
   | { type: 'select'; treeNodeId: string | null; overlayId: string | null }
+  | { type: 'template-compose-request' }
   | { type: 'scheme-added'; parentId: string; nodeId: string; overlayId: string; title: string }
   | { type: 'folder-added'; parentId: string | null; nodeId: string; name: string }
   | { type: 'renamed'; nodeId: string; name: string }
@@ -42,6 +44,7 @@ function isSyncMsg(v: unknown): v is UiTreeSyncMsg {
   if (!v || typeof v !== 'object') return false
   const t = (v as { type?: unknown }).type
   return t === 'select'
+    || t === 'template-compose-request'
     || t === 'scheme-added'
     || t === 'folder-added'
     || t === 'renamed'
@@ -55,9 +58,24 @@ export function broadcastUiTreeIntent(msg: UiTreeSyncMsg): void {
   channel?.postMessage(msg)
 }
 
+/** 请求承载模板列表的主区域打开统一的新建弹窗。 */
+export function requestUiTemplateCompose(): void {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    window.dispatchEvent(new Event(UI_TEMPLATE_COMPOSE_EVENT))
+  }))
+  broadcastUiTreeIntent({ type: 'template-compose-request' })
+}
+
 function applyRemote(msg: UiTreeSyncMsg): void {
   const st = useGraphScenario.getState()
   switch (msg.type) {
+    case 'template-compose-request': {
+      useUiSelection.getState().clearUiSelection()
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        window.dispatchEvent(new Event(UI_TEMPLATE_COMPOSE_EVENT))
+      }))
+      return
+    }
     case 'select': {
       // 纯选中意图：直接落到 uiSelection，不动 scenario。
       if (msg.treeNodeId === null) {

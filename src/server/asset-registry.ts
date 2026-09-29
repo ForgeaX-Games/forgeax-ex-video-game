@@ -749,10 +749,14 @@ async function upsertHostDocumentAtRef(
     parseDesignOptions(contentForValidation)
   }
 
-  if (input.content !== undefined) {
-    await context.files.write(ref, textEncoder.encode(input.content))
-  }
   return context.files.withLocks([HOST_MANIFEST_LOCK], async () => {
+    // Keep the document bytes and its manifest registration in one critical
+    // section. Otherwise two full-document upserts can interleave as
+    // file(A) -> file(B) -> manifest(A), leaving metadata that points at a
+    // different version than the bytes on disk.
+    if (input.content !== undefined) {
+      await context.files.write(ref, textEncoder.encode(input.content))
+    }
     const manifest = await readHostManifest(context.files)
     const previous = manifest.assets.find((asset): asset is DocumentRecord => (
       isDocumentRecord(asset) && asset.meta.documentType === input.documentType

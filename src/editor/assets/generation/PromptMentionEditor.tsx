@@ -12,6 +12,7 @@ import {
 import { createPortal } from 'react-dom'
 import type { KinoPromptContentItem } from '@/runtime/core/schema/kino-schema'
 import searchIcon from '@/editor/ui-assets/asset-toolbar-search.svg?url'
+import mentionRemoveIcon from '@/editor/ui-assets/video-generation-chip-remove.svg?url'
 import closeIcon from '../../shell/rule-dialog-close.svg?url'
 import { useT } from '../../../i18n'
 
@@ -452,7 +453,7 @@ function AssetMentionDialog({
             />
           </label>
         </div>
-        <div className="vgen-asset-grid" role="listbox" aria-label={label}>
+        <div className={`vgen-asset-grid${filteredAssets.length === 0 ? ' is-empty' : ''}`} role="listbox" aria-label={label}>
           {filteredAssets.length === 0 ? <div className="vgen-asset-empty">{emptyLabel}</div> : filteredAssets.map((asset) => (
             <button
               key={asset.id}
@@ -513,6 +514,10 @@ function createMentionChip(asset: PromptMentionAsset): HTMLSpanElement {
   remove.tabIndex = -1
   remove.dataset.mentionRemove = 'true'
   remove.setAttribute('aria-label', `Remove ${asset.label}`)
+  const removeIcon = document.createElement('img')
+  removeIcon.src = mentionRemoveIcon
+  removeIcon.alt = ''
+  remove.append(removeIcon)
   chip.append(preview, at, name, remove)
   return chip
 }

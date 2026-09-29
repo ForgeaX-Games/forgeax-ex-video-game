@@ -6,7 +6,7 @@ import { collectNodeTimelineMarkers } from '../nodeTimelineMarkers'
 /**
  * AI 生成的 blueprint 会把出边 `edge.data.condition` 的写法套到 reaction 顶层，
  * 或者给 state 触发器留一个没有 `all` 的 condition。这类脏数据由
- * `runtime.shape.valid` 报错，但硬门可被 waivedAfterRetries 放行，
+ * `runtime.shape.valid` 报错，但历史项目里已经存着这样的图，
  * 所以编辑器必须能把它渲染成「未配置条件」而不是抛 TypeError 崩掉整页。
  */
 function seed(reactions: Reaction[]): { scenario: GameScenario; node: GameNode } {

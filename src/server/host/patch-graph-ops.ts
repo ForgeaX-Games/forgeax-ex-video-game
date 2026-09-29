@@ -10,15 +10,18 @@ import type {
 } from '@/runtime/core/schema/graph-schema'
 import { normalizeDocument } from '@/authoring/blueprint/blueprint-project'
 import {
-  addNode,
+  createBlueprint as createBlueprintInLibrary,
+  deleteBlueprint as deleteBlueprintInLibrary,
+  renameBlueprint as renameBlueprintInLibrary,
+  setMainBlueprint as setMainBlueprintInLibrary,
+  withBlueprintLibrary,
+} from '@/authoring/blueprint/blueprint-library-edit'
+import {
   attachSubProcess,
-  connect,
-  disconnect,
+  duplicateNodes,
   insertNodeAfter,
-  makeEmptySubFlowPack,
+  insertNodeBefore,
   patchNodeData,
-  removeNode,
-  updateEdgeData,
   type ConnectSpec,
   type NodeDataPatch,
 } from '@/authoring/graph/graph-edit'
@@ -33,6 +36,10 @@ import {
 } from '@/authoring/graph/overlay-edit'
 import { wouldCreateCycle } from '@/authoring/graph/blueprint-refs'
 import { patchNodeBgm } from '@/authoring/audio/bgm-authoring'
+import {
+  executeBlueprintGraphCommands,
+  type BlueprintGraphCommand,
+} from '@/authoring/commands/blueprint-graph-command'
 
 export type PatchGraphInput = {
   blueprintId?: string
@@ -42,6 +49,16 @@ export type PatchGraphInput = {
 export type PatchGraphApplyResult =
   | { ok: true; document: GraphLibraryDocument; applied: number }
   | { ok: false; errors: string[]; failedOpIndex?: number }
+
+function executeTopologyCommand(
+  graph: GameGraph,
+  command: BlueprintGraphCommand,
+  opIndex: number,
+): GameGraph {
+  const result = executeBlueprintGraphCommands(graph, [command])
+  if (!result.ok) throw new Error(`op[${opIndex}] ${result.errors.join('; ')}`)
+  return result.graph
+}
 
 function recordOrNull(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -55,7 +72,7 @@ function overlayNodesWrittenByOp(op: Record<string, unknown>): unknown | undefin
     const patch = recordOrNull(op.patch)
     return patch && Object.hasOwn(patch, 'overlayNodes') ? patch.overlayNodes : undefined
   }
-  if (kind === 'add-node' || kind === 'insert-node-after') {
+  if (kind === 'add-node' || kind === 'insert-node-after' || kind === 'insert-node-before') {
     const node = recordOrNull(op.node)
     const data = recordOrNull(node?.data)
     return data && Object.hasOwn(data, 'overlayNodes') ? data.overlayNodes : undefined
@@ -66,7 +83,20 @@ function overlayNodesWrittenByOp(op: Record<string, unknown>): unknown | undefin
 /** UI writes include helper ops and direct writes through NodeData.overlayNodes. */
 export function graphOpTouchesUi(op: Record<string, unknown>): boolean {
   const kind = String(op.op ?? '')
-  return kind.includes('overlay') || overlayNodesWrittenByOp(op) !== undefined
+  return kind.includes('overlay') || kind === 'duplicate-nodes' || overlayNodesWrittenByOp(op) !== undefined
+}
+
+/** 支柱到总脉络的玩法设计只允许在 blueprint.outline 写入；后续活动只能编译和接线。 */
+export function graphOpTouchesInteractionDesign(op: Record<string, unknown>): boolean {
+  const kind = String(op.op ?? '')
+  if (kind === 'set-node-data') return Object.hasOwn(recordOrNull(op.patch) ?? {}, 'interaction')
+  if (kind === 'add-node' || kind === 'insert-node-after' || kind === 'insert-node-before') {
+    return Object.hasOwn(recordOrNull(recordOrNull(op.node)?.data) ?? {}, 'interaction')
+  }
+  if (kind === 'connect' || kind === 'update-edge-data') {
+    return Object.hasOwn(recordOrNull(op.data) ?? {}, 'design')
+  }
+  return kind === 'duplicate-nodes'
 }
 
 /**
@@ -239,12 +269,14 @@ export function applyPatchGraphOps(
           }
         } else if (field === 'position') {
           const pos = op.value as { x: number; y: number }
-          graph = {
-            ...graph,
-            nodes: graph.nodes.map((n) =>
-              n.id === nodeId ? { ...n, position: { x: pos.x, y: pos.y } } : n,
-            ),
+          if (!Number.isFinite(pos?.x) || !Number.isFinite(pos?.y)) {
+            throw new Error(`op[${i}] position must contain finite x/y`)
           }
+          graph = executeTopologyCommand(graph, {
+            op: 'set-node-position',
+            nodeId,
+            position: { x: pos.x, y: pos.y },
+          }, i)
         } else {
           throw new Error(`unsupported field: ${field}`)
         }
@@ -262,20 +294,62 @@ export function applyPatchGraphOps(
         const node = structuredClone(op.node) as GameNode
         if (!node || typeof node !== 'object') throw new Error(`op[${i}] missing node`)
         if (!node.id) node.id = `n-${randomUUID()}`
-        doc = withPackGraph(doc, packId, addNode(graph, node))
+        doc = withPackGraph(doc, packId, executeTopologyCommand(graph, { op: 'add-node', node }, i))
       } else if (kind === 'remove-node') {
         const nodeId = requireString(op, 'nodeId', i)
         requireNode(graph, nodeId)
-        doc = withPackGraph(doc, packId, removeNode(graph, nodeId))
+        doc = withPackGraph(doc, packId, executeTopologyCommand(graph, { op: 'remove-node', nodeId }, i))
       } else if (kind === 'insert-node-after') {
         const afterId = requireString(op, 'afterId', i)
         requireNode(graph, afterId)
         const inserted = insertNodeAfter(graph, afterId, {
           name: typeof op.name === 'string' ? op.name : undefined,
           gapX: typeof op.gapX === 'number' ? op.gapX : undefined,
+          gapY: typeof op.gapY === 'number' ? op.gapY : undefined,
+          sourceHandle: typeof op.sourceHandle === 'string' ? op.sourceHandle : undefined,
+          position: op.position as { x: number; y: number } | undefined,
           node: op.node as GameNode | undefined,
         })
         doc = withPackGraph(doc, packId, inserted.graph)
+      } else if (kind === 'insert-node-before') {
+        const beforeId = requireString(op, 'beforeId', i)
+        requireNode(graph, beforeId)
+        const inserted = insertNodeBefore(graph, beforeId, {
+          name: typeof op.name === 'string' ? op.name : undefined,
+          gapX: typeof op.gapX === 'number' ? op.gapX : undefined,
+          gapY: typeof op.gapY === 'number' ? op.gapY : undefined,
+          position: op.position as { x: number; y: number } | undefined,
+          node: op.node as GameNode | undefined,
+        })
+        doc = withPackGraph(doc, packId, inserted.graph)
+      } else if (kind === 'duplicate-nodes') {
+        const copies = op.copies as Array<{ sourceId?: unknown; targetId?: unknown }>
+        if (!Array.isArray(copies) || copies.length === 0) throw new Error(`op[${i}] missing copies`)
+        const sourceIds: string[] = []
+        const nodeIdForSource: Record<string, string> = {}
+        const targetIds = new Set<string>()
+        for (const [copyIndex, copy] of copies.entries()) {
+          const sourceId = String(copy?.sourceId ?? '')
+          const targetId = String(copy?.targetId ?? '')
+          if (!sourceId || !targetId) throw new Error(`op[${i}].copies[${copyIndex}] missing sourceId/targetId`)
+          requireNode(graph, sourceId)
+          if (sourceId in nodeIdForSource) throw new Error(`op[${i}] duplicate sourceId: ${sourceId}`)
+          if (targetIds.has(targetId) || graph.nodes.some((node) => node.id === targetId)) {
+            throw new Error(`node already exists: ${targetId}`)
+          }
+          sourceIds.push(sourceId)
+          targetIds.add(targetId)
+          nodeIdForSource[sourceId] = targetId
+        }
+        const offset = op.offset as { x?: unknown; y?: unknown } | undefined
+        if (offset && (!Number.isFinite(offset.x) || !Number.isFinite(offset.y))) {
+          throw new Error(`op[${i}] offset must contain finite x/y`)
+        }
+        const duplicated = duplicateNodes(graph, sourceIds, {
+          ...(offset ? { offset: { x: Number(offset.x), y: Number(offset.y) } } : {}),
+          nodeIdForSource,
+        })
+        doc = withPackGraph(doc, packId, duplicated.graph)
       } else if (kind === 'connect') {
         const spec: ConnectSpec = {
           source: requireString(op, 'source', i),
@@ -287,15 +361,33 @@ export function applyPatchGraphOps(
         }
         requireNode(graph, spec.source)
         requireNode(graph, spec.target)
-        doc = withPackGraph(doc, packId, connect(graph, spec))
+        doc = withPackGraph(doc, packId, executeTopologyCommand(graph, { op: 'connect', spec }, i))
+      } else if (kind === 'reconnect') {
+        const edgeId = requireString(op, 'edgeId', i)
+        requireEdge(graph, edgeId)
+        const patch = {
+          ...(typeof op.source === 'string' ? { source: op.source } : {}),
+          ...(typeof op.target === 'string' ? { target: op.target } : {}),
+          ...(typeof op.sourceHandle === 'string' ? { sourceHandle: op.sourceHandle } : {}),
+          ...(typeof op.targetHandle === 'string' ? { targetHandle: op.targetHandle } : {}),
+        }
+        if (Object.keys(patch).length === 0) throw new Error(`op[${i}] reconnect patch is empty`)
+        const before = graph.edges.find((edge) => edge.id === edgeId)!
+        requireNode(graph, patch.source ?? before.source)
+        requireNode(graph, patch.target ?? before.target)
+        doc = withPackGraph(doc, packId, executeTopologyCommand(graph, {
+          op: 'reconnect', edgeId, patch,
+        }, i))
       } else if (kind === 'disconnect') {
         const edgeId = requireString(op, 'edgeId', i)
         requireEdge(graph, edgeId)
-        doc = withPackGraph(doc, packId, disconnect(graph, edgeId))
+        doc = withPackGraph(doc, packId, executeTopologyCommand(graph, { op: 'disconnect', edgeId }, i))
       } else if (kind === 'update-edge-data') {
         const edgeId = requireString(op, 'edgeId', i)
         requireEdge(graph, edgeId)
-        doc = withPackGraph(doc, packId, updateEdgeData(graph, edgeId, op.data as EdgeRouting))
+        doc = withPackGraph(doc, packId, executeTopologyCommand(graph, {
+          op: 'update-edge-data', edgeId, data: op.data as EdgeRouting,
+        }, i))
       } else if (kind === 'patch-node-bgm') {
         const nodeId = requireString(op, 'nodeId', i)
         const node = graph.nodes.find((item) => item.id === nodeId)
@@ -371,6 +463,53 @@ export function applyPatchGraphOps(
         if (!(formulaId in formulas)) throw new Error(`formula not found: ${formulaId}`)
         delete formulas[formulaId]
         doc = normalizeDocument({ ...doc, formulas })
+      } else if (kind === 'create-blueprint' || kind === 'make-empty-sub-flow-pack') {
+        const title = typeof op.title === 'string'
+          ? op.title
+          : kind === 'make-empty-sub-flow-pack'
+            ? 'Sub blueprints'
+            : '新蓝图'
+        const created = createBlueprintInLibrary(doc.manifest.packs, {
+          title,
+          ...(typeof op.id === 'string' ? { id: op.id } : {}),
+        })
+        if (!created.ok) throw new Error(`cannot create blueprint: ${created.reason}`)
+        const version = typeof op.version === 'string'
+          ? op.version
+          : kind === 'make-empty-sub-flow-pack'
+            ? '1'
+            : undefined
+        const blueprint = version ? { ...created.blueprint, version } : created.blueprint
+        doc = withBlueprintLibrary(doc, {
+          ...created.blueprints,
+          [blueprint.id]: blueprint,
+        })
+      } else if (kind === 'rename-blueprint') {
+        const targetId = requireString(op, 'id', i)
+        const title = requireString(op, 'title', i)
+        const renamed = renameBlueprintInLibrary(doc.manifest.packs, targetId, title)
+        if (!renamed.ok) throw new Error(`cannot rename blueprint ${targetId}: ${renamed.reason}`)
+        doc = withBlueprintLibrary(doc, renamed.blueprints)
+      } else if (kind === 'delete-blueprint') {
+        const targetId = requireString(op, 'id', i)
+        if (targetId === packId) {
+          throw new Error(`cannot delete mutation context blueprint ${targetId}; use another blueprintId`)
+        }
+        const deleted = deleteBlueprintInLibrary(
+          doc.manifest.packs,
+          doc.manifest.mainPackId,
+          targetId,
+        )
+        if (!deleted.ok) {
+          const blockers = deleted.blockedBy?.length ? ` (${deleted.blockedBy.join(', ')})` : ''
+          throw new Error(`cannot delete blueprint ${targetId}: ${deleted.reason}${blockers}`)
+        }
+        doc = withBlueprintLibrary(doc, deleted.blueprints)
+      } else if (kind === 'set-main-blueprint') {
+        const targetId = requireString(op, 'id', i)
+        const selected = setMainBlueprintInLibrary(doc.manifest.packs, targetId)
+        if (!selected.ok) throw new Error(`cannot set main blueprint ${targetId}: ${selected.reason}`)
+        doc = withBlueprintLibrary(doc, doc.manifest.packs, selected.mainBlueprintId)
       } else if (kind === 'attach-sub-process') {
         const nodeId = requireString(op, 'nodeId', i)
         requireNode(graph, nodeId)
@@ -397,19 +536,6 @@ export function applyPatchGraphOps(
           subProcess: undefined,
           subFlowPack: { id: targetId, version: target.version, ...(entry ? { entry } : {}) },
         }))
-      } else if (kind === 'make-empty-sub-flow-pack') {
-        const pack = makeEmptySubFlowPack({
-          id: typeof op.id === 'string' ? op.id : undefined,
-          title: typeof op.title === 'string' ? op.title : 'Sub blueprints',
-          version: typeof op.version === 'string' ? op.version : undefined,
-        })
-        doc = normalizeDocument({
-          ...doc,
-          manifest: {
-            ...doc.manifest,
-            packs: { ...doc.manifest.packs, [pack.id]: pack },
-          },
-        })
       } else {
         throw new Error(`unsupported op: ${kind}`)
       }

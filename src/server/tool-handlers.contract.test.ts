@@ -1,7 +1,7 @@
 import type { ExtensionContext } from '@forgeax/extension-host/node'
 import type { ServiceCapability, VideoGenerationGateway } from '@forgeax/extension-host/contracts'
 import { describe, expect, test } from 'vitest'
-import { NODIA_DEMO_PROJECT } from '@/authoring/demo/demo'
+import { EMPTY_LIBRARY_DOCUMENT } from '@/authoring/blueprint/empty-library'
 import tools from './tool-handlers'
 import { createInitialWorkflowState } from './host/workflow-state'
 
@@ -71,7 +71,7 @@ function createContext(gameId = 'contract-game') {
 describe('host tool context contract', () => {
   test('persists graph data only through its injected bounded host context', async () => {
     const { context, entries } = createContext()
-    const project = structuredClone(NODIA_DEMO_PROJECT)
+    const project = structuredClone(EMPTY_LIBRARY_DOCUMENT)
 
     await expect(tools['game-video:save-graph']!(
       context,
@@ -93,11 +93,11 @@ describe('host tool context contract', () => {
     })
   })
 
-  test('lists extension-owned bundled media without a filesystem host field', async () => {
+  test('lists no bundled performance videos', async () => {
     const { context } = createContext()
 
-    await expect(tools['game-video:list-videos']!(context, {})).resolves.toMatchObject({
-      videos: expect.arrayContaining(['idle01']),
+    await expect(tools['game-video:list-videos']!(context, {})).resolves.toEqual({
+      videos: [],
     })
   })
 
@@ -217,6 +217,12 @@ describe('host tool context contract', () => {
       label: '选项按钮',
       inputs: [{ key: 'label', label: '文字', valueType: 'string', default: '选项' }],
       events: [{ id: 'select', label: '选择' }],
+      gameplaySemantics: {
+        roles: ['player-choice'], purpose: '承载剧情选项', stateBindings: [],
+        eventSemantics: [{ event: 'select', intent: '选择选项', requiredConsequences: ['feedback', 'advance'], stateMutationOwner: 'settlement', downstreamPayoff: '下游呈现选择结果' }],
+        requiredCompanions: [], recommendedSettlements: ['choice-event-route'],
+        requiredFeedback: ['选择后锁定'], antiPatterns: ['无差异合流'],
+      },
       implementation: "function OptionButton(props) { return React.createElement('button', { onClick: function () { props.emit?.('select') } }, props.label) }",
     })).resolves.toMatchObject({
       ok: true,
@@ -233,6 +239,10 @@ describe('host tool context contract', () => {
     await expect(tools['game-video:upsert-component']!(context, {
       id: 'OptionButton',
       events: [],
+      gameplaySemantics: {
+        roles: ['narrative-display'], purpose: '测试控件', stateBindings: [], eventSemantics: [],
+        requiredCompanions: [], recommendedSettlements: [], requiredFeedback: [], antiPatterns: [],
+      },
       implementation: "function OptionButton() { var React = React; return React.createElement('button') }",
     })).rejects.toMatchObject({
       ok: false,

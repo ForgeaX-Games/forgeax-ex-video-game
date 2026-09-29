@@ -6,6 +6,32 @@ import type { VideoGameWorkflowState } from '../../workflow/contracts'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
+const PILLAR_CONTENT = '```pillar-interaction-contract\n'
+  + '{"schemaVersion":2,"beats":[{"id":"B01","narrativeIntent":"武松识破猛虎扑击并发动轻击","playerInformation":["猛虎正在扑击","敌方当前生命值"],"uiCapabilities":["战斗输入"],"actions":[{"id":"light","intent":"观众点轻击，趁老虎扑空时打它","stateMutationOwner":"settlement","stateChange":"降低敌方生命","immediateFeedback":"敌方血条下降并显示受击反馈","downstreamPayoff":"下游视频播放猛虎中拳后退","exitIntent":"进入轻击结果演出"}],"settlements":[{"id":"light-result","sourceActionId":"light","trigger":"at","source":"轻击结果视频 1000ms 命中帧","intent":"应用轻击伤害","feedback":"敌方血条下降并显示受击反馈","exitIntent":"继续结果演出"}]}]}\n```'
+
+const resultPlan = {
+  beat: 'narrative' as const,
+  sourcePillarBeatId: 'B01',
+  narrativeIntent: '武松识破猛虎扑击并发动轻击',
+  playerInformation: ['猛虎正在扑击', '敌方当前生命值'],
+  settlements: [{
+    id: 'light-result',
+    sourcePillarSettlementId: 'light-result',
+    sourcePillarActionId: 'light',
+    pattern: 'timeline-hit-sync',
+    trigger: 'at' as const,
+    triggerSpec: { type: 'at' as const, ms: 1000 },
+    source: '轻击结果视频 1000ms 命中帧',
+    intent: '应用轻击伤害',
+    feedback: '敌方血条下降并显示受击反馈',
+    feedbackSpec: {
+      kind: 'state-binding' as const,
+      component: 'BattleEnemyHpBar',
+      target: 'entity.tiger.attr.hp',
+    },
+    exitIntent: '继续结果演出',
+  }],
+}
 
 /**
  * 玩法契约的**通链**测试：写得进去、读得出来、三段闸门依次消费。
@@ -38,8 +64,17 @@ const seed = {
               position: { x: 200, y: 0 },
               data: { name: '虎扑', chapterSummary: '猛虎扑来', storyText: '一声吼' },
             },
+            {
+              id: 'result',
+              type: 'scene',
+              position: { x: 400, y: 0 },
+              data: { name: '轻击结果', chapterSummary: '猛虎中拳后退', storyText: '虎退半步', interaction: resultPlan },
+            },
           ],
-          edges: [{ id: 'e1', source: 'entry', target: 'clash', sourceHandle: 'default', data: {} }],
+          edges: [
+            { id: 'e1', source: 'entry', target: 'clash', sourceHandle: 'default', data: {} },
+            { id: 'e-light', source: 'clash', target: 'result', sourceHandle: 'light', data: {} },
+          ],
         },
       },
     },
@@ -72,7 +107,15 @@ function contextFor(activity: string): { context: ExtensionContext, files: Map<s
   }
   const files = new Map<string, Uint8Array>([
     ['blueprint.json', encoder.encode(JSON.stringify(seed))],
-    ['assets/manifest.json', encoder.encode(JSON.stringify({ version: 2, assets: [] }))],
+    ['docs/test_pillar.md', encoder.encode(PILLAR_CONTENT)],
+    ['assets/manifest.json', encoder.encode(JSON.stringify({
+      version: 2,
+      assets: [{
+        id: 'pillar', kind: 'document', name: 'pillar', status: 'ready', mimeType: 'text/markdown',
+        provider: { kind: 'local', ref: 'docs/test_pillar.md' }, createdAt: 1, updatedAt: 1,
+        meta: { documentType: 'pillar' },
+      }],
+    }))],
     [VIDEO_GAME_WORKFLOW_FILE, encoder.encode(JSON.stringify(state))],
   ])
   const context = {
@@ -90,13 +133,25 @@ function contextFor(activity: string): { context: ExtensionContext, files: Map<s
 
 const plan = {
   beat: 'combat',
+  sourcePillarBeatId: 'B01',
+  narrativeIntent: '武松识破猛虎扑击并发动轻击',
+  playerInformation: ['猛虎正在扑击', '敌方当前生命值'],
   actions: [{
+    sourcePillarActionId: 'light',
+    stateMutationOwner: 'settlement',
     component: 'BattleSkill',
     event: 'light',
     intent: '观众点轻击，趁老虎扑空时打它',
+    stateChangeIntent: '降低敌方生命',
+    feedback: '敌方血条下降并显示受击反馈',
+    feedbackSpec: { kind: 'state-binding', component: 'BattleEnemyHpBar', target: 'entity.tiger.attr.hp' },
+    downstreamPayoff: '下游视频播放猛虎中拳后退',
+    exitIntent: '进入轻击结果演出',
     effect: { target: 'entity.tiger.attr.hp', op: 'sub', formulaId: 'dmg_light' },
-    exit: 'none',
+    exit: 'light',
+    targetNodeId: 'result',
   }],
+  loop: { backTo: 'clash', note: '双方仍存活时进入下一回合' },
   terminals: [{ when: 'entity.tiger.attr.hp <= 0', note: '武松取胜' }],
 }
 
@@ -107,8 +162,8 @@ describe('玩法契约通链', () => {
 
     const result = await service.patchGraph({
       ops: [
-        { op: 'connect', id: 'branch-left', source: 'clash', target: 'entry', sourceHandle: 'option_left', targetHandle: 'in' },
-        { op: 'connect', id: 'branch-right', source: 'clash', target: 'entry', sourceHandle: 'option_right', targetHandle: 'in' },
+        { op: 'connect', id: 'branch-left', source: 'result', target: 'entry', sourceHandle: 'option_left', targetHandle: 'in' },
+        { op: 'connect', id: 'branch-right', source: 'result', target: 'entry', sourceHandle: 'option_right', targetHandle: 'in' },
       ],
     }) as { ok: boolean, errorCode?: string, errors?: string[] }
 

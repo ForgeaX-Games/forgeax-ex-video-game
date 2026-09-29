@@ -12,6 +12,10 @@ import listAssetsSchema from '../../../schemas/list-assets.args.json'
 import upsertDocumentSchema from '../../../schemas/upsert-document.args.json'
 import listVideosSchema from '../../../schemas/list-videos.args.json'
 import patchGraphSchema from '../../../schemas/patch-graph.args.json'
+import compileBlueprintOutlineSchema from '../../../schemas/compile-blueprint-outline.args.json'
+import createBlueprintOutlineSkeletonSchema from '../../../schemas/create-blueprint-outline-skeleton.args.json'
+import configureBlueprintOutlineNodeSchema from '../../../schemas/configure-blueprint-outline-node.args.json'
+import configureBlueprintNodeSchema from '../../../schemas/configure-blueprint-node.args.json'
 import patchNodeMediaSchema from '../../../schemas/patch-node-media.args.json'
 import patchRulesSchema from '../../../schemas/patch-rules.args.json'
 import saveGraphSchema from '../../../schemas/save-graph.args.json'
@@ -38,6 +42,10 @@ export type ServiceSchemaName =
   | 'getGraph'
   | 'saveGraph'
   | 'patchGraph'
+  | 'compileBlueprintOutline'
+  | 'createBlueprintOutlineSkeleton'
+  | 'configureBlueprintOutlineNode'
+  | 'configureBlueprintNode'
   | 'patchNodeMedia'
   | 'patchRules'
   | 'listAssets'
@@ -75,6 +83,10 @@ const validators: Record<ServiceSchemaName, ValidateFunction> = {
   getGraph: ajv.compile(getGraphSchema),
   saveGraph: ajv.compile(saveGraphSchema),
   patchGraph: ajv.compile(patchGraphSchema),
+  compileBlueprintOutline: ajv.compile(compileBlueprintOutlineSchema),
+  createBlueprintOutlineSkeleton: ajv.compile(createBlueprintOutlineSkeletonSchema),
+  configureBlueprintOutlineNode: ajv.compile(configureBlueprintOutlineNodeSchema),
+  configureBlueprintNode: ajv.compile(configureBlueprintNodeSchema),
   patchNodeMedia: ajv.compile(patchNodeMediaSchema),
   patchRules: ajv.compile(patchRulesSchema),
   listAssets: ajv.compile(listAssetsSchema),

@@ -45,6 +45,11 @@ describe('project component deletion route', () => {
     await upsertAuthoredComponent(context, {
       id: 'CountdownTimer',
       events: [],
+      gameplaySemantics: {
+        roles: ['timed-input'], purpose: '展示倒计时', stateBindings: [], eventSemantics: [],
+        requiredCompanions: [], recommendedSettlements: ['timed-decision'],
+        requiredFeedback: ['持续显示剩余时间'], antiPatterns: ['归零没有结果'],
+      },
       implementation: "function CountdownTimer() { return React.createElement('span') }",
     })
 
@@ -64,6 +69,11 @@ describe('project component deletion route', () => {
     await upsertAuthoredComponent(context, {
       id: 'CountdownTimer',
       events: [],
+      gameplaySemantics: {
+        roles: ['timed-input'], purpose: '展示倒计时', stateBindings: [], eventSemantics: [],
+        requiredCompanions: [], recommendedSettlements: ['timed-decision'],
+        requiredFeedback: ['持续显示剩余时间'], antiPatterns: ['归零没有结果'],
+      },
       implementation: "function CountdownTimer() { return React.createElement('span') }",
     })
     files.set('blueprint.json', encoder.encode(JSON.stringify({

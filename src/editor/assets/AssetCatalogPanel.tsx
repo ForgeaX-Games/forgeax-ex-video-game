@@ -5,6 +5,7 @@ import { AssetCardActionsMenu, AssetCardDialog, type AssetCardAnchor } from './A
 import {
   VISIBLE_CATALOG_TAB_KINDS,
   catalogFolderChildren,
+  catalogFolderSubtree,
   catalogItemsIn,
   catalogRootTarget,
   useAssetCatalog,
@@ -29,7 +30,6 @@ import externalToolbarIcon from '@/editor/ui-assets/asset-toolbar-external.svg?u
 import generateToolbarIcon from '@/editor/ui-assets/asset-toolbar-generate.svg?url'
 import localToolbarIcon from '@/editor/ui-assets/asset-toolbar-local.svg?url'
 import ruleToolbarAddIcon from '@/editor/ui-assets/rule-toolbar-add.svg'
-import ruleToolbarSearchIcon from '@/editor/ui-assets/rule-toolbar-search.svg'
 import videoPlayIcon from '@/editor/ui-assets/asset-video-play.svg?url'
 import videoPreviewIcon from '@/editor/ui-assets/asset-video-preview.svg?url'
 import characterPlaceholderIcon from '@/editor/ui-assets/asset-character-placeholder.svg?url'
@@ -42,6 +42,19 @@ import folderThumbnailIcon from '@/editor/ui-assets/asset-folder-thumbnail.svg?u
 import audioWaveformIcon from '@/editor/ui-assets/asset-audio-waveform.svg?url'
 import { revealFirstVideoFrame } from '@/editor/video/revealFirstVideoFrame'
 import { AudioWaveform } from '@/editor/video/audioWaveform'
+import { isProjectComponent, listComponentCatalogEntries, refreshGameComponents } from '@/runtime/react/component-host'
+import { useComponentCatalogRevision } from '../shell/useComponentCatalogRevision'
+import { ComponentThumbnail } from '../shell/ComponentThumbnail'
+import { CatalogSearchInput } from '../shell/CatalogSearchInput'
+import { useAdaptiveCatalogGrid } from '../shell/useAdaptiveCatalogGrid'
+import { forgeaxHost } from '../../platform/HostSdkBridge'
+import { buildAssetCatalogFolderContextReference, buildAssetCatalogItemContextReference } from './asset-catalog-agent-context'
+import agentReferenceIcon from '@/editor/ui-assets/asset-card-agent-reference.svg?url'
+import folderDropHighlightIcon from '@/editor/ui-assets/asset-folder-drop-highlight.svg?url'
+import { assetCatalogClient } from './asset-catalog-client'
+import { deleteProjectComponent } from './project-component-client'
+import { useGraphScenario } from '../persist/graphScenarioStore'
+import { CatalogEmptyState } from '../shell/CatalogEmptyState'
 
 export { ASSET_CATALOG_PANEL_CSS } from './assetCatalogPanelStyles'
 
@@ -56,7 +69,7 @@ const CATALOG_TAB_CAPABILITIES: Record<CatalogTabKind, {
 }> = {
   character: { generation: 'image', localImport: 'image', externalImport: null },
   scene: { generation: 'image', localImport: 'image', externalImport: null },
-  video: { generation: 'video', localImport: 'video', externalImport: 'video' },
+  video: { generation: 'video', localImport: 'video', externalImport: null },
   icon: { generation: 'image', localImport: 'image', externalImport: null },
   control: { generation: 'image', localImport: 'image', externalImport: null },
   audio: { generation: null, localImport: 'audio', externalImport: null },
@@ -126,15 +139,63 @@ type FolderPreviewEntry =
   | { kind: 'folder'; folder: CatalogFolder }
   | { kind: 'item'; row: CatalogItemRow }
 
+type ComponentCatalogEntry = ReturnType<typeof listComponentCatalogEntries>[number]
+
+function controlItemsIn(
+  catalog: ReturnType<typeof useAssetCatalog>['catalog'],
+  target: string,
+  componentEntries: readonly ComponentCatalogEntry[],
+): CatalogItemRow[] {
+  return componentEntries.flatMap(({ manifest }) => {
+    const placementKey = `control:${manifest.id}`
+    const placement = catalog.placements[placementKey] ?? {
+      folderId: catalogRootTarget('control'),
+      sortKey: manifest.label ?? manifest.id,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    if (placement.folderId === 'hidden:control' || placement.folderId !== target) return []
+    return [{
+      placementKey,
+      tabKind: 'control',
+      itemId: manifest.id,
+      name: manifest.label ?? manifest.id,
+      placement,
+      entity: null,
+      asset: null,
+      pendingAsset: null,
+    }]
+  })
+}
+
 function folderPreviewEntries(
   catalog: ReturnType<typeof useAssetCatalog>['catalog'],
   target: string,
   tabKind: CatalogTabKind,
+  componentEntries: readonly ComponentCatalogEntry[],
 ): FolderPreviewEntry[] {
   return [
     ...catalogFolderChildren(catalog, target, tabKind).map((folder): FolderPreviewEntry => ({ kind: 'folder', folder })),
     ...catalogItemsIn(catalog, target, tabKind).map((row): FolderPreviewEntry => ({ kind: 'item', row })),
+    ...(tabKind === 'control'
+      ? controlItemsIn(catalog, target, componentEntries).map((row): FolderPreviewEntry => ({ kind: 'item', row }))
+      : []),
   ].slice(0, 6)
+}
+
+function folderPreviewContent(
+  entry: FolderPreviewEntry,
+  componentEntries: readonly ComponentCatalogEntry[],
+  t: ReturnType<typeof useT>,
+): JSX.Element | null {
+  if (entry.kind === 'folder') return <img className="acp-folder-preview-folder" src={folderThumbnailIcon} alt="" />
+  const component = entry.row.tabKind === 'control'
+    ? componentEntries.find(({ manifest }) => manifest.id === entry.row.itemId)
+    : undefined
+  if (component) return <ComponentThumbnail component={component.component} manifest={component.manifest} />
+  return entry.row.asset?.kind === 'image' || entry.row.asset?.kind === 'video'
+    ? preview(entry.row.asset, '', t)
+    : null
 }
 
 function typePlaceholder(tabKind: CatalogTabKind): JSX.Element | null {
@@ -157,6 +218,9 @@ function typePlaceholder(tabKind: CatalogTabKind): JSX.Element | null {
 export function AssetCatalogPanel({ gameId }: { gameId: string }): JSX.Element {
   const t = useT()
   const { catalog, loading, error, refresh } = useAssetCatalog(gameId)
+  const componentCatalogRevision = useComponentCatalogRevision()
+  const componentEntries = useMemo(() => listComponentCatalogEntries(), [componentCatalogRevision])
+  const removeProjectComponentReferences = useGraphScenario((state) => state.removeProjectComponentReferences)
   const location = useCatalogNav((state) => state.location)
   const setLocation = useCatalogNav((state) => state.setLocation)
   const setView = useGraphView((state) => state.setView)
@@ -207,13 +271,23 @@ export function AssetCatalogPanel({ gameId }: { gameId: string }): JSX.Element {
     const target = location.kind === 'tab-root' ? catalogRootTarget(location.tabKind) : location.target
     const folders = catalogFolderChildren(catalog, target, location.tabKind)
     const items = catalogItemsIn(catalog, target, location.tabKind)
+    const componentItems = location.tabKind === 'control'
+      ? controlItemsIn(catalog, target, componentEntries)
+      : []
     const needle = query.trim().toLocaleLowerCase()
     return {
       title: location.kind === 'tab-root' ? t(TAB_LABEL_KEYS[location.tabKind]) : location.kind === 'folder' ? catalog.folders.find((folder) => folder.id === location.folderId)?.name ?? t('assetCatalog.folder') : '',
       folders: needle ? folders.filter((folder) => folder.name.toLocaleLowerCase().includes(needle)) : folders,
-      items: needle ? items.filter((row) => `${row.name} ${row.entity?.prompt ?? row.asset?.prompt ?? ''}`.toLocaleLowerCase().includes(needle)) : items,
+      items: needle
+        ? [...items, ...componentItems].filter((row) => `${row.name} ${row.entity?.prompt ?? row.asset?.prompt ?? ''}`.toLocaleLowerCase().includes(needle))
+        : [...items, ...componentItems],
     }
-  }, [catalog, location, query, t])
+  }, [catalog, componentEntries, location, query, t])
+  const catalogTabNeedle = query.trim().toLocaleLowerCase()
+  const gridItemCount = location.kind === 'catalog-root'
+    ? VISIBLE_CATALOG_TAB_KINDS.filter((tabKind) => !catalogTabNeedle || t(TAB_LABEL_KEYS[tabKind]).toLocaleLowerCase().includes(catalogTabNeedle)).length
+    : content.folders.length + content.items.length
+  const grid = useAdaptiveCatalogGrid({ itemCount: gridItemCount, cardWidth: 140, minColumnGap: 52 })
 
   const selectedRow = content.items.find((row) => row.placementKey === selectedPlacementKey) ?? null
 
@@ -341,7 +415,8 @@ export function AssetCatalogPanel({ gameId }: { gameId: string }): JSX.Element {
   }
 
   const moveCatalogItem = async (row: CatalogItemRow, folderId: string): Promise<void> => {
-    await mutate(() => operations.moveCatalogItem(row, folderId))
+    const createPlacement = row.tabKind === 'control' && !catalog.placements[row.placementKey]
+    await mutate(() => operations.moveCatalogItem(row, folderId, createPlacement))
   }
 
   const folderDropHandlers = (folder: CatalogFolder) => ({
@@ -387,6 +462,23 @@ export function AssetCatalogPanel({ gameId }: { gameId: string }): JSX.Element {
     onPointerDown={(event) => event.stopPropagation()}
     onClick={(event) => toggleCardMenu(target, event)}
   ><img src={cardMoreIcon} alt="" /></button>
+  const cardReferenceButton = (target: CardTarget): JSX.Element => <button
+    type="button"
+    className="acp-card-reference"
+    aria-label={tf('videoAssets.aiAria', { name: cardTargetName(target) })}
+    title={t('videoAssets.ai')}
+    onPointerDown={(event) => event.stopPropagation()}
+    onClick={() => {
+        if (!forgeaxHost.available) return
+        forgeaxHost.composer.insertReference(target.kind === 'folder'
+          ? buildAssetCatalogFolderContextReference({
+            gameId,
+            folder: target.folder,
+            items: catalogItemsIn(catalog, target.folder.id, target.folder.tabKind),
+          })
+          : buildAssetCatalogItemContextReference({ gameId, row: target.row }))
+    }}
+  ><img src={agentReferenceIcon} alt="" /></button>
 
   // Card rename/delete deliberately bypass `mutate`: the dialog owns the busy
   // state and shows the host's refusal (asset_in_use, folder_not_empty) inline
@@ -396,9 +488,44 @@ export function AssetCatalogPanel({ gameId }: { gameId: string }): JSX.Element {
   }
 
   const submitCardDelete = async (target: CardTarget): Promise<void> => {
-    await operations.deleteCard(target)
-    if (target.kind === 'folder') return
+    const removeControl = async (componentId: string, name: string): Promise<void> => {
+      if (isProjectComponent(componentId)) {
+        const saved = await removeProjectComponentReferences(componentId)
+        if (!saved) throw new Error(t('componentLibrary.delete.saveFailed'))
+        await deleteProjectComponent(componentId)
+        await assetCatalogClient.deleteAsset({ operationId: crypto.randomUUID(), placementKey: `control:${componentId}` })
+      } else {
+        await assetCatalogClient.place({
+          operationId: crypto.randomUUID(),
+          placementKey: `control:${componentId}`,
+          folderId: 'hidden:control',
+          sortKey: name,
+        })
+      }
+    }
+    if (target.kind === 'folder') {
+      if (target.folder.tabKind !== 'control') {
+        await operations.deleteCard(target)
+        return
+      }
+      const targets = new Set(catalogFolderSubtree(catalog, target.folder.id, 'control'))
+      for (const { manifest } of listComponentCatalogEntries()) {
+        const placement = catalog.placements[`control:${manifest.id}`]
+        if (placement && targets.has(placement.folderId)) await removeControl(manifest.id, manifest.label ?? manifest.id)
+      }
+      for (const folderId of catalogFolderSubtree(catalog, target.folder.id, 'control').reverse()) {
+        await assetCatalogClient.deleteFolder({ operationId: crypto.randomUUID(), folderId })
+      }
+      await refreshGameComponents(gameId)
+      return
+    }
     const { row } = target
+    if (row.tabKind === 'control' && listComponentCatalogEntries().some(({ manifest }) => manifest.id === row.itemId)) {
+      await removeControl(row.itemId, row.name)
+      await refreshGameComponents(gameId)
+    } else {
+      await operations.deleteCard(target)
+    }
     if (location.kind === 'item' && location.placementKey === row.placementKey) {
       setLocation({ kind: 'tab-root', tabKind: row.tabKind, target: catalogRootTarget(row.tabKind) as `root:${CatalogTabKind}` })
     }
@@ -436,16 +563,23 @@ export function AssetCatalogPanel({ gameId }: { gameId: string }): JSX.Element {
   const currentCapabilities = currentTabKind ? CATALOG_TAB_CAPABILITIES[currentTabKind] : null
   const localImportKind = currentCapabilities?.localImport ?? null
   const searchLabel = t('assetCatalog.search')
-  const catalogTabNeedle = query.trim().toLocaleLowerCase()
   const visibleCatalogTabs = VISIBLE_CATALOG_TAB_KINDS.filter((tabKind) => !catalogTabNeedle || t(TAB_LABEL_KEYS[tabKind]).toLocaleLowerCase().includes(catalogTabNeedle))
-  const designedListHeader = currentTabKind && currentCapabilities ? <><header className="acp-head acp-designed-head"><div className="acp-toolbar acp-designed-sources">{currentCapabilities.generation ? <button type="button" onClick={() => openGeneration(currentTabKind)}><span className="acp-toolbar-icon" aria-hidden><img src={generateToolbarIcon} alt="" /></span>{t('assetCatalog.generate')}</button> : null}{localImportKind ? <button type="button" disabled={busy} onClick={() => openLocalImport(localImportKind)}><span className="acp-toolbar-icon" aria-hidden><img src={localToolbarIcon} alt="" /></span>{t('assetCatalog.local')}</button> : null}{currentCapabilities.externalImport ? <button type="button" onClick={() => setExternalForm((value) => !value)}><span className="acp-toolbar-icon" aria-hidden><img src={externalToolbarIcon} alt="" /></span>{t('assetCatalog.external')}</button> : null}</div><div className="acp-toolbar acp-designed-actions">{selectedKeys.size ? <button type="button" onClick={() => void deleteSelected()} disabled={busy}>{t('assetCatalog.batchDelete')}</button> : null}{location.kind === 'tab-root' ? <button type="button" disabled={busy} onClick={() => void createFolder()}><span className="acp-toolbar-icon" aria-hidden><img src={ruleToolbarAddIcon} alt="" /></span>{t('assetCatalog.newFolder')}</button> : null}<label className="acp-search"><span aria-hidden><img src={ruleToolbarSearchIcon} alt="" /></span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchLabel} aria-label={searchLabel} /></label></div></header>{isVideoList && externalForm ? <div className="acp-form"><input autoFocus ref={externalUrlInput} value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder={t('assetCatalog.externalUrl')} aria-label={t('assetCatalog.externalUrl')} /><input value={externalName} onChange={(event) => setExternalName(event.target.value)} placeholder={t('assetCatalog.externalName')} aria-label={t('assetCatalog.externalName')} /><button type="button" onClick={() => void importExternalVideo()} disabled={busy}>{t('assetCatalog.importVideo')}</button></div> : null}<div className="acp-designed-breadcrumb">{renderBreadcrumb(location)}</div></> : null
-  return <div ref={rootRef} className={`acp-root${isCatalogRoot ? ' acp-catalog-root' : ''}${isDesignedList ? ' acp-designed-list' : ''}${isVideoList ? ' acp-video-list' : ''}${isCharacterList ? ' acp-character-list' : ''}`}><div className="acp-browser">{isCatalogRoot ? <header className="acp-head acp-catalog-head"><label className="acp-search"><span aria-hidden><img src={ruleToolbarSearchIcon} alt="" /></span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchLabel} aria-label={searchLabel} /></label></header> : designedListHeader}
-    <div className="acp-grid" data-testid="asset-catalog-grid">
-      {isCatalogRoot ? visibleCatalogTabs.map((tabKind) => { const tabPreview = folderPreviewEntries(catalog, catalogRootTarget(tabKind), tabKind); return <button className="acp-card acp-root-card" type="button" key={tabKind} onClick={() => setLocation({ kind: 'tab-root', tabKind, target: catalogRootTarget(tabKind) as `root:${CatalogTabKind}` })}><div className="acp-thumb acp-folder-thumb"><span className="acp-folder-preview" aria-hidden>{tabPreview.map((entry) => <span className={entry.kind === 'folder' ? 'is-folder-preview' : undefined} key={entry.kind === 'folder' ? entry.folder.id : entry.row.placementKey}>{entry.kind === 'folder' ? <img className="acp-folder-preview-folder" src={folderThumbnailIcon} alt="" /> : entry.row.asset?.kind === 'image' || entry.row.asset?.kind === 'video' ? preview(entry.row.asset, '', t) : null}</span>)}</span></div><strong>{t(TAB_LABEL_KEYS[tabKind])}</strong></button> }) : null}
-      {content.folders.map((folder) => { const folderPreview = isDesignedList ? folderPreviewEntries(catalog, folder.id, folder.tabKind) : []; return <div className={`acp-card${dropTarget?.folderId === folder.id ? ' is-drop-target' : ''}`} key={folder.id} {...folderDropHandlers(folder)}><button className="acp-card-main" type="button" onClick={() => setLocation({ kind: 'folder', tabKind: folder.tabKind, folderId: folder.id, target: folder.id })}><div className={`acp-thumb${isDesignedList ? ' acp-folder-thumb' : ''}`}>{isDesignedList ? <span className="acp-folder-preview" aria-hidden>{folderPreview.map((entry) => <span className={entry.kind === 'folder' ? 'is-folder-preview' : undefined} key={entry.kind === 'folder' ? entry.folder.id : entry.row.placementKey}>{entry.kind === 'folder' ? <img className="acp-folder-preview-folder" src={folderThumbnailIcon} alt="" /> : entry.row.asset?.kind === 'image' || entry.row.asset?.kind === 'video' ? preview(entry.row.asset, '', t) : null}</span>)}</span> : t('assetCatalog.folder')}</div><strong>{folder.name}</strong>{isDesignedList ? null : <small>{t(TAB_LABEL_KEYS[folder.tabKind])}</small>}</button><div className="acp-card-hover-actions">{cardMoreButton({ kind: 'folder', folder })}</div></div> })}
-      {content.items.map((row) => { const isSelected = selectedKeys.has(row.placementKey) || selectedRow?.placementKey === row.placementKey; const canEdit = CATALOG_TAB_CAPABILITIES[row.tabKind].generation !== null; const canPreview = !!row.asset?.url && (row.asset.kind === 'image' || row.asset.kind === 'video' || row.asset.kind === 'audio'); const isGenerating = row.asset?.status === 'generating' || row.pendingAsset !== null; return <div className={`acp-card${isSelected ? ' is-selected' : ''}${isGenerating ? ' is-generating' : ''}${draggingKey === row.placementKey ? ' is-dragging' : ''}`} draggable={!busy && !isGenerating} key={row.placementKey} onPointerEnter={(event) => { if (canPreview) openPreviewAnchor(row, event.currentTarget) }} onPointerLeave={() => { if (canPreview) schedulePreviewClose() }} onDragStart={(event) => { writeCatalogItemDrag(event.dataTransfer, { placementKey: row.placementKey, tabKind: row.tabKind, name: row.name, sourceTarget: row.placement.folderId }); setCatalogItemDragImage(event.dataTransfer, event.currentTarget); setDraggingKey(row.placementKey) }} onDragEnd={() => { setDraggingKey(null); setDropTarget(null) }}>{canBatchSelect ? <input className="acp-check" type="checkbox" aria-label={tf('assetComponents.asset.openAria', { name: row.name })} checked={selectedKeys.has(row.placementKey)} onChange={(event) => setSelectedKeys((current) => { const next = new Set(current); if (event.target.checked) next.add(row.placementKey); else next.delete(row.placementKey); return next })} /> : null}<button className="acp-card-main" type="button" onClick={() => canEdit ? openGeneration(row.tabKind, row.entity?.id, row.asset?.id) : setSelectedPlacementKey(row.placementKey)}><div className={`acp-thumb${!row.asset?.url ? ' has-type-placeholder' : ''}`}>{!row.asset?.url ? typePlaceholder(row.tabKind) ?? t('assetCatalog.noPreview') : row.asset.kind === 'font' ? t('assetCatalog.previewFont') : preview(row.asset, t('assetCatalog.noPreview'), t)}{isGenerating ? <span className="acp-card-generation-status" role="status"><span aria-hidden />{t('assetCatalog.statusGenerating')}</span> : null}</div><strong>{row.name}</strong>{isDesignedList ? null : <small>{row.entity?.prompt ?? row.asset?.prompt ?? row.asset?.kind ?? t('assetCatalog.asset')}</small>}</button><div className="acp-card-hover-actions">{cardMoreButton({ kind: 'asset', row })}</div></div> })}
+  const catalogEmpty = isCatalogRoot
+    ? visibleCatalogTabs.length === 0
+    : content.folders.length === 0 && content.items.length === 0
+  const emptyMessage = query.trim()
+    ? t('assetCatalog.noSearchResults')
+    : isCatalogRoot
+      ? t('assetCatalog.emptyCategories')
+      : tf('assetCatalog.emptyKind', { kind: t(TAB_LABEL_KEYS[currentTabKind!]) })
+  const designedListHeader = currentTabKind && currentCapabilities ? <><header className="acp-head acp-designed-head"><div className="acp-toolbar acp-designed-sources">{currentCapabilities.generation ? <button type="button" onClick={() => openGeneration(currentTabKind)}><span className="acp-toolbar-icon" aria-hidden><img src={generateToolbarIcon} alt="" /></span>{t('assetCatalog.generate')}</button> : null}{localImportKind ? <button type="button" disabled={busy} onClick={() => openLocalImport(localImportKind)}><span className="acp-toolbar-icon" aria-hidden><img src={localToolbarIcon} alt="" /></span>{t('assetCatalog.local')}</button> : null}{currentCapabilities.externalImport ? <button type="button" onClick={() => setExternalForm((value) => !value)}><span className="acp-toolbar-icon" aria-hidden><img src={externalToolbarIcon} alt="" /></span>{t('assetCatalog.external')}</button> : null}</div><div className="acp-toolbar acp-designed-actions">{selectedKeys.size ? <button type="button" onClick={() => void deleteSelected()} disabled={busy}>{t('assetCatalog.batchDelete')}</button> : null}{location.kind === 'tab-root' ? <button type="button" disabled={busy} onClick={() => void createFolder()}><span className="acp-toolbar-icon" aria-hidden><img src={ruleToolbarAddIcon} alt="" /></span>{t('assetCatalog.newFolder')}</button> : null}<CatalogSearchInput value={query} onChange={setQuery} placeholder={searchLabel} ariaLabel={searchLabel} /></div></header>{isVideoList && externalForm ? <div className="acp-form"><input autoFocus ref={externalUrlInput} value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder={t('assetCatalog.externalUrl')} aria-label={t('assetCatalog.externalUrl')} /><input value={externalName} onChange={(event) => setExternalName(event.target.value)} placeholder={t('assetCatalog.externalName')} aria-label={t('assetCatalog.externalName')} /><button type="button" onClick={() => void importExternalVideo()} disabled={busy}>{t('assetCatalog.importVideo')}</button></div> : null}<div className="acp-designed-breadcrumb">{renderBreadcrumb(location)}</div></> : null
+  return <div ref={rootRef} className={`acp-root${isCatalogRoot ? ' acp-catalog-root' : ''}${isDesignedList ? ' acp-designed-list' : ''}${isVideoList ? ' acp-video-list' : ''}${isCharacterList ? ' acp-character-list' : ''}`}><div className="acp-browser">{isCatalogRoot ? <header className="acp-head acp-catalog-head"><CatalogSearchInput value={query} onChange={setQuery} placeholder={searchLabel} ariaLabel={searchLabel} /></header> : designedListHeader}
+    <div ref={grid.ref} style={grid.style} className={`acp-grid${catalogEmpty ? ' is-empty' : ''}`} data-testid="asset-catalog-grid">
+      {catalogEmpty ? <CatalogEmptyState message={emptyMessage} /> : null}
+      {isCatalogRoot ? visibleCatalogTabs.map((tabKind) => { const tabPreview = folderPreviewEntries(catalog, catalogRootTarget(tabKind), tabKind, componentEntries); const open = () => setLocation({ kind: 'tab-root', tabKind, target: catalogRootTarget(tabKind) as `root:${CatalogTabKind}` }); return <div className="acp-card acp-root-card" role="button" tabIndex={0} key={tabKind} onClick={open} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open() } }}><div className="acp-thumb acp-folder-thumb"><span className="acp-folder-preview" aria-hidden>{tabPreview.map((entry) => <span className={entry.kind === 'folder' ? 'is-folder-preview' : undefined} key={entry.kind === 'folder' ? entry.folder.id : entry.row.placementKey}>{folderPreviewContent(entry, componentEntries, t)}</span>)}</span></div><strong>{t(TAB_LABEL_KEYS[tabKind])}</strong></div> }) : null}
+      {content.folders.map((folder) => { const folderPreview = isDesignedList ? folderPreviewEntries(catalog, folder.id, folder.tabKind, componentEntries) : []; const open = () => setLocation({ kind: 'folder', tabKind: folder.tabKind, folderId: folder.id, target: folder.id }); return <div className={`acp-card${dropTarget?.folderId === folder.id ? ' is-drop-target' : ''}`} key={folder.id} {...folderDropHandlers(folder)}><div className="acp-card-main" role="button" tabIndex={0} onClick={open} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open() } }}><div className={`acp-thumb${isDesignedList ? ' acp-folder-thumb' : ''}`}>{isDesignedList ? <span className="acp-folder-preview" aria-hidden>{folderPreview.map((entry) => <span className={entry.kind === 'folder' ? 'is-folder-preview' : undefined} key={entry.kind === 'folder' ? entry.folder.id : entry.row.placementKey}>{folderPreviewContent(entry, componentEntries, t)}</span>)}</span> : t('assetCatalog.folder')}{dropTarget?.folderId === folder.id ? <img className="acp-folder-drop-highlight" src={folderDropHighlightIcon} alt="" aria-hidden /> : null}</div><strong>{folder.name}</strong>{isDesignedList ? null : <small>{t(TAB_LABEL_KEYS[folder.tabKind])}</small>}</div><div className="acp-card-hover-actions">{cardReferenceButton({ kind: 'folder', folder })}{cardMoreButton({ kind: 'folder', folder })}</div></div> })}
+      {content.items.map((row) => { const isSelected = selectedKeys.has(row.placementKey) || selectedRow?.placementKey === row.placementKey; const componentEntry = row.tabKind === 'control' ? componentEntries.find(({ manifest }) => manifest.id === row.itemId) : undefined; const isComponentControl = !!componentEntry; const canEdit = !isComponentControl && CATALOG_TAB_CAPABILITIES[row.tabKind].generation !== null; const canPreview = !!row.asset?.url && (row.asset.kind === 'image' || row.asset.kind === 'video' || row.asset.kind === 'audio'); const isGenerating = row.asset?.status === 'generating' || row.pendingAsset !== null; const open = () => canEdit ? openGeneration(row.tabKind, row.entity?.id, row.asset?.id) : setSelectedPlacementKey(row.placementKey); return <div className={`acp-card${isSelected ? ' is-selected' : ''}${isGenerating ? ' is-generating' : ''}${draggingKey === row.placementKey ? ' is-dragging' : ''}`} draggable={!busy && !isGenerating} key={row.placementKey} onPointerEnter={(event) => { if (canPreview) openPreviewAnchor(row, event.currentTarget) }} onPointerLeave={() => { if (canPreview) schedulePreviewClose() }} onDragStart={(event) => { writeCatalogItemDrag(event.dataTransfer, { placementKey: row.placementKey, tabKind: row.tabKind, name: row.name, sourceTarget: row.placement.folderId }); setCatalogItemDragImage(event.dataTransfer, event.currentTarget); setDraggingKey(row.placementKey) }} onDragEnd={() => { setDraggingKey(null); setDropTarget(null) }}>{/* 图片资产的批量框选暂不开放。 */}{/* canBatchSelect ? <input className="acp-check" type="checkbox" aria-label={tf('assetComponents.asset.openAria', { name: row.name })} checked={selectedKeys.has(row.placementKey)} onChange={(event) => setSelectedKeys((current) => { const next = new Set(current); if (event.target.checked) next.add(row.placementKey); else next.delete(row.placementKey); return next })} /> : null */}<div className="acp-card-main" role="button" tabIndex={0} onClick={open} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open() } }}><div className={`acp-thumb${!row.asset?.url ? ' has-type-placeholder' : ''}`}>{componentEntry ? <ComponentThumbnail component={componentEntry.component} manifest={componentEntry.manifest} /> : !row.asset?.url ? typePlaceholder(row.tabKind) ?? t('assetCatalog.noPreview') : row.asset.kind === 'font' ? t('assetCatalog.previewFont') : preview(row.asset, t('assetCatalog.noPreview'), t)}{isGenerating ? <span className="acp-card-generation-status" role="status"><span aria-hidden />{t('assetCatalog.statusGenerating')}</span> : null}</div><strong>{row.name}</strong>{isDesignedList ? null : <small>{row.entity?.prompt ?? row.asset?.prompt ?? row.asset?.kind ?? t('assetCatalog.asset')}</small>}</div><div className="acp-card-hover-actions">{cardReferenceButton({ kind: 'asset', row })}{cardMoreButton({ kind: 'asset', row })}</div></div> })}
     </div>
-    {!content.folders.length && !content.items.length && location.kind !== 'catalog-root' ? <p className="acp-empty">{t('assetCatalog.empty')}</p> : null}
     {dropTarget ? <span className="acp-drag-hint" style={{ left: dropTarget.x + 12, top: dropTarget.y + 12 }}>{tf('assetCatalog.moveTo', { name: dropTarget.label })}</span> : null}
     {cardMenu ? <AssetCardActionsMenu
       name={cardTargetName(cardMenu.target)}

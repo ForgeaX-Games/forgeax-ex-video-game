@@ -108,39 +108,6 @@ export const ASSET_CATALOG_PANEL_CSS = `
   border-bottom: 0;
 }
 .acp-root .acp-designed-actions { position: relative; margin-left: auto; }
-.acp-root .acp-search {
-  position: relative;
-  display: inline-flex;
-  box-sizing: border-box;
-  width: 221px;
-  height: 28px;
-  flex: 0 0 221px;
-  align-items: center;
-  border-radius: 8px;
-  background: var(--asset-overlay);
-  color: #919191;
-}
-.acp-root .acp-search:focus-within { box-shadow: inset 0 0 0 2px var(--asset-focus); }
-.acp-root .acp-search > span { position: absolute; z-index: 1; top: 2px; left: 8px; display: grid; width: 24px; height: 24px; place-items: center; pointer-events: none; }
-.acp-root .acp-search img { display: block; width: 24px; height: 24px; }
-.acp-root .acp-search input,
-.acp-root .acp-search input:focus,
-.acp-root .acp-search input:focus-visible {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  height: 28px;
-  border: 0;
-  padding: 2px 8px 2px 45px;
-  outline: 0;
-  box-shadow: none;
-  color: #919191;
-  background: transparent;
-  font: inherit;
-  font-size: 16px;
-  line-height: 24px;
-}
-.acp-root .acp-search input::placeholder { color: #919191; opacity: 1; }
 .acp-root .acp-designed-breadcrumb {
   box-sizing: border-box;
   display: flex;
@@ -180,12 +147,14 @@ export const ASSET_CATALOG_PANEL_CSS = `
 .acp-root .acp-form button.acp-primary:hover:not(:disabled) { background: var(--asset-brand-light); }
 
 .acp-root .acp-grid {
+  --adaptive-grid-min-column-gap: 52px;
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: repeat(auto-fill, 140px);
+  grid-template-columns: repeat(var(--adaptive-grid-columns, 1), 140px);
   align-content: start;
-  gap: 24px 52px;
+  row-gap: 24px;
+  column-gap: var(--adaptive-grid-column-gap, var(--adaptive-grid-min-column-gap));
   overflow: auto;
   padding: 20px 24px 26px;
 }
@@ -246,9 +215,9 @@ export const ASSET_CATALOG_PANEL_CSS = `
   font-size: 34px;
   transition: background .12s ease, box-shadow .12s ease;
 }
-.acp-root .acp-thumb img,
-.acp-root .acp-thumb video,
-.acp-root .acp-thumb audio { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.acp-root .acp-thumb > img,
+.acp-root .acp-thumb > video,
+.acp-root .acp-thumb > audio { width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .acp-root .acp-thumb.has-type-placeholder { background: transparent; }
 .acp-root .acp-type-placeholder {
   position: absolute;
@@ -305,13 +274,15 @@ export const ASSET_CATALOG_PANEL_CSS = `
   padding: 0;
   border: 0;
   border-radius: 6px;
-  background: rgba(10,10,10,.72);
-  box-shadow: 0 1px 4px rgba(0,0,0,.24);
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
   transition: background .12s ease, box-shadow .12s ease;
 }
-.acp-root .acp-card-hover-actions button:hover { background: rgba(10,10,10,.88); box-shadow: 0 2px 6px rgba(0,0,0,.32); }
+.acp-root .acp-card-hover-actions button:hover { background: transparent; box-shadow: none; }
 .acp-root .acp-card-hover-actions button:focus-visible { outline: 1px solid rgba(255,156,42,.6); outline-offset: 1px; }
+.acp-root .acp-card-hover-actions .acp-card-reference { display:grid; width:18px; height:18px; place-items:center; border-radius:6px; background:rgba(255,255,255,.1); }
+.acp-root .acp-card-reference img { display:block; width:14px; height:14px; }
 .acp-root .acp-card-more img { width: 18px; height: 18px; object-fit: contain; }
 .acp-root .acp-card-preview {
   position: fixed;
@@ -335,8 +306,6 @@ export const ASSET_CATALOG_PANEL_CSS = `
 .acp-root .acp-card-preview:hover { background: rgba(0,0,0,.68); box-shadow: 0 3px 10px rgba(0,0,0,.32); }
 .acp-root .acp-card-preview:focus-visible { outline: 1px solid rgba(255,156,42,.9); outline-offset: 2px; }
 .acp-root .acp-card-preview img { width: 24px; height: 24px; object-fit: contain; }
-.acp-root.acp-video-list .acp-thumb { position: relative; border: 1px solid transparent; transition: border-color .15s ease, background .15s ease; }
-.acp-root.acp-video-list .acp-card:hover .acp-thumb { border-color: rgba(255,156,42,.6); }
 .acp-root .acp-card-generation-status { position: absolute; z-index: 3; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: inherit; background: rgba(10,10,10,.72); color: var(--asset-text-primary); font-size: 12px; }
 .acp-root .acp-card-generation-status > span { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.24); border-top-color: var(--asset-brand); border-radius: 50%; }
 .acp-root .acp-folder-thumb {
@@ -346,15 +315,16 @@ export const ASSET_CATALOG_PANEL_CSS = `
   clip-path: path('M0 6C0 2.6863 2.68629 0 6 0H50.8506C52.5206 0 54.115 0.695986 55.2505 1.92058L71.8399 19.813C72.9753 21.0376 74.5698 21.7335 76.2397 21.7335H134C137.314 21.7335 140 24.4198 140 27.7335V134C140 137.314 137.314 140 134 140H6C2.6863 140 0 137.314 0 134V6Z');
 }
 .acp-root .acp-folder-preview { position: absolute; z-index: 1; top: 41px; left: 9px; display: grid; width: 121px; height: 78px; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.acp-root .acp-folder-preview > span { display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; border-radius: 6px; background: var(--asset-overlay); }
+.acp-root .acp-folder-preview > span { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; border-radius: 6px; background: var(--asset-overlay); }
 .acp-root .acp-folder-preview > span.is-folder-preview { background: transparent; }
 .acp-root .acp-folder-preview img,
 .acp-root .acp-folder-preview video { width: 100%; height: 100%; object-fit: cover; }
 .acp-root .acp-folder-preview img.acp-folder-preview-folder { width: 34px; height: 34px; object-fit: contain; }
 .acp-root .acp-card:hover .acp-folder-thumb { background: var(--asset-overlay-hover); }
 .acp-root .acp-card:active .acp-folder-thumb,
-.acp-root .acp-card:focus-visible .acp-folder-thumb { background: rgba(255,255,255,.2); box-shadow: inset 0 0 0 1px rgba(255,156,42,.6); }
-.acp-root .acp-card.is-drop-target .acp-folder-thumb { background: rgba(255,255,255,.2); box-shadow: inset 0 0 0 1px rgba(255,156,42,.9); }
+.acp-root .acp-card:focus-visible .acp-folder-thumb { background: rgba(255,255,255,.2); }
+.acp-root .acp-card.is-drop-target .acp-folder-thumb { background: rgba(255,255,255,.2); }
+.acp-root .acp-folder-drop-highlight { position:absolute; z-index:3; inset:0; display:block; width:140px; height:140px; pointer-events:none; }
 .acp-root .acp-card strong,
 .acp-root .acp-card small {
   box-sizing: border-box;
@@ -410,83 +380,11 @@ export const ASSET_CATALOG_PANEL_CSS = `
 .acp-root .acp-card-menu button:hover { border-color: rgba(255,255,255,.24); background: var(--asset-overlay); }
 .acp-root .acp-card-menu button:focus-visible { border-color: var(--asset-focus); outline: none; }
 
-.acp-root .acp-dialog-backdrop {
-  position: fixed;
-  z-index: 10002;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(0,0,0,.5);
+.acp-root .acp-grid.is-empty {
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
-.acp-root .acp-dialog {
-  position: relative;
-  box-sizing: border-box;
-  display: flex;
-  width: 408px;
-  max-width: calc(100vw - 48px);
-  flex-direction: column;
-  gap: 12px;
-  border-radius: 12px;
-  padding: 24px;
-  color: var(--asset-text-primary);
-  background: #2b2b2b;
-  box-shadow: 0 16px 48px rgba(0,0,0,.5);
-}
-.acp-root .acp-dialog h2 { margin: 0 0 4px; font-size: 16px; font-weight: 500; line-height: 24px; text-align: center; }
-.acp-root .acp-dialog label { color: var(--asset-text-secondary); font-size: 12px; line-height: 18px; }
-.acp-root .acp-dialog input {
-  box-sizing: border-box;
-  width: 100%;
-  height: 40px;
-  border: 1px solid var(--asset-border);
-  border-radius: 8px;
-  padding: 0 12px;
-  outline: 0;
-  color: var(--asset-text-primary);
-  background: rgba(255,255,255,.06);
-  font: inherit;
-  font-size: 14px;
-}
-.acp-root .acp-dialog input:focus-visible { border-color: var(--asset-focus); }
-.acp-root .acp-dialog-message { margin: 0; color: var(--asset-text-secondary); font-size: 14px; line-height: 22px; }
-.acp-root .acp-dialog-message strong { color: var(--asset-brand-light); font-weight: 600; }
-.acp-root .acp-dialog-error { margin: 0; color: #ff6b5e; font-size: 12px; line-height: 18px; word-break: break-word; }
-.acp-root .acp-dialog-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border: 0;
-  border-radius: 6px;
-  padding: 0;
-  color: var(--asset-text-secondary);
-  background: transparent;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-.acp-root .acp-dialog-close:hover { color: var(--asset-text-primary); background: var(--asset-overlay); }
-.acp-root .acp-dialog-actions { display: flex; justify-content: center; gap: 16px; padding-top: 4px; }
-.acp-root .acp-dialog-actions button {
-  box-sizing: border-box;
-  min-width: 112px;
-  height: 36px;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 16px;
-  color: #1a1a1a;
-  background: #fff;
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-.acp-root .acp-dialog-actions .acp-primary { color: #fff; background: var(--asset-brand-light); }
-.acp-root .acp-dialog-actions button:disabled { opacity: .5; cursor: not-allowed; }
-.acp-root .acp-dialog-actions button:focus-visible { outline: 2px solid var(--asset-focus); outline-offset: 2px; }
-
 .acp-root .acp-empty {
   position: absolute;
   top: 54%;
@@ -537,8 +435,7 @@ export const ASSET_CATALOG_PANEL_CSS = `
   .acp-root .acp-toolbar { flex-wrap: wrap; gap: 8px; }
   .acp-root .acp-designed-head { height: 52px; min-height: 52px; flex: 0 0 52px; flex-wrap: nowrap; overflow-x: auto; padding: 24px 24px 0; }
   .acp-root .acp-catalog-head { height: 52px; min-height: 52px; flex: 0 0 52px; flex-wrap: nowrap; padding: 24px 24px 0; }
-  .acp-root .acp-search { width: 180px; flex-basis: 180px; }
-  .acp-root .acp-grid { grid-template-columns: repeat(auto-fill, 140px); gap: 20px; padding: 20px; }
+  .acp-root .acp-grid { --adaptive-grid-min-column-gap: 20px; row-gap: 20px; padding: 20px; }
   .acp-root .acp-browser > .acp-form { flex-wrap: wrap; }
 }
 @container (max-width: 780px) {
@@ -555,8 +452,7 @@ export const ASSET_CATALOG_PANEL_CSS = `
   .acp-root .acp-toolbar { flex-wrap: wrap; gap: 8px; }
   .acp-root .acp-designed-head { height: 52px; min-height: 52px; flex: 0 0 52px; flex-wrap: nowrap; overflow-x: auto; padding: 24px 24px 0; }
   .acp-root .acp-catalog-head { height: 52px; min-height: 52px; flex: 0 0 52px; flex-wrap: nowrap; padding: 24px 24px 0; }
-  .acp-root .acp-search { width: 180px; flex-basis: 180px; }
-  .acp-root .acp-grid { gap: 20px; padding: 20px; }
+  .acp-root .acp-grid { --adaptive-grid-min-column-gap: 20px; row-gap: 20px; padding: 20px; }
   .acp-root .acp-browser > .acp-form { flex-wrap: wrap; }
 }
 `

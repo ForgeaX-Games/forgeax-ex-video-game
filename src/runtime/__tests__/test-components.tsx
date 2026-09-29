@@ -52,8 +52,23 @@ export const TestQteManifest: ComponentManifest = {
   id: TEST_QTE,
   label: '测试 QTE',
   events: [
-    { id: 'greatSuccess', label: '大成功' },
-    { id: 'success', label: '成功' },
+    {
+      id: 'greatSuccess',
+      label: '大成功',
+      outputs: [
+        { key: 'damage', label: '伤害', valueType: 'number' },
+        { key: 'label', label: '评语', valueType: 'string' },
+        { key: 'critical', label: '暴击', valueType: 'boolean' },
+      ],
+    },
+    {
+      id: 'success',
+      label: '成功',
+      outputs: [
+        { key: 'damage', label: '伤害', valueType: 'number' },
+        { key: 'count', label: '数量', valueType: 'number' },
+      ],
+    },
     { id: 'fail', label: '失败' },
   ],
   inputs: [

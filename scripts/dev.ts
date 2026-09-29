@@ -1,8 +1,6 @@
 import { resolve } from 'node:path'
-import { resolveViteDevPort } from './vite-dev-port'
 
 const cwd = resolve(import.meta.dir, '..')
-const standalone = Bun.argv.includes('--standalone')
 const scripts = ['dev:frontend', 'dev:backend'] as const
 const children = scripts.map((script) => ({
   script,
@@ -13,10 +11,6 @@ const children = scripts.map((script) => ({
     stderr: 'inherit',
   }),
 }))
-
-if (standalone) {
-  console.log(`[dev] local host shell: http://localhost:${resolveViteDevPort()}/dev.html`)
-}
 
 let stopping = false
 

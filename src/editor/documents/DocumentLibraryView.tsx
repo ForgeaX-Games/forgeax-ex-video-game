@@ -11,7 +11,7 @@ import {
   type ProjectDocument,
   type ProjectDocumentSummary,
 } from './document-client'
-import { extractAuthorVisible } from './extractAuthorVisible'
+import { authorDocumentMarkdown } from './extractAuthorVisible'
 import { useDocumentNav } from '../persist/documentNavStore'
 import { useProductionProjection } from '../persist/productionProjectionStore'
 import { AuthorDocumentView } from './AuthorDocumentView'
@@ -195,7 +195,7 @@ export function DocumentLibraryView(): JSX.Element {
           />
         ) : null}
         {!documentEmpty && document && document.documentType !== 'design-options' ? (
-          <AuthorDocumentView markdown={extractAuthorVisible(document.content)} />
+          <AuthorDocumentView markdown={authorDocumentMarkdown(document.documentType, document.content)} />
         ) : null}
       </div>
     </section>

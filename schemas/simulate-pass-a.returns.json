@@ -4,9 +4,14 @@
   "description": "返回蓝图路径、运行时覆盖率和结构化审查证据，不代表真实视频试玩结果。",
   "type": "object",
   "additionalProperties": true,
-  "required": ["schemaVersion", "ok", "evidence", "simulations"],
+  "required": ["schemaVersion", "ok", "evidence", "simulations", "qualityMetrics"],
   "properties": {
     "schemaVersion": { "const": 1 }, "ok": { "type": "boolean" },
-    "evidence": { "type": "object" }, "simulations": { "type": "array" }
+    "evidence": { "type": "object" },
+    "simulations": { "type": "array" },
+    "qualityMetrics": {
+      "type": "object",
+      "description": "代表路径回放同时返回互动密度、边 producer、支柱追踪、下游 payoff、战斗闭环、决策差异、状态/公式消费和反馈覆盖率。"
+    }
   }
 }

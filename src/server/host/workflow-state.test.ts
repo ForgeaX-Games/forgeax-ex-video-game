@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { ExtensionContext } from '@forgeax/extension-host/node'
 import { ACTIVITY_FOCUS, activityContract } from '../../workflow/activity-contracts'
+import { gameVideoMcpToolName } from '../../workflow/mcp-tool-name'
 import { expandCheckIds } from '../../workflow/validation-check-groups'
-import type { CompletionReport, ValidationEvidence, VideoGameWorkflowState } from '../../workflow/contracts'
+import type { ActivityRecord, CompletionReport, ValidationEvidence, VideoGameWorkflowState } from '../../workflow/contracts'
 import {
+  assertAssetCatalogMutationAllowed,
+  assertBlueprintMutationAllowed,
   assertSceneCatalogMutationAllowed,
   assertWorkflowMutationAllowed,
   awaitWorkflowUser,
@@ -13,6 +16,7 @@ import {
   confirmPillarAuthorGate,
   createInitialWorkflowState,
   EMPTY_CONTENT_INVENTORY,
+  isPostDeliveryAuthoringMaintenance,
   isPostDeliveryCatalogMaintenance,
   projectWorkflowState,
   reconcileProductionFailure,
@@ -114,12 +118,11 @@ describe('video-game workflow state', () => {
     })).rejects.toMatchObject({ code: 'workflow.inquiry.invalid' })
   })
 
-  it('蓝图可玩性审查聚焦蓝图且不能导航到试玩页', () => {
+  it('蓝图可玩性交付投影没有 agent 工具面', () => {
     const contract = activityContract('playtest.validating')
     expect(ACTIVITY_FOCUS['playtest.validating']).toEqual({ kind: 'blueprint' })
-    expect(contract.allowedToolNames).not.toContain(
-      'mcp__as-mate-tools__extension__game_video__focus_page',
-    )
+    expect(contract.allowedToolNames).toEqual([])
+    expect(contract.stopConditions).toEqual(['本阶段由 Host 编译产出，不派 peer、不接受 agent 写入'])
     // 生成终点的权威可玩性硬门：数据合法性 + 玩法合理性，complete_activity 展开为叶子 evidence。
     expect(contract.hardChecks).toEqual([
       'blueprint.data.valid',
@@ -168,22 +171,109 @@ describe('video-game workflow state', () => {
     } as never
     expect(countConfiguredUi(project as never)).toBe(1)
   })
+  // 界面与整装曾经是两个 agent 活动，各自持有造控件/配节点的工具面。它们现在是
+  // 支柱的编译产物：没有工具面，才谈不上「谁能造控件」。
+  it('grants the compiled UI and finalizing stages no tools at all', () => {
+    for (const activity of ['ui.authoring', 'game.finalizing'] as const) {
+      expect(activityContract(activity).allowedToolNames).toEqual([])
+      expect(activityContract(activity).mutationSequence).toEqual([])
+    }
+  })
 
-  it('keeps custom-control tools out of game.finalizing but allows them in ui.authoring', () => {
-    // ui.authoring 放开：可造控件 + 组装模板（agent 制作界面的默认路径）。
-    expect(activityContract('ui.authoring').allowedToolNames).toContain(
-      'mcp__as-mate-tools__extension__game_video__upsert_component',
-    )
-    // game.finalizing 保持保守：收尾集成阶段仍只挂已有方案，不造控件。
-    expect(activityContract('game.finalizing').allowedToolNames).not.toContain(
-      'mcp__as-mate-tools__extension__game_video__upsert_component',
-    )
+  // 硬校验保留：编译产物仍然要过下游原本那套检查，只是现在由 Host 满足而不是
+  // 由 LLM 反复试错去满足。
+  it('keeps the compiled stages hard checks so the compiler output is still verified', () => {
     expect(activityContract('ui.authoring').hardChecks).toContain('ui.reuses-existing-overlays')
-    expect(activityContract('game.finalizing').hardChecks).not.toContain('ui.reuses-existing-overlays')
-    expect(activityContract('ui.authoring').domainGuide).toContain(
-      '{ left:0, top:0, width:1, height:1 }',
-    )
-    expect(activityContract('ui.authoring').domainGuide).toContain('不得写 children')
+    expect(activityContract('game.finalizing').hardChecks.length).toBeGreaterThan(0)
+  })
+
+
+  it('publishes one blueprint capability contract across planning and execution stages', () => {
+    const pillar = activityContract('document.pillar')
+    const outline = activityContract('blueprint.outline')
+    const finalizing = activityContract('game.finalizing')
+
+    expect(pillar.blueprintCapabilities).toEqual(outline.blueprintCapabilities)
+    expect(outline.blueprintCapabilities).toEqual(finalizing.blueprintCapabilities)
+    expect(pillar.blueprintCapabilities).toMatchObject({
+      schemaVersion: 1,
+      registryVersion: 2,
+      registryPolicy: expect.stringContaining('能力注册表是唯一事实源'),
+      topology: { tool: 'patch_graph' },
+      nodeTransaction: {
+        tool: 'configure_blueprint_node',
+        unit: '一个已完整规划的节点一次调用',
+      },
+    })
+    expect(pillar.blueprintCapabilities?.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'blueprint.library.create',
+        agent: expect.objectContaining({
+          tool: 'patch_graph',
+          operations: expect.arrayContaining(['create-blueprint']),
+        }),
+      }),
+      expect.objectContaining({
+        id: 'blueprint.interface.mount',
+        agent: expect.objectContaining({
+          tool: 'configure_blueprint_node',
+          schemaPaths: expect.arrayContaining(['interfaces']),
+        }),
+      }),
+    ]))
+    expect(pillar.blueprintCapabilities?.nodeTransaction.settlementTriggers).toEqual([
+      'at：时间轴时刻',
+      'watch：变量或实体属性 change/inc/dec',
+      'state：条件表达式成立',
+    ])
+    expect(pillar.blueprintCapabilities?.nodeTransaction.settlementPatterns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'health-terminal', trigger: 'state' }),
+      expect.objectContaining({ id: 'timeline-hit-sync', trigger: 'at' }),
+    ]))
+    expect(pillar.blueprintCapabilities?.interactionPatterns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'health-combat-loop' }),
+      expect.objectContaining({ id: 'relationship-branch' }),
+      expect.objectContaining({ id: 'item-gate' }),
+    ]))
+    expect(pillar.blueprintCapabilities?.nodeTransaction.removals).toEqual(expect.arrayContaining([
+      expect.stringContaining('卸载界面'),
+      expect.stringContaining('事件响应'),
+      expect.stringContaining('结算'),
+      expect.stringContaining('指定出边'),
+    ]))
+    expect(pillar.blueprintCapabilities?.planningRequirements).toEqual(expect.arrayContaining([
+      expect.stringContaining('component/event'),
+      expect.stringContaining('状态变化或可达出口'),
+      expect.stringContaining('可感知差异'),
+      expect.stringContaining('动作、结果与下一步之间的因果'),
+      expect.stringContaining('循环必须有退出条件'),
+      expect.stringContaining('requiredRole'),
+      expect.stringContaining('capabilityGap'),
+    ]))
+  })
+
+  it('lets upstream stages inspect capabilities without granting node mutation rights', () => {
+    const listComponents = gameVideoMcpToolName('list-ui-components')
+    const patchGraph = gameVideoMcpToolName('patch-graph')
+    const configureNode = gameVideoMcpToolName('configure-blueprint-node')
+    const pillar = activityContract('document.pillar')
+    const outline = activityContract('blueprint.outline')
+    const finalizing = activityContract('game.finalizing')
+
+    expect(pillar.allowedToolNames).toContain(listComponents)
+    expect(pillar.allowedToolNames).not.toContain(patchGraph)
+    expect(pillar.allowedToolNames).not.toContain(configureNode)
+    expect(pillar.mutationSequence.indexOf('list-ui-components'))
+      .toBeLessThan(pillar.mutationSequence.indexOf('upsert-document'))
+    expect(pillar.domainGuide).toContain('本阶段只写支柱文档')
+    expect(pillar.domainGuide).toContain('不调用 patch_graph 或 configure_blueprint_node')
+    // 支柱必须在平台词汇里表态，否则可行性判断又会推迟到总脉络。
+    expect(pillar.domainGuide).toContain('requiredRole')
+    expect(pillar.domainGuide).toContain('capabilityGap')
+
+    // 支柱之后没有可写的阶段：总脉络与整装都是编译产物，工具面为空。
+    expect(outline.allowedToolNames).toEqual([])
+    expect(finalizing.allowedToolNames).toEqual([])
   })
 
   it('requires real external gate evidence before pillar and feature development', async () => {
@@ -229,7 +319,7 @@ describe('video-game workflow state', () => {
     state = await beginWorkflowActivity(ctx, {
       activity: 'blueprint.outline',
       expectedWorkflowRevision: state.revision,
-    })
+    }, { compilerOwned: true })
 
     expect(state.gates.pillar).toMatchObject({
       status: 'approved', evidenceRef,
@@ -261,16 +351,32 @@ describe('video-game workflow state', () => {
     })
     state = await complete(ctx, state)
     state = await confirmPillarAuthorGate(ctx, { productionId: 'prod-first' })
+    const evidenceRef = state.gates.pillar?.evidenceRef
     state = await beginWorkflowActivity(ctx, {
       activity: 'blueprint.outline',
       expectedWorkflowRevision: state.revision,
-    })
+    }, { compilerOwned: true })
     state = await complete(ctx, state)
+
+    await expect(beginWorkflowActivity(ctx, {
+      activity: 'document.pillar',
+      expectedWorkflowRevision: state.revision,
+      rework: true,
+      reason: '跨节拍 resolvesActions 限制需要修正支柱',
+    })).rejects.toMatchObject({
+      code: 'workflow.gate.pillar-frozen',
+      retry: 'stop',
+    })
+    expect((await readWorkflowState(ctx))?.gates.pillar).toMatchObject({
+      status: 'approved',
+      evidenceRef,
+    })
 
     const reworking = await beginWorkflowActivity(ctx, {
       activity: 'document.pillar',
       expectedWorkflowRevision: state.revision,
       rework: true,
+      authorReopen: true,
       reason: 'author requested pillar regeneration',
     })
 
@@ -278,6 +384,137 @@ describe('video-game workflow state', () => {
     expect(reworking.activities['blueprint.outline']?.status).toBe('not-started')
     expect(reworking.gates.pillar).toMatchObject({ status: 'pending' })
     expect(reworking.gates.pillar?.evidenceRef).toBeUndefined()
+  })
+
+  // 未确认的支柱是草稿，写它的 peer 必须能改自己的稿子：文档写入触发隐式
+  // begin(rework)，在这里拦截等于让它修不完第一版。已确认支柱由 pillar-frozen 保护。
+  it('未确认的支柱允许其作者 peer 继续返工自己的草稿', async () => {
+    const ctx = context()
+    let state = (await readWorkflowState(ctx, { create: true }))!
+    state = await complete(ctx, state)
+    state = await beginWorkflowActivity(ctx, {
+      activity: 'document.core',
+      expectedWorkflowRevision: state.revision,
+    })
+    state = await complete(ctx, state)
+    state = await beginWorkflowActivity(ctx, {
+      activity: 'document.pillar',
+      expectedWorkflowRevision: state.revision,
+      gateApproval: { gate: 'core', evidenceRef: 'production:core:3', revision: 3 },
+    })
+    expect(state.activities['document.pillar']?.status).toBe('working')
+    expect(state.gates.pillar?.status).toBe('pending')
+
+    const reworked = await beginWorkflowActivity(ctx, {
+      activity: 'document.pillar',
+      expectedWorkflowRevision: state.revision,
+      rework: true,
+      reason: 'peer 修契约后重写草稿',
+    })
+
+    expect(reworked.activities['document.pillar']?.status).toBe('working')
+    expect(reworked.gates.pillar?.status).toBe('pending')
+  })
+
+  // 编译阶段没有 agent 工具面，也不能被 agent 开启：它们由 Host 在支柱落盘时整体
+  // 产出。允许 begin 就等于把「支柱是唯一创作面」的不变量交回给模型的自觉。
+  it('拒绝 agent 开启编译阶段', async () => {
+    const ctx = context()
+    const state = (await readWorkflowState(ctx, { create: true }))!
+
+    await expect(beginWorkflowActivity(ctx, {
+      activity: 'blueprint.outline',
+      expectedWorkflowRevision: state.revision,
+    })).rejects.toMatchObject({ code: 'workflow.activity.compiler-owned' })
+  })
+
+  // 开关必须在第三参数而不是 input 里：input 是 agent 的工具参数，`begin_activity`
+  // 原样透传，写在 input 里的门禁开关模型自己就能填上。
+  it('编译阶段开关不能通过 agent 的工具参数打开', async () => {
+    const ctx = context()
+    const state = (await readWorkflowState(ctx, { create: true }))!
+
+    await expect(beginWorkflowActivity(ctx, {
+      activity: 'blueprint.outline',
+      expectedWorkflowRevision: state.revision,
+      compilerOwned: true,
+    })).rejects.toMatchObject({ code: 'workflow.activity.compiler-owned' })
+  })
+
+  // Host 内部调用越过授权门后，仍要走正常的状态机检查——这里的 transition.invalid
+  // 正说明授权门放行了，而不是又被拦在授权上。
+  it('Host 内部调用越过授权门后仍受状态机约束', async () => {
+    const ctx = context()
+    const state = (await readWorkflowState(ctx, { create: true }))!
+
+    await expect(beginWorkflowActivity(
+      ctx,
+      { activity: 'blueprint.outline', expectedWorkflowRevision: state.revision },
+      { compilerOwned: true },
+    )).rejects.toMatchObject({ code: 'workflow.transition.invalid' })
+  })
+
+  it('最终组装返工会清除下游可玩性审查的旧完成凭据', async () => {
+    const ctx = context()
+    const initial = createInitialWorkflowState('workflow-test-game')
+    const completed: ActivityRecord = {
+      revision: 1,
+      status: 'complete' as const,
+      startedAt: '2026-08-24T14:10:40.778Z',
+      completedAt: '2026-08-24T14:10:48.230Z',
+      artifactRefs: [{ kind: 'blueprint', id: 'bp-main', revision: 5 }],
+      evidence: [{
+        schemaVersion: 1,
+        activity: 'playtest.validating',
+        activityRevision: 1,
+        projectRevision: 5,
+        checkId: 'playtest.playability.valid',
+        status: 'pass',
+        observedAt: '2026-08-24T14:10:48.230Z',
+      }],
+    }
+    const state: VideoGameWorkflowState = {
+      ...initial,
+      productPhase: 'feature-development',
+      phaseStatus: 'working',
+      activity: 'game.finalizing',
+      activityRevision: 1,
+      activityStatus: 'complete',
+      activeGroup: {
+        id: 'integration',
+        activities: ['game.finalizing'],
+        status: 'complete',
+        revision: 2,
+      },
+      phases: {
+        ...initial.phases,
+        'feature-development': { revision: 1, status: 'working' },
+      },
+      activities: {
+        ...initial.activities,
+        'game.finalizing': {
+          revision: 1,
+          status: 'complete',
+          artifactRefs: [],
+          evidence: [],
+        },
+        'playtest.validating': completed,
+      },
+    }
+    await ctx.files.write(VIDEO_GAME_WORKFLOW_FILE, new TextEncoder().encode(JSON.stringify(state)))
+
+    const reworking = await beginWorkflowActivity(ctx, {
+      activity: 'game.finalizing',
+      rework: true,
+      reason: 'finalization fix requires another playability review',
+    }, { compilerOwned: true })
+
+    expect(reworking.activities['playtest.validating']).toEqual({
+      revision: 1,
+      status: 'not-started',
+      artifactRefs: [],
+      evidence: [],
+    })
   })
 
   it('ignores the obsolete character-cost gate when reading a legacy workflow', async () => {
@@ -316,12 +553,12 @@ describe('video-game workflow state', () => {
       gateApprovals: [
         { gate: 'pillar', evidenceRef: 'production:pillar:9', revision: 9 },
       ],
-    })).rejects.toMatchObject({ code: 'workflow.gate.external-only' })
+    }, { compilerOwned: true })).rejects.toMatchObject({ code: 'workflow.gate.external-only' })
 
     await expect(beginWorkflowActivity(ctx, {
       activity: 'blueprint.outline',
       expectedWorkflowRevision: state.revision,
-    })).rejects.toMatchObject({ code: 'workflow.gate.required' })
+    }, { compilerOwned: true })).rejects.toMatchObject({ code: 'workflow.gate.required' })
   })
 
   it('rejects stale transitions and skipping mandatory activities', async () => {
@@ -404,10 +641,10 @@ describe('作者门的提示条策略', () => {
     await expect(beginWorkflowActivity(ctx, {
       activity: 'blueprint.outline',
       expectedWorkflowRevision: state.revision,
-    })).rejects.toMatchObject({ code: 'workflow.gate.required' })
+    }, { compilerOwned: true })).rejects.toMatchObject({ code: 'workflow.gate.required' })
   })
 
-  it('作者确认支柱后提示条报下一步，而不是停在「正在建立游戏支柱」', async () => {
+  it('作者确认支柱后不再显示支柱或可玩性审查提示条', async () => {
     const ctx = context()
     const state = await advanceTo(ctx, 'document.pillar')
     const confirmed = await confirmPillarAuthorGate(ctx, {
@@ -417,9 +654,8 @@ describe('作者门的提示条策略', () => {
     const notice = projectWorkflowState(confirmed).notice
     const modules = projectWorkflowState(confirmed).modules
 
-    // 支柱已经确认过了，作者会觉得流程卡住；这段间隙要说「即将生成游戏蓝图」。
-    expect(notice?.kind).toBe('upcoming')
-    expect(notice?.activity).toBe('blueprint.outline')
+    // 支柱确认后的编译与可玩性审查都是 Host 内部原子投影，不向作者暴露中间进度。
+    expect(notice).toBeUndefined()
     expect(modules.blueprint?.availability, '功能开发尚未开始时蓝图入口不应提前出现').toBe('hidden')
   })
 })
@@ -428,7 +664,7 @@ describe('awaiting-user workflow transition', () => {
   it('narrows the projection while waiting and can resume the same activity', async () => {
     const ctx = context()
     expect(activityContract('brief.collecting').allowedToolNames).toContain(
-      'mcp__as-mate-tools__extension__game_video__await_user',
+      gameVideoMcpToolName('await-user'),
     )
     const initial = (await readWorkflowState(ctx, { create: true }))!
     const working = await beginWorkflowActivity(ctx, {
@@ -789,12 +1025,25 @@ describe('侧边栏按 workflow 活动历史单调解锁', () => {
     }
 
     expect(isPostDeliveryCatalogMaintenance(delivered)).toBe(true)
+    expect(isPostDeliveryAuthoringMaintenance(delivered)).toBe(true)
     expect(canCreateCatalogAdHocScenes(delivered)).toBe(true)
     expect(() => assertSceneCatalogMutationAllowed(
       delivered,
       undefined,
       ['scenes.previewing', 'assets.scene'],
       ['scenes', 'assets.scene'],
+    )).not.toThrow()
+    expect(() => assertBlueprintMutationAllowed(
+      delivered,
+      undefined,
+      ['game.finalizing'],
+      ['graph', 'ui', 'rules'],
+    )).not.toThrow()
+    expect(() => assertAssetCatalogMutationAllowed(
+      delivered,
+      undefined,
+      ['characters.previewing', 'assets.character'],
+      ['characters', 'assets.character'],
     )).not.toThrow()
     expect(() => assertWorkflowMutationAllowed(
       delivered,

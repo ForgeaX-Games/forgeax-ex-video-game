@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { GameGraph } from '@/runtime/core/schema/graph-schema'
 import { canvasNodeDetails, canvasSettlementLabel, GraphCanvas } from '../GraphCanvas'
@@ -76,49 +76,10 @@ describe('GraphCanvas output handles', () => {
     expect(container.querySelector('.gv-graph-minimap-node.is-active')).toBeTruthy()
   })
 
-  it('adds a node behind the output whose arrow was hovered', () => {
-    // a 的 fail 出口已连到 b：点该出口的「+」应把新节点插在 a→b 之间，default 出口不受影响。
-    // 「+」UI 当前 display:none，DOM/逻辑仍保留。
-    const forked: GameGraph = {
-      nodes: graph.nodes,
-      edges: [{ id: 'a-fail-b', source: 'a', target: 'b', sourceHandle: 'fail', targetHandle: 'in' }],
-    }
-    const onChange = vi.fn()
-    const { container, rerender } = render(<GraphCanvas graph={forked} onChange={onChange} />)
-
-    // a/b 各 1 个入口 + a 出口 default/fail + b 出口 default = 5。
-    expect(container.querySelectorAll('.gv-handle-add-btn')).toHaveLength(5)
-
-    const failHandle = container.querySelector('[data-handleid="source:fail"]')
-    fireEvent.click(failHandle!.closest('.gv-handle-more')!.querySelector('.gv-handle-add-btn')!)
-
-    const next = onChange.mock.calls[0]![0] as GameGraph
-    const created = next.nodes.find((n) => !['a', 'b'].includes(n.id))!
-    expect(created.data.name).toBe('新演出节点')
-    expect(next.edges.some((e) => e.source === 'a' && e.target === created.id && e.sourceHandle === 'fail')).toBe(true)
-    expect(next.edges.some((e) => e.source === created.id && e.target === 'b')).toBe(true)
-    expect(next.edges.some((e) => e.id === 'a-fail-b')).toBe(false)
-
-    rerender(<GraphCanvas graph={forked} onChange={onChange} readOnly />)
+  it('does not render handle-side add buttons; insert stays on drag-to-empty', () => {
+    const { container } = render(<GraphCanvas graph={graph} onChange={() => { }} />)
     expect(container.querySelector('.gv-handle-add-btn')).toBeNull()
-  })
-
-  it('adds a node in front of the input whose arrow was hovered', () => {
-    // a→b：点 b 入口的「+」应把新节点插在 a→b 之间，保留原 sourceHandle。
-    const onChange = vi.fn()
-    const { container } = render(<GraphCanvas graph={graph} onChange={onChange} />)
-
-    // 两个节点各有一个入口 +；按渲染顺序第二个是 b。
-    const inletAdds = container.querySelectorAll('.gv-handle-add-btn.is-before')
-    expect(inletAdds).toHaveLength(2)
-    fireEvent.click(inletAdds[1]!)
-
-    const next = onChange.mock.calls[0]![0] as GameGraph
-    const created = next.nodes.find((n) => !['a', 'b'].includes(n.id))!
-    expect(created.data.name).toBe('新演出节点')
-    expect(next.edges.some((e) => e.source === 'a' && e.target === created.id && (e.sourceHandle ?? 'default') === 'default')).toBe(true)
-    expect(next.edges.some((e) => e.source === created.id && e.target === 'b')).toBe(true)
-    expect(next.edges.some((e) => e.id === 'a-b')).toBe(false)
+    expect(container.querySelector('[data-testid="play-current-blueprint"]')).toBeNull()
   })
 
   it('marks the current graph entry node', () => {

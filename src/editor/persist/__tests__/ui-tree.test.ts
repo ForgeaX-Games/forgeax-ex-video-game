@@ -5,7 +5,6 @@ import { toRuntimeScenario } from '@/authoring/blueprint/formula-authoring'
 import {
   addUiTreeFolder,
   addUiTreeScheme,
-  BASIC_UI_FOLDER_ID,
   collectUiTreeNodeIds,
   CUSTOM_UI_FOLDER_ID,
   ensureUiTree,
@@ -77,9 +76,8 @@ describe('uiTree pure functions', () => {
 })
 
 describe('uiTree migration and persistence', () => {
-  it('creates default basic/custom folders when no tree exists', () => {
+  it('creates the interface-template folder and keeps base overlays out of the tree', () => {
     const tree = ensureUiTree(undefined, overlays)
-    expect((findUiTreeNode(tree, BASIC_UI_FOLDER_ID) as { children: unknown[] }).children).toHaveLength(1)
     expect((findUiTreeNode(tree, CUSTOM_UI_FOLDER_ID) as { children: unknown[] }).children).toHaveLength(2)
     expect(findUiTreeNode(tree, UNGROUPED_UI_FOLDER_ID)).toBeUndefined()
     expect(validateUiTree(tree).valid).toBe(true)
@@ -101,7 +99,7 @@ describe('uiTree migration and persistence', () => {
     expect(migrated.root[0]).toMatchObject({ id: 'mine', name: '我的顺序' })
     expect(findUiTreeNode(migrated, 'dialogue-node')).toEqual(existing.root[0] && (existing.root[0] as { children: unknown[] }).children[0])
     expect(findUiTreeNode(migrated, 'dangling-node')).toBeUndefined()
-    expect((findUiTreeNode(migrated, BASIC_UI_FOLDER_ID) as { children: Array<{ overlayId: string }> }).children[0]?.overlayId).toBe('base:hp')
+    expect(findUiTreeNode(migrated, 'ui-folder:basic')).toBeUndefined()
     expect((findUiTreeNode(migrated, CUSTOM_UI_FOLDER_ID) as { children: Array<{ overlayId: string }> }).children[0]?.overlayId).toBe('combat')
     expect(findUiTreeNode(migrated, UNGROUPED_UI_FOLDER_ID)).toBeUndefined()
     expect(ensureUiTree(migrated, overlays)).toBe(migrated)
@@ -139,16 +137,16 @@ describe('uiTree migration and persistence', () => {
     expect(rebuilt.uiTree).toEqual(tree)
   })
 
-  it('defaults to 模板 before 控件', () => {
+  it('uses 界面模板 as the default directory name', () => {
     const tree = ensureUiTree(undefined, overlays)
-    expect(tree.root.map((n) => n.id)).toEqual([CUSTOM_UI_FOLDER_ID, BASIC_UI_FOLDER_ID])
+    expect(tree.root.map((n) => n.id)).toEqual([CUSTOM_UI_FOLDER_ID])
+    expect((tree.root[0] as { name: string }).name).toBe('界面模板')
   })
 
-  it('pins 控件 to the root tail so new top-level folders land before it', () => {
-    // 既有树把控件放在前面：规范化应把它挪到末尾，用户区都在它前面。
+  it('filters the legacy basic folder and its base overlays without changing overlay data', () => {
     const existing: UiTree = {
       root: [
-        { kind: 'folder', id: BASIC_UI_FOLDER_ID, name: '控件', children: [{ kind: 'scheme', id: 's-base', overlayId: 'base:hp' }] },
+        { kind: 'folder', id: 'ui-folder:basic', name: '基础界面', children: [{ kind: 'scheme', id: 's-base', overlayId: 'base:hp' }] },
         { kind: 'folder', id: CUSTOM_UI_FOLDER_ID, name: '模板', children: [
           { kind: 'scheme', id: 's-combat', overlayId: 'combat' },
           { kind: 'scheme', id: 's-dialogue', overlayId: 'dialogue' },
@@ -156,18 +154,9 @@ describe('uiTree migration and persistence', () => {
       ],
     }
     const migrated = ensureUiTree(existing, overlays)
-    // 基础界面被钉到末尾，自定义界面在前；无遗漏 overlay 故不补未分组。
-    expect(migrated.root.map((n) => n.id)).toEqual([CUSTOM_UI_FOLDER_ID, BASIC_UI_FOLDER_ID])
-    // 幂等：再规范一次不产生新引用。
+    expect(migrated.root.map((n) => n.id)).toEqual([CUSTOM_UI_FOLDER_ID])
+    expect(findUiTreeNode(migrated, 's-base')).toBeUndefined()
     expect(ensureUiTree(migrated, overlays)).toBe(migrated)
-
-    // 新建顶层文件夹插末尾（insertNode 默认），落在基础界面之前（基础界面已被钉末尾）。
-    let withNew = addUiTreeFolder(migrated, null, { id: 'ui-folder:boss', name: '首领战' })
-    withNew = ensureUiTree(withNew, overlays)
-    const ids = withNew.root.map((n) => n.id)
-    expect(ids[ids.length - 1]).toBe(BASIC_UI_FOLDER_ID)
-    expect(ids).toContain('ui-folder:boss')
-    expect(ids.indexOf('ui-folder:boss')).toBeLessThan(ids.indexOf(BASIC_UI_FOLDER_ID))
   })
 
   it('puts node-local overlays in 模板 and migrates them out of 未分组', () => {

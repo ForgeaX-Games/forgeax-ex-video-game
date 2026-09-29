@@ -9,9 +9,19 @@
       "enum": ["intake", "design-options", "core", "inquiry", "pillar"],
       "description": "Pipeline document slot to upsert."
     },
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "支柱活动当前修订号。重开活动后旧 peer 的写入会被拒绝。"
+    },
     "content": {
       "type": "string",
-      "description": "Markdown body to write. Omit to register an existing docs/ file."
+      "maxLength": 40000,
+      "description": "Markdown body for non-pillar documents. For pillar prefer `contract`; if content is used it must be IR JSON or a pillar-interaction-contract fence, not author prose. Host renders the author-facing document. Per-call pillar payload must stay <=32000 characters; the schema cap is deliberately higher so the Host can answer an oversize pillar with actionable compression guidance instead of a bare schema error."
+    },
+    "contract": {
+      "type": "object",
+      "description": "Pillar IR v4. Creative surface for pillar. May contain a subset of skeleton beats; Host merges by beat id and renders author markdown. Omit carrier and settlement prose. Do not put this JSON in content."
     },
     "name": {
       "type": "string",
@@ -20,7 +30,7 @@
     "slug": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-      "description": "Required filename slug prefix for docs/<slug>_<type>.md. Never inferred; an illegal slug is rejected instead of sanitized."
+      "description": "ASCII filename slug prefix for docs/<slug>_<type>.md. For pillar reuse pillarSource.documentSlug. Chinese or other non-ASCII slugs are rejected."
     }
   }
 }

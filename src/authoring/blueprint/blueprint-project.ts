@@ -4,7 +4,7 @@
  * - `manifest.packs` 含主蓝图（编辑库）+ 子蓝图；engine 执行中遇依赖从此表取；无根级 `packs` 数组。
  */
 import type {
-  BlueprintDoc, BlueprintManifest, GameGraph, GameScenario, GraphLibraryDocument, ScenarioMetaFields, SubFlowPackDef,
+  BlueprintDoc, BlueprintManifest, ComponentEvent, GameGraph, GameScenario, GraphLibraryDocument, ScenarioMetaFields, SubFlowPackDef,
 } from '@/runtime/core/schema/graph-schema'
 import { getSubFlowPack, getSubProcess, resolveGraphEntry } from '@/runtime/core/schema/graph-schema'
 import type { EditorScenarioDocument } from '@/authoring/blueprint/formula-authoring'
@@ -182,7 +182,13 @@ export function playDocument(doc: GraphLibraryDocument, rootBlueprintId?: string
   }
 }
 
-export function validateDocument(doc: GraphLibraryDocument): string[] {
+export function validateDocument(
+  doc: GraphLibraryDocument,
+  options?: {
+    deferReferenceErrors?: boolean
+    componentEvents?: ReadonlyMap<string, { events: readonly ComponentEvent[] }>
+  },
+): string[] {
   const normalized = normalizeDocument(doc)
   const errors: string[] = []
   const blueprints = normalized.manifest.packs
@@ -238,11 +244,14 @@ export function validateDocument(doc: GraphLibraryDocument): string[] {
       vars: Object.keys(normalized.variables ?? {}),
       formulas: Object.keys(normalized.formulas ?? {}),
       overlays: normalized.ui?.overlays,
+      componentEvents: options?.componentEvents,
     }).filter((issue) => issue.level === 'error' && issue.code.startsWith('ref.'))
-    for (const issue of referenceIssues) {
-      errors.push(
-        `蓝图「${bp.title}」(${bpId}) ${issue.msg}${issue.at ? ` (${issue.at})` : ''}`,
-      )
+    if (!options?.deferReferenceErrors) {
+      for (const issue of referenceIssues) {
+        errors.push(
+          `蓝图「${bp.title}」(${bpId}) ${issue.msg}${issue.at ? ` (${issue.at})` : ''}`,
+        )
+      }
     }
     if (bp.graph.nodes.length > 0 && !bp.graph.nodes.some((n) => n.id === bp.entry)) {
       const fallback = resolveGraphEntry(bp.graph) ?? '∅'

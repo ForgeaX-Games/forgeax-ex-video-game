@@ -163,7 +163,13 @@ export const VIDEO_FULLSCREEN_DIALOG_CSS = `
 .vfd-play-icon > i { display: block; width: 2.5px; height: 15px; background: currentColor; }
 .vfd-restart-icon { display: block; width: 19px; height: 20px; }
 .vfd-fullscreen-icon > img { display: block; width: 20px; height: 20px; }
-.vfd-rate { padding: 0; border: 0; color: #ff9c2a; background: transparent; cursor: pointer; font: inherit; font-size: 16px; line-height: 20px; }
+.vfd-rate-picker { position:relative; }
+.vfd-rate { padding: 0; border: 0; color: #fff; background: transparent; cursor: pointer; font: inherit; font-size: 16px; line-height: 20px; }
+.vfd-rate[aria-expanded="true"] { color:#ff9c2a; }
+.vfd-rate-menu { position:absolute; right:0; bottom:calc(100% + 8px); display:flex; box-sizing:border-box; width:76px; flex-direction:column; align-items:flex-start; gap:4px; padding:8px; overflow:hidden; border:1px solid rgba(255,255,255,.2); border-radius:12px; background:#141414; }
+.vfd-rate-menu button { box-sizing:border-box; width:60px; height:38px; padding:8px; border:0; border-radius:8px; color:#fff; background:transparent; font:500 16px/22px "PingFang SC",sans-serif; text-align:center; cursor:pointer; }
+.vfd-rate-menu button:hover { background:rgba(255,255,255,.1); }
+.vfd-rate-menu button[aria-checked="true"] { color:#ff9c2a; }
 .vfd-image {
   display: block;
   width: 100%;
@@ -249,6 +255,59 @@ function formatPlaybackTime(value: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+const PLAYBACK_RATES = [2, 1.5, 1, 0.5] as const
+
+export function PlaybackRatePicker({
+  playbackRate,
+  onChange,
+  ariaLabel,
+  className = 'vfd-rate',
+  disabled = false,
+  dataAction,
+}: {
+  playbackRate: number
+  onChange(rate: number): void
+  ariaLabel: string
+  className?: string
+  disabled?: boolean
+  dataAction?: string
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent): void => {
+      if (event.target instanceof Node && rootRef.current?.contains(event.target)) return
+      setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+
+  return <div ref={rootRef} className="vfd-rate-picker">
+    <button type="button" className={`${className} vfd-rate`} data-action={dataAction} disabled={disabled} aria-label={ariaLabel} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+      {translateUiFormat('mediaPreview.rateValue', { rate: playbackRate.toFixed(1) })}
+    </button>
+    {open ? <div className="vfd-rate-menu" role="menu" aria-label={ariaLabel}>
+      {PLAYBACK_RATES.map((rate) => <button
+        type="button"
+        key={rate}
+        role="menuitemradio"
+        aria-checked={rate === playbackRate}
+        onClick={() => { onChange(rate); setOpen(false) }}
+      >{translateUiFormat('mediaPreview.rateMenuValue', { rate: rate.toFixed(1) })}</button>)}
+    </div> : null}
+  </div>
+}
+
 export function MediaPreviewControls({
   currentTime,
   duration,
@@ -268,7 +327,7 @@ export function MediaPreviewControls({
   onTogglePlayback(): void
   onRestartPlayback(): void
   onSeek(time: number): void
-  onUpdatePlaybackRate(): void
+  onUpdatePlaybackRate(rate: number): void
   onFullscreen?(): void
   fullscreenDisabled?: boolean
 }): JSX.Element {
@@ -285,18 +344,52 @@ export function MediaPreviewControls({
       aria-label={translateUi('mediaPreview.progress')}
       onChange={(event) => onSeek(Number(event.target.value))}
     />
-    <div className="vfd-control-row">
-      <div className="vfd-control-left">
-        <button type="button" className="vfd-control-button" onClick={onTogglePlayback} aria-label={translateUi(playing ? 'mediaPreview.pause' : 'mediaPreview.play')}>
-          {playing ? <span className="vfd-play-icon" aria-hidden><i /><i /></span> : '▶'}
-        </button>
-        <button type="button" className="vfd-control-button" onClick={onRestartPlayback} aria-label={translateUi('mediaPreview.replay')}><img className="vfd-restart-icon" src={restartIcon} alt="" /></button>
-        <span className="vfd-time"><span className="vfd-time-current">{formatPlaybackTime(currentTime)}</span><span>/</span><span>{formatPlaybackTime(duration)}</span></span>
-      </div>
-      <div className="vfd-control-right">
-        <button type="button" className="vfd-rate" onClick={onUpdatePlaybackRate}>{translateUiFormat('mediaPreview.rateValue', { rate: playbackRate.toFixed(1) })}</button>
-        <button type="button" className="vfd-control-button vfd-fullscreen-icon" onClick={onFullscreen} aria-label={translateUi('mediaPreview.fullscreen')} disabled={fullscreenDisabled}><img src={fullscreenIcon} alt="" /></button>
-      </div>
+    <MediaPreviewControlRow
+      currentTime={currentTime}
+      duration={duration}
+      playing={playing}
+      playbackRate={playbackRate}
+      onTogglePlayback={onTogglePlayback}
+      onRestartPlayback={onRestartPlayback}
+      onUpdatePlaybackRate={onUpdatePlaybackRate}
+      onFullscreen={onFullscreen}
+      fullscreenDisabled={fullscreenDisabled}
+    />
+  </div>
+}
+
+export function MediaPreviewControlRow({
+  currentTime,
+  duration,
+  playing,
+  playbackRate,
+  onTogglePlayback,
+  onRestartPlayback,
+  onUpdatePlaybackRate,
+  onFullscreen,
+  fullscreenDisabled = false,
+}: {
+  currentTime: number
+  duration: number
+  playing: boolean
+  playbackRate: number
+  onTogglePlayback(): void
+  onRestartPlayback(): void
+  onUpdatePlaybackRate(rate: number): void
+  onFullscreen?(): void
+  fullscreenDisabled?: boolean
+}): JSX.Element {
+  return <div className="vfd-control-row">
+    <div className="vfd-control-left">
+      <button type="button" className="vfd-control-button" onClick={onTogglePlayback} aria-label={translateUi(playing ? 'mediaPreview.pause' : 'mediaPreview.play')}>
+        {playing ? <span className="vfd-play-icon" aria-hidden><i /><i /></span> : '▶'}
+      </button>
+      <button type="button" className="vfd-control-button" onClick={onRestartPlayback} aria-label={translateUi('mediaPreview.replay')}><img className="vfd-restart-icon" src={restartIcon} alt="" /></button>
+      <span className="vfd-time"><span className="vfd-time-current">{formatPlaybackTime(currentTime)}</span><span>/</span><span>{formatPlaybackTime(duration)}</span></span>
+    </div>
+    <div className="vfd-control-right">
+      <PlaybackRatePicker playbackRate={playbackRate} onChange={onUpdatePlaybackRate} ariaLabel={translateUi('mediaPreview.rate')} />
+      {onFullscreen ? <button type="button" className="vfd-control-button vfd-fullscreen-icon" onClick={onFullscreen} aria-label={translateUi('mediaPreview.fullscreen')} disabled={fullscreenDisabled}><img src={fullscreenIcon} alt="" /></button> : null}
     </div>
   </div>
 }
@@ -388,11 +481,10 @@ export function VideoFullscreenDialog({
     void video.play()
   }
 
-  const updatePlaybackRate = (): void => {
+  const updatePlaybackRate = (rate: number): void => {
     const video = videoRef.current
-    const nextRate = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1
-    setPlaybackRate(nextRate)
-    if (video) video.playbackRate = nextRate
+    setPlaybackRate(rate)
+    if (video) video.playbackRate = rate
   }
 
   if (!open || typeof document === 'undefined') return null
@@ -445,7 +537,7 @@ export function VideoFullscreenDialog({
           onRestartPlayback={restartPlayback}
           onSeek={(time) => { setCurrentTime(time); if (videoRef.current) videoRef.current.currentTime = time }}
           onUpdatePlaybackRate={updatePlaybackRate}
-          onFullscreen={() => { void stageRef.current?.requestFullscreen?.() }}
+          onFullscreen={onClose}
         /> : null)}
         {onImport ? (
           <footer className="vfd-footer">

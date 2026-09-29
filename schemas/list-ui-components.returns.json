@@ -13,7 +13,7 @@
     },
     "components": {
       "type": "array",
-      "description": "平台内置界面元件的契约。events 有两个用途：写节点 reaction 的 when.event.id，以及作为节点的**出口 handle**——节点除 default 外的每个出口都来自挂载元件的某个事件，边的 sourceHandle 必须对齐其中一个 id。inputs 是可写的输入键，component 为 numberExpr 的输入可以绑表达式（实体属性、变量或公式）。",
+      "description": "内置及当前游戏 authored 界面元件的契约。events 有两个用途：写节点 reaction 的 when.event.id，以及作为节点的出口 handle；events[].outputs 声明 payload 字段，reaction 通过 eventPayload.<key> 读取。inputs 是可写的输入键，component 为 numberExpr 的输入可以绑表达式（实体属性、变量或公式）。",
       "items": {
         "type": "object",
         "additionalProperties": true,
@@ -110,6 +110,45 @@
               "defaultTtlMs": { "type": "number", "exclusiveMinimum": 0 }
             }
           },
+          "gameplaySemantics": {
+            "type": "object",
+            "description": "机器可读玩法语义。支柱与总脉络据此理解该控件解决什么玩法问题、依赖哪些状态、事件必须产生什么后果、适合搭配哪些结算，以及哪些合法配置其实没有游戏意义。",
+            "required": ["roles", "purpose", "stateBindings", "eventSemantics", "requiredCompanions", "recommendedSettlements", "requiredFeedback", "antiPatterns"],
+            "properties": {
+              "roles": { "type": "array", "items": { "enum": ["narrative-display", "player-choice", "combat-command", "timed-input", "state-feedback", "transient-feedback"] } },
+              "purpose": { "type": "string" },
+              "stateBindings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["input", "meaning", "required"],
+                  "properties": {
+                    "input": { "type": "string" },
+                    "meaning": { "type": "string" },
+                    "required": { "type": "boolean" }
+                  }
+                }
+              },
+              "eventSemantics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["event", "intent", "requiredConsequences", "stateMutationOwner", "downstreamPayoff"],
+                  "properties": {
+                    "event": { "type": "string" },
+                    "intent": { "type": "string" },
+                    "requiredConsequences": { "type": "array", "items": { "enum": ["effect", "feedback", "advance"] } },
+                    "stateMutationOwner": { "const": "settlement" },
+                    "downstreamPayoff": { "type": "string" }
+                  }
+                }
+              },
+              "requiredCompanions": { "type": "array", "items": { "type": "string" } },
+              "recommendedSettlements": { "type": "array", "items": { "type": "string" } },
+              "requiredFeedback": { "type": "array", "items": { "type": "string" } },
+              "antiPatterns": { "type": "array", "items": { "type": "string" } }
+            }
+          },
           "events": {
             "type": "array",
             "items": {
@@ -124,6 +163,19 @@
                 },
                 "label": {
                   "type": "string"
+                },
+                "outputs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["key", "valueType"],
+                    "properties": {
+                      "key": { "type": "string" },
+                      "label": { "type": "string" },
+                      "valueType": { "enum": ["string", "number", "boolean"] }
+                    }
+                  }
                 }
               }
             },

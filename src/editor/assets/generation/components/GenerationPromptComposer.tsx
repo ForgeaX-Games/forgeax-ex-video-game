@@ -54,6 +54,7 @@ export interface GenerationPromptComposerProps extends GenerationInteractionProp
   mentionEmptyLabel?: string
   mentionPresentation?: 'menu' | 'dialog'
   mentionButtonLabel?: string
+  mentionIcon?: ReactNode
   submitLabel?: string
   cancelLabel?: string
   clearLabel?: string
@@ -98,6 +99,7 @@ export function GenerationPromptComposer({
   mentionEmptyLabel,
   mentionPresentation = 'menu',
   mentionButtonLabel,
+  mentionIcon,
   submitLabel,
   cancelLabel,
   clearLabel,
@@ -203,7 +205,7 @@ export function GenerationPromptComposer({
 
   return (
     <section className="generation-prompt-composer" aria-label={label ?? t('generation.prompt.label')}>
-      {top ? <div className="generation-prompt-top">{top}</div> : null}
+      {top}
       <div className="generation-prompt-body">
         {prefix ? <div className="generation-prompt-prefix">{prefix}</div> : null}
         <PromptMentionEditor
@@ -233,7 +235,7 @@ export function GenerationPromptComposer({
               disabled={!can('edit')}
               onClick={(event) => editorRef.current?.openMentions(event.currentTarget)}
             >
-              @
+              {mentionIcon ?? '@'}
             </button>
             <button
               type="button"

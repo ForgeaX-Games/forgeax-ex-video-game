@@ -101,4 +101,80 @@ describe('standalone runtime host', () => {
     }])
     expect(fetchMock).toHaveBeenCalledTimes(6)
   })
+
+  it('uses playable manifest URLs without requesting Kino', async () => {
+    const manifestAssets = [
+      { id: VIDEO_ID, kind: 'video', url: 'https://cdn.example.com/video.mp4' },
+      { id: 'image-1', kind: 'image', url: 'https://cdn.example.com/image.png' },
+      { id: 'audio-1', kind: 'audio', url: 'https://cdn.example.com/audio.mp3' },
+    ]
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === `${GAME_BASE_URL}project.json`) return jsonResponse(project)
+      if (url === `${GAME_BASE_URL}blueprint.json`) return jsonResponse(blueprint)
+      if (url === `${GAME_BASE_URL}assets/manifest.json`) {
+        return jsonResponse({ version: 2, assets: manifestAssets })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const session = await createStandaloneRuntimeHost({
+      fetch: fetchMock as unknown as typeof fetch,
+      gameBaseUrl: GAME_BASE_URL,
+    }).ready()
+
+    expect(session.gamePackage.assetsManifest.assets).toEqual(manifestAssets)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('requests only media kinds with unresolved manifest URLs', async () => {
+    const requestedMediaTypes: string[] = []
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const rawUrl = String(input)
+      if (rawUrl === `${GAME_BASE_URL}project.json`) return jsonResponse(project)
+      if (rawUrl === `${GAME_BASE_URL}blueprint.json`) return jsonResponse(blueprint)
+      if (rawUrl === `${GAME_BASE_URL}assets/manifest.json`) {
+        return jsonResponse({
+          version: 2,
+          assets: [
+            { id: VIDEO_ID, kind: 'video', url: 'https://cdn.example.com/video.mp4' },
+            {
+              id: 'asset-image-1',
+              kind: 'image',
+              provider: { kind: 'kino', ref: 'image-1', upstreamResourceId: 'image-1' },
+            },
+          ],
+        })
+      }
+      const url = new URL(rawUrl)
+      const mediaType = url.searchParams.get('media_type')!
+      requestedMediaTypes.push(mediaType)
+      return jsonResponse({
+        code: 0,
+        data: {
+          items: mediaType === 'image'
+            ? [{ resource_id: 'image-1', media_type: 'image', url: 'https://cdn.example.com/image.png' }]
+            : [],
+          total: mediaType === 'image' ? 1 : 0,
+        },
+        message: 'ok',
+      })
+    })
+
+    const session = await createStandaloneRuntimeHost({
+      fetch: fetchMock as unknown as typeof fetch,
+      gameBaseUrl: GAME_BASE_URL,
+    }).ready()
+
+    expect(requestedMediaTypes).toEqual(['image'])
+    expect(session.gamePackage.assetsManifest.assets).toEqual([
+      { id: VIDEO_ID, kind: 'video', url: 'https://cdn.example.com/video.mp4' },
+      {
+        id: 'asset-image-1',
+        kind: 'image',
+        provider: { kind: 'kino', ref: 'image-1', upstreamResourceId: 'image-1' },
+        url: 'https://cdn.example.com/image.png',
+      },
+    ])
+  })
 })

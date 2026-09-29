@@ -12,6 +12,7 @@ import { useEffect, useMemo } from 'react'
 import type { GameScenario, Layout, Overlay, OverlayChild, UiTreeNode } from '@/runtime/core/schema/graph-schema'
 import { ScenarioInspector, type ScenarioSection } from './ScenarioInspector'
 import { OverlaySchemeEditor } from './OverlaySchemeEditor'
+import { OverlaySchemeLibrary } from './OverlaySchemeLibrary'
 import { useGraphScenario, graphUndo, graphRedo } from '../persist/graphScenarioStore'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { CATALOG_CSS } from './catalogCss'
@@ -19,8 +20,7 @@ import {
   NEW_COMPONENT_PRESETS,
   BASE_HUD_PREFIX,
   listInterfaceCustomSchemeIds,
-  listBaseHudIds,
-} from '@/authoring/demo/builtin-schemes'
+} from '@/authoring/overlays/builtin-schemes'
 import { findDuplicateOverlays } from './overlay-dedup'
 import type { Formula } from '@/authoring/blueprint/formula-authoring'
 import { countOverlayReferences } from '@/authoring/graph/overlay-edit'
@@ -38,6 +38,7 @@ import { collectItemIds } from './itemCatalog'
 import { overlayTitleExists } from './overlay-title'
 import { ensureUiTree } from '../persist/ui-tree'
 import { useUiSelection } from '../persist/uiSelectionStore'
+import { broadcastUiTreeIntent } from '../persist/graphUiTreeSync'
 import { useRuleSelection } from '../persist/ruleSelectionStore'
 
 export interface ConfigTab {
@@ -102,17 +103,17 @@ export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = 
   const dupMap = useMemo(() => findDuplicateOverlays(allOverlays), [allOverlays])
   // 界面 tab 保持新建方案置顶；其它方案选择器继续沿用通用排序。
   const schemeIds = useMemo(() => listInterfaceCustomSchemeIds(allOverlays), [allOverlays])
-  const baseIds = useMemo(() => listBaseHudIds(allOverlays), [allOverlays])
   const selectedOverlayId = useUiSelection((state) => state.selectedOverlayId)
-  // 主区展示用的方案：选中项不存在于当前 overlays（删除/首次/空选中）时，
-  // 回落到第一个全局方案，保证 OverlaySchemeEditor 始终有内容可渲染。
-  // node:* 方案不会进入全局方案集，但可以由界面树选中，必须直接展示。
-  // 注意：这里只做「渲染回落」，不回写选中态——选中态纯用户驱动（与左栏主树一致），
-  // 否则新建方案时 add-scheme 的 selectUiNode 会与此处回写抢态，导致 is-selected 闪烁。
-  const selOverlay = selectedOverlayId && allOverlays[selectedOverlayId]
-    ? selectedOverlayId
-    : (schemeIds[0] ?? baseIds[0] ?? '')
+  const selectUiNode = useUiSelection((state) => state.selectUiNode)
+  // 未选方案时显示自定义界面列表，不能回退打开第一个方案；否则用户无法回到入口页。
+  // node:* 仍允许由树的方案叶子直接选择并进入编辑器。
+  const selOverlay = selectedOverlayId && allOverlays[selectedOverlayId] ? selectedOverlayId : ''
   const uiTree = ensureUiTree(meta.uiTree, allOverlays)
+  const customSchemes = schemeIds.flatMap((overlayId) => {
+    const treeNodeId = findSchemeNodeId(uiTree.root, overlayId)
+    const overlay = allOverlays[overlayId]
+    return treeNodeId && overlay ? [{ treeNodeId, overlay }] : []
+  })
   // 基础覆盖物方案只锁结构：单组件不可增删；inputs/layout 可编辑。
   const selLocked = selOverlay.startsWith(BASE_HUD_PREFIX)
 
@@ -161,12 +162,6 @@ export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = 
     const nodeId = findSchemeNodeId(uiTree.root, oid)
     if (nodeId) removeUiNode(nodeId)
   }
-  const patchSchemePrompt = (oid: string, prompt: string) => {
-    const ov = allOverlays[oid]
-    if (!ov) return
-    setOverlays({ ...allOverlays, [oid]: { ...ov, prompt } })
-  }
-  // 简介字段（Overlay.prompt）经 GraphConfigView 写回 meta.ui.overlays。
   const addSchemeChild = (
     oid: string,
     componentId: string,
@@ -258,10 +253,15 @@ export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = 
           (() => {
             const ov = allOverlays[selOverlay]
             if (!ov) {
-              return (
-                <div style={{ flex: 1, padding: 18, opacity: 0.6, fontSize: 12 }}>
-                  {translateUi('ui.copy.296cb0b0dfbe')}</div>
-              )
+              return <OverlaySchemeLibrary
+                schemes={customSchemes}
+                entities={meta.entities ?? {}}
+                variables={meta.variables ?? {}}
+                onOpen={(treeNodeId, overlayId) => {
+                  selectUiNode(treeNodeId, overlayId)
+                  broadcastUiTreeIntent({ type: 'select', treeNodeId, overlayId })
+                }}
+              />
             }
             return (
               <OverlaySchemeEditor
@@ -277,7 +277,6 @@ export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = 
                 duplicateOf={dupMap.get(selOverlay) ?? []}
                 onRename={(t) => renameScheme(selOverlay, t)}
                 onRemove={() => removeScheme(selOverlay)}
-                onPromptChange={(prompt) => patchSchemePrompt(selOverlay, prompt)}
                 onAddChild={(p, place) => addSchemeChild(selOverlay, p, place)}
                 onRemoveChild={(c) => removeSchemeChild(selOverlay, c)}
                 onPatchChild={(c, patch) => patchOverlayChild(selOverlay, c, patch)}

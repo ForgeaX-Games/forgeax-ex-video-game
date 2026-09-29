@@ -3,6 +3,7 @@ import type { ExtensionContext } from '@forgeax/extension-host/node'
 import {
   ASSET_PIPELINE_TRACKS,
   PRODUCT_PHASES,
+  isCompiledActivity,
   MAIN_VIDEO_GAME_ACTIVITIES,
   VIDEO_GAME_ACTIVITIES,
   type ActivityRecord,
@@ -486,6 +487,7 @@ const RETRY_DISPOSITION: Readonly<Record<string, WorkflowRetryDisposition>> = {
   'workflow.gate.required': 'stop',
   'workflow.gate.external-only': 'stop',
   'workflow.gate.invalid-state': 'stop',
+  'workflow.gate.pillar-frozen': 'stop',
   'workflow.transition.invalid': 'stop',
   'workflow.capability.denied': 'stop',
   'workflow.write-scope.denied': 'stop',
@@ -561,6 +563,20 @@ function expectedRevision(input: Record<string, unknown>, current: VideoGameWork
 
 function activityRecord(state: VideoGameWorkflowState, activity: VideoGameActivity) {
   return state.activities[activity] ?? { revision: 0, status: 'not-started' as const, artifactRefs: [], evidence: [] }
+}
+
+/**
+ * Rework invalidates the previous run, including its timestamps and evidence.
+ * Keeping completedAt on a not-started record makes a later completion summary
+ * look authoritative even though the activity must still be run again.
+ */
+function resetActivityRecord(record: ActivityRecord): ActivityRecord {
+  return {
+    revision: record.revision,
+    status: 'not-started',
+    artifactRefs: [],
+    evidence: [],
+  }
 }
 
 function nextRevisionState(
@@ -700,12 +716,7 @@ function beginAssetActivityState(
     for (const candidate of invalidated) {
       const prior = activities[candidate]
       if (prior) {
-        activities[candidate] = {
-          ...prior,
-          status: 'not-started',
-          blocker: undefined,
-          evidence: [],
-        }
+        activities[candidate] = resetActivityRecord(prior)
       }
     }
   }
@@ -739,9 +750,22 @@ function beginAssetActivityState(
   }, rework || previous.status === 'blocked' ? 'asset-activity-retrying' : 'asset-activity-began')
 }
 
+/**
+ * Host-only 开启选项。
+ *
+ * 刻意不放在 `input` 里：`input` 是 agent 的工具参数，`begin_activity` 会原样
+ * 透传（extension-service 的 `beginActivity`），所以任何写在 input 里的门禁开关
+ * 都能被模型自己填上，等于没有门禁。
+ */
+export interface BeginWorkflowActivityOptions {
+  /** 由编译器发起，可以开启编译阶段。只有 Host 内部代码能传。 */
+  compilerOwned?: boolean
+}
+
 export async function beginWorkflowActivity(
   context: ExtensionContext,
   input: Record<string, unknown>,
+  options: BeginWorkflowActivityOptions = {},
 ): Promise<VideoGameWorkflowState> {
   const activity = input.activity
   if (!isActivity(activity)) throw new WorkflowStateError('workflow.activity.invalid', 'Unknown video-game activity')
@@ -751,6 +775,20 @@ export async function beginWorkflowActivity(
       const next = beginAssetActivityState(current, activity, input)
       await writeState(context, next)
       return next
+    }
+    // 编译阶段由 Host 在支柱落盘时整体产出。放行 agent 开启它们，等于把
+    // 「支柱是唯一创作面，下游全是编译」这条不变量交回模型自觉——那条路已经
+    // 走过：编排者自己打了 194 次节点配置，在终局节点上空转 76 分钟。
+    //
+    // 授权检查排在状态检查之前：一个根本无权开启的活动，不该先收到
+    // 「转移不合法」这种暗示「换个时机再试」的错误。
+    if (isCompiledActivity(activity) && options.compilerOwned !== true) {
+      throw new WorkflowStateError(
+        'workflow.activity.compiler-owned',
+        `${activity} 是支柱的编译产物，由 Host 在支柱落盘时生成，不接受 agent 开启。已确认后的蓝图缺口在可玩性审查阶段修正，不要返工支柱。`,
+        current.revision,
+        guidanceFor(current, current.activity),
+      )
     }
     const rework = input.rework === true
     // 组内并发 begin 不比全局修订号。
@@ -765,6 +803,23 @@ export async function beginWorkflowActivity(
     if (!canBegin(current, activity, rework)) {
       throw new WorkflowStateError('workflow.transition.invalid', `Cannot begin ${activity} from ${current.activity}:${current.activityStatus}`, current.revision)
     }
+    if (
+      rework
+      && activity === 'document.pillar'
+      && current.gates.pillar?.status === 'approved'
+      && input.authorReopen !== true
+    ) {
+      throw new WorkflowStateError(
+        'workflow.gate.pillar-frozen',
+        '已确认的支柱不得被下游返工。请在当前阶段按已确认支柱装配：settlement 动作使用同节拍结果节点，mut=none 保持纯剧情分流。作者明确要求重开时由确认栏发起。上次作者确认仍然有效。',
+        current.revision,
+        guidanceFor(current, current.activity),
+      )
+    }
+    // 未确认的支柱是**草稿**：写它的 peer 必须能改自己的稿子。文档写入会触发隐式
+    // begin(rework)，所以在这里拦截等于让 peer 修不完第一版——09-09 的支柱就是这样
+    // 卡在四次契约修复之后、带着无效的第 10 拍进入作者确认的。已确认支柱由上面的
+    // `pillar-frozen` 保护；编排者本就不该持有 upsert_document。
     type GateApproval = {
       gate?: unknown
       evidenceRef?: unknown
@@ -847,7 +902,7 @@ export async function beginWorkflowActivity(
         const laterGroup = candidateGroupIndex > targetGroupIndex
         if (!laterGroup && !reworkTrack.has(candidate)) continue
         const prior = activities[candidate]
-        if (prior) activities[candidate] = { ...prior, status: 'not-started', blocker: undefined, evidence: [] }
+        if (prior) activities[candidate] = resetActivityRecord(prior)
       }
     }
     activities[activity] = { revision: activityRevision, status: 'working', startedAt: at, artifactRefs: [], evidence: [] }
@@ -914,7 +969,9 @@ export async function ensureActivityStarted(
     }
     : {}
   try {
-    return await beginWorkflowActivity(context, { activity, ...gateApproval })
+    // Host 自己的推进路径（隐式 begin / auto-advance）。授权已经在工具边界兑现：
+    // 编译阶段没有 allowedToolNames，任何 agent 都拿不到能触发它的写工具。
+    return await beginWorkflowActivity(context, { activity, ...gateApproval }, { compilerOwned: true })
   } catch {
     // 作者门未过、并发抢先等都是合法失败；交回调用方走正常拒绝路径。
     return null
@@ -935,10 +992,9 @@ export async function readWorkflowStateForMutation(
 ): Promise<{ state: VideoGameWorkflowState | null, activityRevision: unknown }> {
   const state = await readWorkflowState(context)
   if (!state) return { state, activityRevision: callerRevision }
-  if (
-    state.phaseStatus === 'complete'
-    && allowedActivities.every(isAssetPipelineActivity)
-  ) {
+  // 已交付状态不再隐式 begin 任何活动。后续由具体领域守卫决定该工具是否拥有
+  // 长期维护权限；没有维护权限的工具仍会在 assert 阶段被拒绝。
+  if (state.phaseStatus === 'complete') {
     return { state, activityRevision: callerRevision }
   }
   const openable = allowedActivities.filter(
@@ -1213,6 +1269,7 @@ export async function completeWorkflowActivity(
     notRequiredAuthorized?: boolean
     requirementContract?: unknown
     inquiryContract?: unknown
+    outlineDesignSnapshot?: VideoGameWorkflowState['outlineDesignSnapshot']
   } = {},
 ): Promise<VideoGameWorkflowState> {
   return context.files.withLocks([WORKFLOW_LOCK], async () => {
@@ -1322,6 +1379,7 @@ export async function completeWorkflowActivity(
       noticeRevision: current.noticeRevision + 1,
       ...(requirementContract ? { requirementContract } : {}),
       ...(inquiryContract ? { inquiryContract } : {}),
+      ...(options.outlineDesignSnapshot ? { outlineDesignSnapshot: options.outlineDesignSnapshot } : {}),
       ...(completionFocus ? { focus: { location: completionFocus, reason: 'artifact-created', revision: report.activityRevision } } : {}),
     }, 'activity-completed')
     await writeState(context, next)
@@ -1800,9 +1858,20 @@ function nextActivitiesOf(state: VideoGameWorkflowState): VideoGameActivity[] {
     .filter((activity): activity is VideoGameActivity => activity !== undefined)
 }
 
-/** Notice 协议仍保留一个代表活动；并行组开始后另由 activeActivities 表达全部轨道。 */
-function nextActivityOf(state: VideoGameWorkflowState): VideoGameActivity | undefined {
-  return nextActivitiesOf(state)[0]
+/**
+ * 给作者看的下一步。编译阶段没有 peer，提示「即将生成蓝图」会对不上现在的流程。
+ */
+function nextAuthorFacingActivity(state: VideoGameWorkflowState): VideoGameActivity | undefined {
+  const chain = MAIN_VIDEO_GAME_ACTIVITIES
+  const currentIndex = (chain as readonly string[]).indexOf(state.activity)
+  const start = currentIndex < 0 ? 0 : currentIndex + 1
+  for (let index = start; index < chain.length; index++) {
+    const activity = chain[index]!
+    if (isCompiledActivity(activity)) continue
+    if (isSettled(state.activities[activity]?.status)) continue
+    return activity
+  }
+  return undefined
 }
 
 function pendingAuthorGate(
@@ -1954,10 +2023,16 @@ export function projectWorkflowState(
   // 未开始 = 等作者输入，没有进度可报；notice 缺省时前端不渲染提示条。
   // 交付完但下一步还没开始的那段间隙，报「即将做什么」而不是「正在做上一步」。
   // 作者已经确认过支柱了，提示条还写「正在建立游戏支柱…」会让人以为流程卡住。
-  const upcoming = settledNow && !awaitingGate ? nextActivityOf(state) : undefined
+  // 编译阶段没有 LLM、瞬间完成，提示条跳过它们，避免再报「蓝图节点生成中」。
+  const upcoming = settledNow && !awaitingGate
+    ? nextAuthorFacingActivity(state)
+    : undefined
   // 作者输入由右侧问卷或中间内容区的专用确认面承接。Toast 只描述二级菜单
   // 对应对象正在生产什么，不重复发布“等待确认”。
-  const noticeKind = workflowComplete || awaitingGate || state.activityStatus === 'awaiting-user'
+  const noticeKind = workflowComplete
+    || awaitingGate
+    || state.activityStatus === 'awaiting-user'
+    || (settledNow && !upcoming)
     ? undefined
     : state.activityStatus === 'not-started'
       ? undefined
@@ -2080,11 +2155,43 @@ export function assertWorkflowMutationAllowed(
 }
 
 /**
+ * 已交付项目的长期创作入口。交付后的作者修改不是生产 workflow 返工：不得重新
+ * begin 已完成的 activity，也不得通过焦点更新改写 workflow 完成态。
+ */
+export function isPostDeliveryAuthoringMaintenance(
+  state: VideoGameWorkflowState | null,
+): boolean {
+  return state?.phaseStatus === 'complete'
+}
+
+/**
+ * 编译产物在两种情况下允许改蓝图：交付后的作者维护，以及可玩性审查闭环。
+ * 审查阶段发现的缺口修蓝图本身，不重开支柱、也不 begin 编译阶段。
+ */
+export function allowsCompiledBlueprintRewrite(
+  state: VideoGameWorkflowState | null,
+): boolean {
+  if (!state) return false
+  if (isPostDeliveryAuthoringMaintenance(state)) return true
+  return state.activity === 'playtest.validating'
+}
+
+/**
  * Delivery complete (`phaseStatus === 'complete'`): scene catalog / preview tools
  * may run without reopening `assets.scene` (rework would wipe playtest evidence).
  */
-export function isPostDeliveryCatalogMaintenance(state: VideoGameWorkflowState | null): boolean {
-  return state?.phaseStatus === 'complete'
+export const isPostDeliveryCatalogMaintenance = isPostDeliveryAuthoringMaintenance
+
+/** Graph / node configuration / rule writes: normal activity gate, or author maintenance after delivery. */
+export function assertBlueprintMutationAllowed(
+  state: VideoGameWorkflowState | null,
+  activityRevision: unknown,
+  allowedActivities: readonly VideoGameActivity[],
+  writeScope?: readonly string[],
+): void {
+  if (!state) return
+  if (isPostDeliveryAuthoringMaintenance(state)) return
+  assertWorkflowMutationAllowed(state, activityRevision, allowedActivities, writeScope)
 }
 
 /** Character/scene patch and preview writes: normal lane gate, or post-delivery maintenance. */

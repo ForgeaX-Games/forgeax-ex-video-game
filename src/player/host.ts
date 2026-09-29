@@ -1,6 +1,17 @@
-import { loadKinoAssetLocators } from './kino'
-import { GamePackageError, parseGamePackage, type RuntimeGamePackage } from './package'
+import {
+  KINO_MEDIA_TYPES,
+  loadKinoAssetLocators,
+  type KinoMediaType,
+} from './kino'
+import {
+  GamePackageError,
+  parseGamePackage,
+  type RuntimeAsset,
+  type RuntimeGamePackage,
+} from './package'
 import type { RuntimeSdkHost, RuntimeSdkSession } from './runtime-host'
+
+const PLAYABLE_LOCATOR = /^(?:https?:|blob:|data:|\/)/
 
 export interface StandaloneRuntimeOptions {
   fetch?: typeof fetch
@@ -38,6 +49,33 @@ function readGameId(project: unknown): string {
   throw new GamePackageError('Game project.json is missing a string "id"')
 }
 
+function unresolvedMediaTypes(gamePackage: RuntimeGamePackage): KinoMediaType[] {
+  const assets = gamePackage.assetsManifest.assets
+  if (assets.length === 0) return [...KINO_MEDIA_TYPES]
+  const unresolved = new Set<KinoMediaType>()
+  for (const asset of assets) {
+    if (
+      KINO_MEDIA_TYPES.includes(asset.kind as KinoMediaType)
+      && (!asset.url || !PLAYABLE_LOCATOR.test(asset.url))
+    ) {
+      unresolved.add(asset.kind as KinoMediaType)
+    }
+  }
+  return KINO_MEDIA_TYPES.filter((mediaType) => unresolved.has(mediaType))
+}
+
+function kinoResourceIds(asset: RuntimeAsset): string[] {
+  return [
+    asset.provider?.upstreamResourceId,
+    asset.provider?.kind === 'kino'
+      && asset.provider.ref
+      && !PLAYABLE_LOCATOR.test(asset.provider.ref)
+      ? asset.provider.ref
+      : undefined,
+    asset.id,
+  ].filter((value): value is string => Boolean(value))
+}
+
 /**
  * Fills in playable URLs from Kino for assets the package manifest leaves
  * unresolved. Editor products may ship an empty `assets/manifest.json` because
@@ -49,13 +87,25 @@ async function withKinoAssets(
   request: typeof fetch,
   signal?: AbortSignal,
 ): Promise<RuntimeGamePackage> {
-  const kinoAssets = await loadKinoAssetLocators(gameId, request, signal)
+  const mediaTypes = unresolvedMediaTypes(gamePackage)
+  if (mediaTypes.length === 0) return gamePackage
+  const kinoAssets = await loadKinoAssetLocators(gameId, request, signal, mediaTypes)
   if (kinoAssets.length === 0) return gamePackage
-  const assets = new Map(kinoAssets.map((asset) => [asset.id, asset]))
-  for (const asset of gamePackage.assetsManifest.assets) assets.set(asset.id, asset)
+  const remainingKinoAssets = new Map(kinoAssets.map((asset) => [asset.id, asset]))
+  const assets = gamePackage.assetsManifest.assets.map((asset) => {
+    const kinoResourceId = kinoResourceIds(asset)
+      .find((resourceId) => remainingKinoAssets.has(resourceId))
+    const kinoAsset = kinoResourceId ? remainingKinoAssets.get(kinoResourceId) : undefined
+    if (kinoResourceId) remainingKinoAssets.delete(kinoResourceId)
+    if (asset.url && PLAYABLE_LOCATOR.test(asset.url)) return asset
+    return kinoAsset?.url ? { ...kinoAsset, ...asset, url: kinoAsset.url } : asset
+  })
   return {
     ...gamePackage,
-    assetsManifest: { ...gamePackage.assetsManifest, assets: [...assets.values()] },
+    assetsManifest: {
+      ...gamePackage.assetsManifest,
+      assets: [...assets, ...remainingKinoAssets.values()],
+    },
   }
 }
 

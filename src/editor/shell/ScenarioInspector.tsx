@@ -8,9 +8,9 @@ import type { AttrMeta, Entity, GameScenario, Layout, Overlay, ScalarValue, Vari
 import type { Formula, FormulaParseFailureSnapshot } from '@/authoring/blueprint/formula-authoring'
 import { OverlayCatalogPreview } from './OverlayCatalogPreview'
 import { OverlayChildStyleEditor } from './OverlayChildStyleEditor'
-import { NEW_COMPONENT_PRESETS, listSchemeAndBaseOverlayIds } from '@/authoring/demo/builtin-schemes'
+import { NEW_COMPONENT_PRESETS, listSchemeAndBaseOverlayIds } from '@/authoring/overlays/builtin-schemes'
 import { FormulaHelpContent, FormulaTextEditor } from './FormulaTextEditor'
-import { LooseNumberInput } from './TermChainEditor'
+import { LooseNumberInput } from './LooseNumberInput'
 import { nextUniqueOverlayTitle, overlayTitleExists } from './overlay-title'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import type {
@@ -23,14 +23,13 @@ import { AiParameterFillButton } from './AiParameterFillButton'
 import { forgeaxHost } from '../../platform/HostSdkBridge'
 import { buildFormulaContextReference } from './formula-agent-context'
 import { useGraphScenario } from '../persist/graphScenarioStore'
-import searchIcon from '@/editor/ui-assets/asset-toolbar-search.svg?url'
-import entityEmptyIcon from '@/editor/ui-assets/entity-empty.svg?url'
 import ruleToolbarAddIcon from '@/editor/ui-assets/rule-toolbar-add.svg'
-import ruleToolbarSearchIcon from '@/editor/ui-assets/rule-toolbar-search.svg'
 import ruleChevronRightIcon from '@/editor/ui-assets/rule-chevron-right.png'
-import ruleOverflowIcon from '@/editor/ui-assets/rule-more-horizontal.png'
+import ruleOverflowIcon from './rule-more-horizontal.svg?url'
 import ruleDialogCloseIcon from './rule-dialog-close.svg?url'
 import type { ScenarioIdRename, ScenarioIdRenameResult } from '../persist/scenario-id'
+import { CatalogSearchInput } from './CatalogSearchInput'
+import { CatalogEmptyState } from './CatalogEmptyState'
 
 export type ScenarioMeta = Pick<GameScenario, 'variables' | 'entities' | 'ui'> & {
   formulas?: Record<string, Formula>
@@ -54,7 +53,7 @@ const sectionTitle: CSSProperties = {
 }
 const entityAttrGrid = 'minmax(4.5rem, 0.45fr) minmax(0, 0.9fr) minmax(4rem, 0.5fr) minmax(7rem, 1.25fr) 2rem'
 const FORMULA_RULES_CSS = `
-.sir-formulas { min-width:0; }
+.sir-formulas { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; }
 .sir-formula-toolbar {
   height:44px; display:flex; align-items:center; justify-content:flex-end; gap:12px;
 }
@@ -96,11 +95,6 @@ const FORMULA_RULES_CSS = `
 }
 .sir-formula-name--toggle { cursor: pointer; }
 .sir-formula-id { flex:0 0 auto; margin-left:-2px; color:rgba(255,255,255,.32); font-size:14px; white-space:nowrap; }
-.sir-formula-more {
-  margin-left:auto; width:24px; height:24px; padding:0; border:0;
-  background:transparent; color:rgba(255,255,255,.9); font-size:18px;
-  line-height:18px; cursor:pointer; transform:translateY(2px);
-}
 .sir-formula-body { padding:0 0 14px; }
 .sir-formula-field { display:grid; gap:6px; margin-bottom:10px; }
 .sir-formula-field > span { color:rgba(255,255,255,.48); font-size:12px; }
@@ -156,58 +150,8 @@ const FORMULA_RULES_CSS = `
   outline:0; box-shadow:none;
 }
 .sir-formula-empty { padding:20px 0; color:rgba(255,255,255,.38); }
+.gc-rule-delete-dialog > p { display:block; padding-top:16px; }
 
-/* ── 公式行弹窗（重命名 / 删除）—— 居中模态 ── */
-.sir-modal-backdrop {
-  position:fixed; inset:0; z-index:100;
-  background:rgba(0,0,0,.55);
-  display:flex; align-items:center; justify-content:center;
-  padding:16px;
-}
-.sir-modal {
-  box-sizing:border-box; width:min(420px, 100%);
-  background:#161310; border:1px solid rgba(255,255,255,.08);
-  border-radius:10px; padding:24px 28px 20px;
-  box-shadow:0 20px 50px rgba(0,0,0,.5);
-  color:#fff;
-  display:flex; flex-direction:column; gap:16px;
-}
-.sir-modal-head {
-  position:relative; display:flex; align-items:center; justify-content:center;
-  font-size:16px; font-weight:500;
-}
-.sir-modal-close {
-  position:absolute; right:-4px; top:-4px;
-  width:24px; height:24px; border:0; background:transparent; color:rgba(255,255,255,.6);
-  cursor:pointer; border-radius:4px; padding:0;
-  display:inline-flex; align-items:center; justify-content:center;
-}
-.sir-modal-close:hover { background:rgba(255,255,255,.08); }
-.sir-modal-close svg { width:14px; height:14px; display:block; }
-.sir-modal-field { display:flex; flex-direction:column; gap:6px; }
-.sir-modal-field > label { font-size:12px; color:rgba(255,255,255,.6); }
-.sir-modal-input {
-  box-sizing:border-box; width:100%; height:32px; padding:4px 10px;
-  border:1px solid rgba(255,255,255,.18); border-radius:4px;
-  background:rgba(0,0,0,.4); color:#fff; font-size:14px; outline:0;
-}
-.sir-modal-input:focus { border-color:rgba(255,255,255,.4); }
-.sir-modal-input::placeholder { color:rgba(255,255,255,.32); }
-.sir-modal-input:disabled { border-color:rgba(255,255,255,.12); background:rgba(255,255,255,.06); color:rgba(255,255,255,.38); cursor:not-allowed; }
-.sir-modal-id-hint { margin:0; color:rgba(255,255,255,.42); font-size:12px; line-height:1.4; }
-.sir-modal-body { font-size:13px; line-height:1.6; color:rgba(255,255,255,.72); text-align:center; padding:8px 0; }
-.sir-modal-body strong { color:rgba(255,156,42,1); font-weight:600; }
-.sir-modal-actions { display:flex; justify-content:center; gap:24px; margin-top:4px; }
-.sir-modal-btn {
-  min-width:96px; height:34px; padding:0 18px; border:0; border-radius:4px;
-  font-size:14px; cursor:pointer; transition:background-color .12s;
-}
-/* 按钮 hover 把背景变亮，显式钉死 color 避免文字色漂移；disabled 不响应 hover。 */
-.sir-modal-btn.is-secondary { background:rgba(255,255,255,.92); color:#161310; }
-.sir-modal-btn.is-secondary:not(:disabled):hover { background:#fff; color:#161310; }
-.sir-modal-btn.is-primary { background:#f08840; color:#17120d; }
-.sir-modal-btn.is-primary:not(:disabled):hover { background:#f59b56; color:#17120d; }
-.sir-modal-btn:disabled { cursor:not-allowed; opacity:.4; }
 `
 
 function field(label: string, node: JSX.Element): JSX.Element {
@@ -218,7 +162,6 @@ function field(label: string, node: JSX.Element): JSX.Element {
     </label>
   )
 }
-
 function ValueSettings({ values, onChange, label }: {
   values: Pick<AttrMeta, 'min' | 'max' | 'initial'>
   onChange: (field: 'min' | 'max' | 'initial', value: number | undefined) => void
@@ -319,9 +262,9 @@ function RuleOverflowAction({ label, currentName, currentId, idTaken, onRename, 
 
   return (
     <span ref={rootRef} className="gc-rule-overflow">
-      <button type="button" className="gc-rule-icon-button" aria-label={`${label}${translateUi('ui.template.9f07d2ce4115')}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}>⋯</button>
+      <button type="button" className="gc-rule-icon-button" aria-label={`${label}${translateUi('ui.template.9f07d2ce4115')}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}><img src={ruleOverflowIcon} alt="" /></button>
       {open ? (
-        <span className="gc-rule-menu" role="menu">
+        <span className="gc-rule-dropdown gc-rule-menu" role="menu">
           <button type="button" onClick={() => { setOpen(false); setDialog('rename') }}>{translateUi('ui.copy.1cd80fd7a8b3')}</button>
           <button type="button" onClick={() => { setOpen(false); setDialog('delete') }}>{translateUi('ui.copy.3755f56f2f83')}</button>
         </span>
@@ -352,11 +295,16 @@ function RuleActionDialog({ action, label, currentName, currentId, idTaken, onCl
 }): JSX.Element {
   const [name, setName] = useState(currentName)
   const [id, setId] = useState(currentId)
+  const [notice, setNotice] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const noun = label.replace(/^(实体|属性|变量|公式)\s+/, '').trim()
   const kind = label.match(/^(实体|属性|变量|公式)/)?.[0] ?? label
-  const idError = ruleIdError(id, idTaken)
-  const canSubmit = Boolean(name.trim()) && !idError
+  const nameLabel = ruleNameLabel(kind)
+  const validation = newRuleDialogValidation(name, id, idTaken, ruleDialogKind(kind))
+  const rename = (): void => {
+    if (validation.notice) { setNotice(validation.notice); return }
+    onRename(validation.name, validation.id)
+  }
 
   useEffect(() => {
     if (action === 'rename') inputRef.current?.focus()
@@ -376,26 +324,26 @@ function RuleActionDialog({ action, label, currentName, currentId, idTaken, onCl
           <img src={ruleDialogCloseIcon} alt="" />
         </button>
         {action === 'rename' ? <>
-          <h2>{translateUi('ui.copy.1cd80fd7a8b3')} {kind}</h2>
+          <h2>{translateUi('ui.copy.1cd80fd7a8b3')}</h2>
           <div className="gc-rule-rename-fields">
             <label className="gc-rule-rename-field">
-              <span>{kind} {translateUi('ui.template.92ddb51db6c4')}</span>
-              <input ref={inputRef} className="gc-rule-dialog-input" aria-label={`${label} ${translateUi('ui.template.92ddb51db6c4')}`} value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => {
-                if (event.key === 'Enter' && canSubmit) onRename(name.trim(), id.trim())
+              <span>{nameLabel}</span>
+              <input ref={inputRef} className="gc-rule-dialog-input" aria-label={nameLabel} value={name} onChange={(event) => { setName(event.target.value); setNotice('') }} onKeyDown={(event) => {
+                if (event.key === 'Enter') rename()
               }} />
             </label>
             <label className="gc-rule-rename-field">
-              <span>{kind} {translateUi('rules.id')}</span>
-              <input className="gc-rule-dialog-input" aria-label={`${label} ${translateUi('rules.id')}`} value={id} aria-invalid={Boolean(idError)} aria-describedby={idError ? 'gc-rule-rename-id-error' : undefined} onChange={(event) => setId(event.target.value)} />
+              <span>{ruleIdLabel(kind)}<RuleIdFormatHint /></span>
+              <input className="gc-rule-dialog-input" aria-label={ruleIdLabel(kind)} value={id} onChange={(event) => { setId(event.target.value); setNotice('') }} />
             </label>
           </div>
-          {idError ? <p id="gc-rule-rename-id-error" className="gc-rule-id-error" role="alert">{idError}</p> : null}
           <div className="gc-rule-dialog-actions">
             <button type="button" onClick={onClose}>{translateUi('ui.copy.4d0b4688c787')}</button>
-            <button type="button" className="is-danger" disabled={!canSubmit} onClick={() => onRename(name.trim(), id.trim())}>{translateUi('ui.copy.b56d9ac6c5a0')}</button>
+            <button type="button" className={`is-danger${validation.blocked ? ' is-disabled' : ''}`} aria-disabled={validation.blocked} onClick={rename}>{translateUi('ui.copy.b56d9ac6c5a0')}</button>
           </div>
+          {notice ? <RuleDialogValidationNotice message={notice} onDismiss={() => setNotice('')} /> : null}
         </> : <>
-          <h2>{translateUi('ui.copy.3755f56f2f83')}{kind}</h2>
+          <h2>{ruleDeleteTitle(kind)}</h2>
           <p>{translateUi('ui.copy.3c06abe11651')}<span>[{noun}]</span>{translateUi('ui.copy.1703bcb8e5be')}{kind}{translateUi('ui.copy.29ef2346fbea')}</p>
           <div className="gc-rule-dialog-actions">
             <button type="button" onClick={onClose}>{translateUi('ui.copy.4d0b4688c787')}</button>
@@ -515,7 +463,7 @@ function NewVariableDialog({ defaultId, existing, onClose, onCreate }: {
               <span>{type === 'number' ? translateUi('rules.variables.number') : translateUi('rules.variables.text')}</span>
               <svg viewBox="0 0 12 8" aria-hidden="true"><path d="m1 1 5 5 5-5" /></svg>
             </button>
-            {typeOpen ? <div className="gc-rule-type-select-menu" role="listbox" aria-label={translateUi('rules.variables.type')}>
+            {typeOpen ? <div className="gc-rule-dropdown gc-rule-type-select-menu" role="listbox" aria-label={translateUi('rules.variables.type')}>
               {(['number', 'text'] as const).map((option) => (
                 <button
                   key={option}
@@ -743,18 +691,37 @@ export type ScenarioSection = 'overlays' | 'variables' | 'entities' | 'formulas'
 const RULE_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 function ruleIdFormatError(id: string): string | undefined {
-  if (!id.trim()) return '请输入 ID'
-  if (!RULE_ID_PATTERN.test(id.trim())) return 'ID 只能包含大小写英文字母、数字和下划线，且不能以数字开头'
+  if (!id.trim()) return '请输入 id'
+  if (!RULE_ID_PATTERN.test(id.trim())) return 'id 只能包含大小写英文字母、数字和下划线，且不能以数字开头'
   return undefined
 }
 
 type RuleDialogKind = 'entity' | 'variable' | 'attribute' | 'formula'
 
+function ruleDialogKind(kind: string): RuleDialogKind {
+  if (kind === '变量') return 'variable'
+  if (kind === '属性') return 'attribute'
+  if (kind === '公式') return 'formula'
+  return 'entity'
+}
+
+function ruleNameLabel(kind: string): string {
+  return RULE_DIALOG_LABELS[ruleDialogKind(kind)].name
+}
+
+function ruleIdLabel(kind: string): string {
+  return `${RULE_DIALOG_LABELS[ruleDialogKind(kind)].noun}id`
+}
+
+function ruleDeleteTitle(kind: string): string {
+  return `${translateUi('ui.copy.3755f56f2f83')}${RULE_DIALOG_LABELS[ruleDialogKind(kind)].noun}`
+}
+
 const RULE_DIALOG_LABELS: Record<RuleDialogKind, { noun: string, name: string }> = {
   entity: { noun: '实体', name: '实体名称' },
   variable: { noun: '变量', name: '变量名称' },
-  attribute: { noun: '属性', name: '属性名称' },
-  formula: { noun: '公式', name: '公式名' },
+  attribute: { noun: '实体属性', name: '实体属性名称' },
+  formula: { noun: '公式', name: '公式名称' },
 }
 
 function newRuleDialogValidation(
@@ -779,7 +746,7 @@ function newRuleDialogValidation(
 function ruleIdError(id: string, idTaken: (id: string) => boolean): string | undefined {
   const formatError = ruleIdFormatError(id)
   if (formatError) return formatError
-  if (idTaken(id.trim())) return '该 ID 已被使用'
+  if (idTaken(id.trim())) return '该 id 已被使用'
   return undefined
 }
 
@@ -797,13 +764,15 @@ function RuleToolbar({
   return (
     <div className="gc-rule-toolbar" style={{ position: 'sticky', top: 0, zIndex: 2 }}>
       <button type="button" className="gc-rule-button" aria-label={`${translateUi('ui.template.710895850bb2')}${title}`} onClick={onCreate}>
-        <span className="gc-rule-button-icon" aria-hidden />
+        <span className="gc-rule-button-icon" aria-hidden><img src={ruleToolbarAddIcon} alt="" /></span>
         <span>{translateUi('ui.copy.0cda8d1c7182')}{title}</span>
       </button>
-      <label className="gc-rule-search-wrap">
-        <span className="gc-rule-search-icon" aria-hidden><img src={searchIcon} alt="" /></span>
-        <input className="gc-rule-search" aria-label={`${translateUi('ui.template.44ce7ae909bb')}${title}`} placeholder={`${translateUi('ui.template.44ce7ae909bb')}${title}`} value={search} onChange={(event) => onSearchChange(event.target.value)} />
-      </label>
+      <CatalogSearchInput
+        ariaLabel={`${translateUi('ui.template.44ce7ae909bb')}${title}`}
+        placeholder={`${translateUi('ui.template.44ce7ae909bb')}${title}`}
+        value={search}
+        onChange={onSearchChange}
+      />
     </div>
   )
 }
@@ -815,21 +784,11 @@ function RuleEmptyState({ searching, emptyText, noSearchResultsText, createText,
   createText: string
   onCreate: () => void
 }): JSX.Element {
-  return (
-    <div className="gc-rule-empty">
-      <div className="gc-rule-empty-content">
-        <div className="gc-rule-empty-message">
-          <span className="gc-rule-empty-icon" aria-hidden>
-            <img src={entityEmptyIcon} alt="" />
-          </span>
-          <p>{searching ? noSearchResultsText : emptyText}</p>
-        </div>
-        <button type="button" className="gc-rule-empty-create" onClick={onCreate}>
-          {createText}
-        </button>
-      </div>
-    </div>
-  )
+  return <CatalogEmptyState
+    className="gc-rule-empty"
+    message={searching ? noSearchResultsText : emptyText}
+    action={{ label: createText, onClick: onCreate }}
+  />
 }
 
 export function ScenarioInspector({
@@ -1054,7 +1013,7 @@ export function ScenarioInspector({
             }}
           /> : null}
           {numericVariableEntries.length > 0 ? <div className="gc-rule-grid-head gc-rule-grid-head--attributes gc-rule-variable-head" aria-hidden>
-            <span>{translateUi('ui.copy.5ce0577df1ac')}</span><span>{translateUi('rules.variables.number')}</span><span>{translateUi('ui.copy.c3d641f190fe')}</span><span>{translateUi('ui.copy.01821997b758')}</span><span />
+            <span>{translateUi('ui.copy.5ce0577df1ac')}</span><span>{translateUi('cascade.field.initialValue')}</span><span>{translateUi('ui.copy.c3d641f190fe')}</span><span>{translateUi('ui.copy.01821997b758')}</span><span />
           </div> : null}
           {numericVariableEntries.map(([key, v]) => (
             <div key={key} id={`rule-item:${key}`} className="gc-rule-attribute-row gc-rule-variable-row">
@@ -1608,9 +1567,6 @@ function FormulaRow({
   onCreateEntityAttribute?: EntityAttributeCreateHandler
 }): JSX.Element {
   const [expanded, setExpanded] = useState(defaultExpanded)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [renameOpen, setRenameOpen] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
   const [formulaFailure, setFormulaFailure] = useState<FormulaParseFailureSnapshot | null>(null)
   const game = useGraphScenario((s) => s.game)
   const blueprintId = useGraphScenario((s) => s.activeBlueprintId)
@@ -1632,7 +1588,6 @@ function FormulaRow({
     }))
   }
   return (
-    <>
     <div id={`rule-item:${formulaKey}`} className="sir-formula-row">
       <div className="sir-formula-head">
         <button
@@ -1660,23 +1615,17 @@ function FormulaRow({
           {formula.name || formulaKey}
         </span>
         <span className="sir-formula-id">{translateUi('ui.copy.a078622f8db4')}{formulaKey}</span>
-        <span className="gc-rule-overflow">
-          <button
-            type="button"
-            className="sir-formula-more"
-            aria-label={`${formula.name || formulaKey}${translateUi('ui.template.9f07d2ce4115')}`}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((current) => !current)}
-          >
-            ⋯
-          </button>
-          {menuOpen ? (
-            <div className="gc-rule-menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setRenameOpen(true) }}>{translateUi('ui.copy.1cd80fd7a8b3')}</button>
-              <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setDeleteOpen(true) }}>{translateUi('ui.copy.7386d1cdcc22')}</button>
-            </div>
-          ) : null}
-        </span>
+        <RuleOverflowAction
+          label={`${translateUi('ui.template.e3bba06bd089')}${formula.name || formulaKey}`}
+          currentName={formula.name || formulaKey}
+          currentId={formulaKey}
+          idTaken={idTaken}
+          onRename={(name, id) => {
+            if (id === formulaKey) onChange({ ...formula, id: formulaKey, name })
+            else onRenameScenarioId?.({ kind: 'formula', oldId: formulaKey, newId: id, name })
+          }}
+          onDelete={onDelete}
+        />
       </div>
       {expanded ? (
         <div className="sir-formula-body">
@@ -1724,166 +1673,6 @@ function FormulaRow({
         </div>
       ) : null}
     </div>
-    {renameOpen ? (
-      <FormulaRenameDialog
-        initialName={formula.name ?? formulaKey}
-        initialId={formulaKey}
-        idTaken={idTaken}
-        onCancel={() => setRenameOpen(false)}
-        onConfirm={(nextName, nextId) => {
-          setRenameOpen(false)
-          if (nextId === formulaKey) onChange({ ...formula, id: formulaKey, name: nextName })
-          else onRenameScenarioId?.({ kind: 'formula', oldId: formulaKey, newId: nextId, name: nextName })
-        }}
-      />
-    ) : null}
-    {deleteOpen ? (
-      <FormulaDeleteDialog
-        name={formula.name || formulaKey}
-        onCancel={() => setDeleteOpen(false)}
-        onConfirm={() => { setDeleteOpen(false); onDelete() }}
-      />
-    ) : null}
-  </>
   )
 }
-
-/**
- * 公式重命名弹窗（居中模态）。
- * 公式 ID 变更由上层的规则 ID 迁移事务提交。
- */
-function FormulaRenameDialog({
-  initialName,
-  initialId,
-  idTaken,
-  onCancel,
-  onConfirm,
-}: {
-  initialName: string
-  initialId: string
-  idTaken: (id: string) => boolean
-  onCancel: () => void
-  onConfirm: (nextName: string, nextId: string) => void
-}): JSX.Element {
-  const [name, setName] = useState(initialName)
-  const [id, setId] = useState(initialId)
-  const [notice, setNotice] = useState('')
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const idError = ruleIdError(id, idTaken)
-  useEffect(() => {
-    inputRef.current?.focus()
-    inputRef.current?.select()
-  }, [])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') { e.preventDefault(); onCancel() }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
-  const submit = (): void => {
-    if (!name.trim()) { setNotice('未填入公式名'); return }
-    if (idError) return
-    onConfirm(name.trim(), id.trim())
-  }
-  return createPortal(
-    <div
-      className="sir-modal-backdrop"
-      role="presentation"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}
-    >
-      <div className="sir-modal" role="dialog" aria-modal="true" aria-labelledby="sir-formula-rename-title">
-        <div className="sir-modal-head">
-          <span id="sir-formula-rename-title">{translateUi('ui.copy.1cd80fd7a8b3')}</span>
-          <button type="button" className="sir-modal-close" aria-label={translateUi('ui.copy.6c14bd7f6f9e')} onClick={onCancel}>
-            <svg viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="M2.5 2.5L11.5 11.5M11.5 2.5L2.5 11.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-        <div className="sir-modal-field">
-          <label htmlFor="sir-formula-rename-name-input">{translateUi('ui.copy.19ea306e92e4')}</label>
-          <input
-            id="sir-formula-rename-name-input"
-            ref={inputRef}
-            className="sir-modal-input"
-            value={name}
-            placeholder={translateUi('ui.copy.d009384d8e2c')}
-            onChange={(e) => { setName(e.target.value); setNotice('') }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); submit() }
-            }}
-          />
-        </div>
-        <div className="sir-modal-field">
-          <label htmlFor="sir-formula-rename-id-input">{translateUi('rules.formula.id')}</label>
-          <input
-            id="sir-formula-rename-id-input"
-            className="sir-modal-input"
-            value={id}
-            aria-invalid={Boolean(idError)}
-            aria-describedby={idError ? 'sir-formula-rename-id-error' : undefined}
-            onChange={(e) => setId(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); submit() }
-            }}
-          />
-          {idError ? <p id="sir-formula-rename-id-error" className="sir-modal-id-hint" role="alert">{idError}</p> : null}
-        </div>
-        <div className="sir-modal-actions">
-          <button type="button" className="sir-modal-btn is-secondary" onClick={onCancel}>{translateUi('ui.copy.4d0b4688c787')}</button>
-          <button type="button" className="sir-modal-btn is-primary" onClick={submit} disabled={Boolean(name.trim()) && Boolean(idError)}>{translateUi('ui.copy.b56d9ac6c5a0')}</button>
-        </div>
-        {notice ? <RuleDialogValidationNotice message={notice} onDismiss={() => setNotice('')} /> : null}
-      </div>
-    </div>,
-    document.body,
-  )
-}
-
-/**
- * 公式删除确认弹窗（居中模态）。
- * 文案：「确认删除[名字]吗？工程中对这公式的调用引用将被清除。」
- */
-function FormulaDeleteDialog({
-  name,
-  onCancel,
-  onConfirm,
-}: {
-  name: string
-  onCancel: () => void
-  onConfirm: () => void
-}): JSX.Element {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') { e.preventDefault(); onCancel() }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
-  return createPortal(
-    <div
-      className="sir-modal-backdrop"
-      role="presentation"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}
-    >
-      <div className="sir-modal" role="dialog" aria-modal="true" aria-labelledby="sir-formula-delete-title">
-        <div className="sir-modal-head">
-          <span id="sir-formula-delete-title">{translateUi('ui.copy.7386d1cdcc22')}</span>
-          <button type="button" className="sir-modal-close" aria-label={translateUi('ui.copy.6c14bd7f6f9e')} onClick={onCancel}>
-            <svg viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="M2.5 2.5L11.5 11.5M11.5 2.5L2.5 11.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-        <div className="sir-modal-body">
-          {translateUi('ui.copy.3c06abe11651')}<strong>[{name}]</strong>{translateUi('ui.copy.4857ca513a95')}</div>
-        <div className="sir-modal-actions">
-          <button type="button" className="sir-modal-btn is-secondary" onClick={onCancel}>{translateUi('ui.copy.4d0b4688c787')}</button>
-          <button type="button" className="sir-modal-btn is-primary" onClick={onConfirm}>{translateUi('ui.copy.3755f56f2f83')}</button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  )
-}
+// Formula actions intentionally share RuleOverflowAction and RuleActionDialog.

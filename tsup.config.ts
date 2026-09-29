@@ -53,6 +53,9 @@ export default defineConfig({
   ],
   onSuccess: async () => {
     await cp('src/server/engine/llm/skills', 'dist/skills', { recursive: true })
+    // 开局模板包：`dist/server/host.js` 按 `../templates/<id>/` 读取（见
+    // host/video-game-template-seed.ts），与源码布局的相对路径保持一致。
+    await cp('src/server/templates', 'dist/templates', { recursive: true })
     await cp(
       'src/runtime/react/assets/placeholder-video.mp4',
       'dist/assets/placeholder-video.mp4',

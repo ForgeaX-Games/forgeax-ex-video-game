@@ -63,7 +63,7 @@ export interface FlowNodePreviewState {
   onPlaybackRateChange: (rate: number) => void
   onVideoAudioToggle: () => void
   onRestart: () => void
-  onEmit: (elementId: string, key: string) => void
+  onEmit: (elementId: string, key: string, payload?: Record<string, unknown>) => void
   onTick: (nowMs: number) => void
   onPerformanceEnd: () => void
   onDurationChange: (durationMs: number) => void

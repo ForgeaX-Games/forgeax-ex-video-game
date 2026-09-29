@@ -95,8 +95,8 @@ export interface MediaAsset {
   file?: string
   /**
    * 稳定可播放访问地址（D8 目标态）：一旦上传能力就绪，成片以稳定 `url` 登记，
-   * 播放优先用它（`resolveMediaSrc` 见 media.ts 优先序）；在此之前为空，回落 D9 兜底
-   * （zhandou basename / 宿主绑定的 media content 流）。graph/blueprint 只挂 id，URL 只住 manifest。
+   * 播放优先用它（`resolveMediaSrc` 见 media.ts 优先序）；在此之前为空，回落
+   * 宿主绑定的 media content 流。graph/blueprint 只挂 id，URL 只住 manifest。
    */
   url?: string
   /** 跨模块只读产物：对方文件的绝对磁盘路径（**不复制**进本 registry 的 media/）。 */

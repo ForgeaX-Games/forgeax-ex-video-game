@@ -27,7 +27,6 @@ describe('GAME_VIDEO_HTTP_ROUTES', () => {
       'POST stage-artifacts/import',
       'DELETE components/:id',
       'POST documents/design-options/apply',
-      'GET media/bundled/:name',
       'GET style-axes',
       'POST style-axes',
       'POST references/characters/import',

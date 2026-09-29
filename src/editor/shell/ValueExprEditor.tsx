@@ -3,7 +3,7 @@ import { t as translateUi, tf as formatUi } from '../../i18n'
 /**
  * 通用数值表达式编辑器 —— 直接选择具体状态值或具名公式；固定值使用普通输入框。
  * 条款链（±×÷、留空实体）的编排完全收在「规则 → 公式」Tab（见 ScenarioInspector.tsx 的
- * FormulaRow + TermChainEditor）；这里不重复一份「当场拼公式」的入口——要用公式，先去规则页定义，
+ * FormulaRow）；这里不重复一份「当场拼公式」的入口——要用公式，先去规则页定义，
  * 再回这里选它、填空。
  */
 import { useState, type CSSProperties } from 'react'
@@ -22,7 +22,7 @@ import {
   type VariableCreateRequest,
 } from '@/authoring/formulas/meta-catalog'
 import { EffectOpButtons } from './OpSymbolButtons'
-import { LooseNumberInput } from './TermChainEditor'
+import { LooseNumberInput } from './LooseNumberInput'
 import { FormulaApplyEditor } from './FormulaApplyEditor'
 import { compileFormula } from '@/authoring/formulas/formula-apply'
 import {

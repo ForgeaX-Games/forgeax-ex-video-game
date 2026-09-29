@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:compile-blueprint-outline returns",
+  "type": "object",
+  "description": "Adaptive outline result. Intermediate staged batches return staged=true, revisionChanged=false, received/remaining batches and bytes. The final atomic commit returns one revision, compiled node/edge counts, and commandCount for the shared standard topology commands; failures include deterministic errorCode/errors and optional failedPath."
+}

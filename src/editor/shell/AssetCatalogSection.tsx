@@ -61,11 +61,21 @@ export function visibleCatalogTabKinds(
     : []
 }
 
-export function AssetCatalogSection({ gameId }: { gameId: string }): JSX.Element {
+export function AssetCatalogSection({
+  gameId,
+  tabKinds,
+  showRoot = true,
+}: {
+  gameId: string
+  tabKinds?: readonly CatalogTabKind[]
+  showRoot?: boolean
+}): JSX.Element {
   const { catalog } = useAssetCatalog(gameId)
   const projection = useProductionProjection((state) => state.projection)
   const visibleTabKinds = visibleCatalogTabKinds(projection, catalog)
+    .filter((tabKind) => !tabKinds || tabKinds.includes(tabKind))
   const setView = useGraphView((state) => state.setView)
+  const view = useGraphView((state) => state.view)
   const location = useCatalogNav((state) => state.location)
   const setLocation = useCatalogNav((state) => state.setLocation)
   // 默认收起：与旧资产库同级并列，展开后才铺开各 Tab，避免和旧库同名行相互干扰。
@@ -140,6 +150,7 @@ export function AssetCatalogSection({ gameId }: { gameId: string }): JSX.Element
 
   // 面板里选中某个资源时，侧栏高亮落回它所在的目录行。
   const isActive = (rowId: string): boolean => {
+    if (view !== 'assets') return false
     if (rowId === CATALOG_ROOT_TARGET) return location.kind === 'catalog-root'
     if (rowId.startsWith('catalog-folder:')) {
       const folderId = rowId.slice('catalog-folder:'.length)
@@ -179,23 +190,22 @@ export function AssetCatalogSection({ gameId }: { gameId: string }): JSX.Element
     ]
   })
 
-  const sectionExpanded = expanded.has(CATALOG_ROOT_TARGET)
+  const sectionExpanded = !showRoot || expanded.has(CATALOG_ROOT_TARGET)
 
   return (
     <>
-      <SidebarTreeRow
+      {showRoot ? <SidebarTreeRow
         depth={0}
         label={translateUi('assetCatalog.title')}
         active={isActive(CATALOG_ROOT_TARGET)}
         expandable
         expanded={sectionExpanded}
-        leading="asset-library"
         onActivate={() => {
           toggle(CATALOG_ROOT_TARGET)
           select(CATALOG_ROOT_TARGET, describeCatalogRoot(catalog))
         }}
         onToggle={() => toggle(CATALOG_ROOT_TARGET)}
-      />
+      /> : null}
       {sectionExpanded
         ? visibleTabKinds.flatMap((tabKind) => {
           const target = catalogRootTarget(tabKind)

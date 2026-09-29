@@ -6,8 +6,6 @@ vi.mock('../persist-client', async (importOriginal) => {
     ...actual,
     loadStore: vi.fn(),
     saveProject: vi.fn(async () => ({ ok: true, revision: 'rev-local' })),
-    currentVersion: vi.fn(async () => ({ tag: null, commitHash: null, dirty: false })),
-    listVersions: vi.fn(async () => []),
   }
 })
 
@@ -74,7 +72,7 @@ describe('syncTipIfClean', () => {
       },
       'a',
     )
-    vi.mocked(loadStore).mockResolvedValue({ project: remote, revision: 'rev-remote', versions: [] })
+    vi.mocked(loadStore).mockResolvedValue({ project: remote, revision: 'rev-remote' })
 
     const epoch = useGraphScenario.getState().loadEpoch
     const result = await useGraphScenario.getState().syncTipIfClean()
@@ -95,7 +93,7 @@ describe('syncTipIfClean', () => {
       },
       'a',
     )
-    vi.mocked(loadStore).mockResolvedValue({ project: remote, revision: 'rev-remote', versions: [] })
+    vi.mocked(loadStore).mockResolvedValue({ project: remote, revision: 'rev-remote' })
 
     expect(await useGraphScenario.getState().syncTipIfClean()).toBe('unchanged')
     expect(useGraphScenario.getState().graph.nodes[0]?.data.name).toBe('旧名')
@@ -113,7 +111,6 @@ describe('syncTipIfClean', () => {
         'a',
       ),
       revision: 'rev-same',
-      versions: [],
     })
     expect(await useGraphScenario.getState().syncTipIfClean()).toBe('unchanged')
   })
@@ -134,7 +131,7 @@ describe('syncTipIfClean', () => {
       },
       'a',
     )
-    vi.mocked(loadStore).mockResolvedValue({ project: remote, revision: 'rev-remote', versions: [] })
+    vi.mocked(loadStore).mockResolvedValue({ project: remote, revision: 'rev-remote' })
     expect(await useGraphScenario.getState().syncTipIfClean()).toBe('applied')
     expect(useGraphScenario.getState().activeBlueprintId).toBe('a')
     expect(useGraphScenario.getState().selectedNodeId).toBeNull()
@@ -158,7 +155,6 @@ describe('syncTipIfClean', () => {
         'a',
       ),
       revision: 'rev-remote',
-      versions: [],
     })
     expect(await useGraphScenario.getState().syncTipIfClean()).toBe('skipped')
     pending[0]?.({ ok: true, revision: 'rev-done' })

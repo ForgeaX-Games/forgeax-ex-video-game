@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:configure-blueprint-outline-node args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["nodeId", "idempotencyKey", "actions", "settlements", "outgoingRoutes"],
+  "$defs": {
+    "graphCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all"],
+      "properties": { "all": { "type": "array", "items": { "type": "object" } } }
+    },
+    "effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "op"],
+      "properties": {
+        "target": { "type": "string", "minLength": 1 },
+        "op": { "enum": ["add", "sub", "set"] },
+        "formulaId": { "type": "string", "minLength": 1 },
+        "value": { "type": "number" }
+      }
+    },
+    "feedbackSpec": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "component"],
+          "properties": {
+            "kind": { "const": "transient-component" },
+            "component": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "component", "target"],
+          "properties": {
+            "kind": { "const": "state-binding" },
+            "component": { "type": "string", "minLength": 1 },
+            "target": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "hide-interface" } }
+        }
+      ]
+    },
+    "triggerSpec": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "ms"],
+          "properties": { "type": { "const": "at" }, "ms": { "type": "number", "minimum": 0 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "of"],
+          "properties": {
+            "type": { "const": "watch" },
+            "of": { "type": "string", "minLength": 1 },
+            "on": { "enum": ["change", "inc", "dec"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "condition"],
+          "properties": {
+            "type": { "const": "state" },
+            "condition": { "$ref": "#/$defs/graphCondition" }
+          }
+        }
+      ]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pillarActionId", "component", "event", "feedbackSpec"],
+      "properties": {
+        "pillarActionId": { "type": "string", "minLength": 1 },
+        "component": { "type": "string", "minLength": 1 },
+        "event": { "type": "string", "minLength": 1 },
+        "effect": { "$ref": "#/$defs/effect" },
+        "feedbackSpec": { "$ref": "#/$defs/feedbackSpec" }
+      }
+    },
+    "settlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pillarSettlementId", "triggerSpec", "feedbackSpec"],
+      "properties": {
+        "pillarSettlementId": { "type": "string", "minLength": 1 },
+        "triggerSpec": { "$ref": "#/$defs/triggerSpec" },
+        "feedbackSpec": { "$ref": "#/$defs/feedbackSpec" },
+        "pattern": { "type": "string", "minLength": 1 }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceNodeId", "pillarActionId", "triggerSpec"],
+      "properties": {
+        "sourceNodeId": { "type": "string", "minLength": 1 },
+        "pillarActionId": { "type": "string", "minLength": 1 },
+        "triggerSpec": { "$ref": "#/$defs/triggerSpec" },
+        "pattern": { "type": "string", "minLength": 1 }
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "producer"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": { "enum": ["action", "settlement", "lifecycle"] },
+            "ref": { "type": "string", "minLength": 1 }
+          }
+        },
+        "sourceHandle": { "type": "string", "minLength": 1 },
+        "targetHandle": { "type": "string", "minLength": 1 },
+        "condition": { "$ref": "#/$defs/graphCondition" },
+        "transition": { "enum": ["immediate", "onSettlement"] },
+        "narrativePayoff": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "activityRevision": { "type": "integer", "minimum": 1 },
+    "blueprintId": { "type": "string", "minLength": 1 },
+    "nodeId": { "type": "string", "minLength": 1 },
+    "beat": { "enum": ["narrative", "choice", "combat", "check", "timed"] },
+    "pillarBeatId": { "type": "string", "minLength": 1 },
+    "expectedRevision": { "type": "integer", "minimum": 0 },
+    "snapshotToken": { "type": "string", "minLength": 1 },
+    "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "actions": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/action" } },
+    "settlements": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/settlement" } },
+    "resolvesActions": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/resolution" } },
+    "outgoingRoutes": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/route" } },
+    "cast": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["characterId"],
+        "properties": {
+          "characterId": { "type": "string", "minLength": 1 },
+          "role": { "enum": ["primary", "supporting", "background"] },
+          "onScreen": { "type": "boolean" }
+        }
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sceneId"],
+        "properties": {
+          "sceneId": { "type": "string", "minLength": 1 },
+          "role": { "enum": ["primary", "secondary", "background"] },
+          "useAsVideoReference": { "type": "boolean" }
+        }
+      }
+    },
+    "loop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backTo"],
+      "properties": {
+        "backTo": { "type": "string", "minLength": 1 },
+        "note": { "type": "string" }
+      }
+    },
+    "terminals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["when"],
+        "properties": {
+          "when": { "type": "string", "minLength": 1 },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  }
+}

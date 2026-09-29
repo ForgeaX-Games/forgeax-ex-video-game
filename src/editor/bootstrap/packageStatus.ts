@@ -2,11 +2,11 @@
  * Package status shared by every surface that must not touch an uninitialized
  * package.
  *
- * The host answers `load`/`save` with `package_uninitialized` until the package
- * is seeded, so any surface that reads or writes the tip has to pass this gate
- * first — otherwise it only produces rejected promises the caller cannot use.
+ * A video-game workflow may legitimately have only part of the portable package
+ * while it is being authored. The gate only blocks package boot until a
+ * blueprint exists; workflow-state and document surfaces remain usable earlier.
  */
-export type PackageState = 'uninitialized' | 'initialized' | 'inconsistent'
+export type PackageState = 'uninitialized' | 'partial' | 'initialized' | 'inconsistent'
 export type PackageStatus = { state: PackageState; missing?: string[] }
 
 export function statusOf(value: unknown): PackageStatus | null {
@@ -14,6 +14,7 @@ export function statusOf(value: unknown): PackageStatus | null {
   const candidate = value as { state?: unknown; missing?: unknown }
   if (
     candidate.state !== 'uninitialized'
+    && candidate.state !== 'partial'
     && candidate.state !== 'initialized'
     && candidate.state !== 'inconsistent'
   ) return null

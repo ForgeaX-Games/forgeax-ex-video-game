@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     entities: { character: {}, scene: {}, video: {}, icon: {}, control: {}, audio: {}, font: {} },
     assets: {},
   } as import('../../asset-catalog').AssetCatalog,
+  historyLoading: false,
   requestVisualStyles: undefined as undefined | (() => void),
   generationTrack: vi.fn(),
   generationState: {
@@ -42,6 +43,12 @@ vi.mock('../../asset-catalog', async (importOriginal) => ({
   useAssetCatalog: () => ({
     catalog: mocks.catalog,
     loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
+  useAssetCatalogHistory: () => ({
+    catalog: mocks.catalog,
+    loading: mocks.historyLoading,
     error: null,
     refresh: vi.fn(),
   }),
@@ -117,6 +124,7 @@ beforeEach(() => {
   mocks.surfaceTargetRoot = undefined
   mocks.surfaceMentionAssets = undefined
   mocks.catalog.assets = {}
+  mocks.historyLoading = false
   mocks.requestVisualStyles = undefined
   mocks.generationOptions = undefined
   mocks.generationTrack.mockClear()
@@ -127,6 +135,16 @@ beforeEach(() => {
   useGraphScenario.setState({ isDraft: false, syncTipIfClean: vi.fn(async () => 'applied' as const) })
   useCatalogNav.setState({ location: { kind: 'catalog-root', target: 'root:catalog' } })
 })
+
+it.each(['character', 'scene'] as const)('waits for %s history before mounting the generation layout', (targetRoot) => {
+  mocks.historyLoading = true
+
+  render(<ImageGenerationWorkspace gameId="demo" targetRoot={targetRoot} entityId={`${targetRoot}-1`} />)
+
+  expect(screen.getByRole('status')).toHaveTextContent('正在加载生成历史…')
+  expect(mocks.surfaceTargetRoot).toBeUndefined()
+})
+
 it.each(['control', 'character', 'scene'] as const)(
   'refreshes image assets and preselects the returned Kino resource in the %s root after success',
   async (root) => {
@@ -495,7 +513,10 @@ it('numbers a new standalone image from the first unused image name', async () =
   mocks.catalog.assets['existing-image'] = {
     id: 'existing-image', kind: 'image', name: '新图片 1', createdAt: 1, updatedAt: 1,
   }
-  render(<ImageGenerationWorkspace gameId="demo" />)
+  mocks.catalog.assets['current-image'] = {
+    id: 'current-image', kind: 'image', name: '新图片 2', createdAt: 1, updatedAt: 1,
+  }
+  render(<ImageGenerationWorkspace gameId="demo" initialAssetId="current-image" />)
 
   await mocks.generationOptions?.onSucceeded?.('kino-image-resource', {
     generationId: 'image-generation-numbered', status: 'succeeded', resourceId: 'kino-image-resource',
@@ -503,6 +524,28 @@ it('numbers a new standalone image from the first unused image name', async () =
   })
 
   expect(mocks.registerGenerated).toHaveBeenCalledWith(expect.objectContaining({
-    asset: expect.objectContaining({ label: '新图片 2' }),
+    asset: expect.objectContaining({ label: '新图片 3' }),
   }))
+})
+
+it('numbers a new icon from the first unused icon name', async () => {
+  mocks.catalog.entities.icon['icon-1'] = {
+    id: 'icon-1', name: '新图标 1', history: [], createdAt: 1, updatedAt: 1,
+  }
+  mocks.catalog.entities.icon['icon-3'] = {
+    id: 'icon-3', name: '新图标 3', history: [], createdAt: 1, updatedAt: 1,
+  }
+  render(<ImageGenerationWorkspace gameId="demo" targetRoot="icon" entityId="icon-3" />)
+
+  await mocks.generationOptions?.onSucceeded?.('kino-icon-resource', {
+    generationId: 'icon-generation-numbered', status: 'succeeded', resourceId: 'kino-icon-resource',
+    resultUrl: 'https://example.test/icon.png', prompt: '不会作为名称的提示词',
+  })
+
+  expect(mocks.registerGenerated).toHaveBeenCalledWith(expect.objectContaining({
+    asset: expect.objectContaining({ label: '新图标 2' }),
+    apply: expect.objectContaining({ createEntity: { name: '新图标 2' } }),
+  }))
+  delete mocks.catalog.entities.icon['icon-1']
+  delete mocks.catalog.entities.icon['icon-3']
 })

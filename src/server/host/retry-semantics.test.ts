@@ -19,6 +19,7 @@ describe('拒绝语义三态', () => {
       'workflow.gate.required',
       'workflow.gate.external-only',
       'workflow.transition.invalid',
+      'workflow.gate.pillar-frozen',
       'workflow.capability.denied',
       'workflow.write-scope.denied',
       'workflow.not-required.denied',

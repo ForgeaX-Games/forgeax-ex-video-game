@@ -1,13 +1,26 @@
 import { describe, expect, test } from 'vitest'
-import blueprint from './fixtures/nodia.blueprint.json'
+import { EMPTY_LIBRARY_DOCUMENT } from '@/authoring/blueprint/empty-library'
 import {
   applyPatchGraphOps,
   agentUiPatchErrors,
+  graphOpTouchesInteractionDesign,
   graphOpTouchesUi,
 } from './patch-graph-ops'
 import type { GameNode, GraphLibraryDocument } from '@/runtime/core/schema/graph-schema'
 import { normalizeDocument } from '@/authoring/blueprint/blueprint-project'
 import { getSubFlowPack, getSubProcess } from '@/runtime/core/schema/graph-schema'
+
+const blueprint = EMPTY_LIBRARY_DOCUMENT
+
+function withFormulas(doc: GraphLibraryDocument): GraphLibraryDocument {
+  return {
+    ...doc,
+    formulas: {
+      'fx-dmg': { id: 'fx-dmg', name: '伤害公式', ast: { t: 'num', id: 'n1', v: 1 } },
+      'fx-heal': { id: 'fx-heal', name: '恢复公式', ast: { t: 'num', id: 'n2', v: 2 } },
+    },
+  }
+}
 
 describe('applyPatchGraphOps', () => {
   test('renames a node on the main pack and keeps root graph in sync', () => {
@@ -99,16 +112,29 @@ describe('applyPatchGraphOps', () => {
 
   test('remove-node deletes the node and its connected edges', () => {
     const doc = normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument)
-    const [source, target] = doc.graph.nodes
-    const result = applyPatchGraphOps(doc, {
+    const source = doc.graph.nodes[0]!
+    const added: GameNode = {
+      id: 'remove-target',
+      type: 'perf',
+      position: { x: 240, y: 80 },
+      inputs: [],
+      outputs: [],
+      data: { name: '待删除' },
+    }
+    const prepared = applyPatchGraphOps(doc, {
       ops: [
-        { op: 'connect', id: 'remove-edge', source: source!.id, target: target!.id },
-        { op: 'remove-node', nodeId: target!.id },
+        { op: 'add-node', node: added },
+        { op: 'connect', id: 'remove-edge', source: source.id, target: added.id },
       ],
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const result = applyPatchGraphOps(prepared.document, {
+      ops: [{ op: 'remove-node', nodeId: added.id }],
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.document.graph.nodes.some((node) => node.id === target!.id)).toBe(false)
+    expect(result.document.graph.nodes.some((node) => node.id === added.id)).toBe(false)
     expect(result.document.graph.edges.some((edge) => edge.id === 'remove-edge')).toBe(false)
   })
 
@@ -275,7 +301,7 @@ describe('applyPatchGraphOps', () => {
     if (!result.ok) return
     const data = result.document.graph.nodes.find((node) => node.id === nodeId)!.data
     expect(getSubProcess(data)).toBeUndefined()
-    expect(getSubFlowPack(data)?.id).toBe('pack-tiandao')
+    expect(getSubFlowPack(data)).toEqual({ id: 'pack-tiandao', version: '1' })
   })
 
   test('set-sub-flow-pack pins an explicit version when given', () => {
@@ -338,6 +364,11 @@ describe('applyPatchGraphOps', () => {
     ['set-sub-flow-pack', { op: 'set-sub-flow-pack', nodeId: 'missing-node', packId: 'pack-tiandao' }],
     ['remove-node', { op: 'remove-node', nodeId: 'missing-node' }],
     ['insert-node-after', { op: 'insert-node-after', afterId: 'missing-node' }],
+    ['insert-node-before', { op: 'insert-node-before', beforeId: 'missing-node' }],
+    ['duplicate-nodes', {
+      op: 'duplicate-nodes',
+      copies: [{ sourceId: 'missing-node', targetId: 'copy-node' }],
+    }],
     ['attach-sub-process', { op: 'attach-sub-process', nodeId: 'missing-node' }],
     ['ensure-node-overlay', { op: 'ensure-node-overlay', nodeId: 'missing-node' }],
     [
@@ -363,6 +394,7 @@ describe('applyPatchGraphOps', () => {
     ],
     ['reset-overlay-override', { op: 'reset-overlay-override', nodeId: 'missing-node', childId: 'caption' }],
     ['disconnect', { op: 'disconnect', edgeId: 'missing-edge' }],
+    ['reconnect', { op: 'reconnect', edgeId: 'missing-edge', target: 'entry' }],
     ['update-edge-data', { op: 'update-edge-data', edgeId: 'missing-edge', data: { weight: 2 } }],
   ])('%s fails the batch when the target is missing', (_name, op) => {
     const doc = normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument)
@@ -377,8 +409,24 @@ describe('applyPatchGraphOps', () => {
     ['target', { source: undefined, target: 'missing-node' }],
   ])('connect fails the batch when %s is missing', (_name, endpoints) => {
     const doc = normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument)
-    const [first, second] = doc.graph.nodes
-    const result = applyPatchGraphOps(doc, {
+    const first = doc.graph.nodes[0]!
+    const prepared = applyPatchGraphOps(doc, {
+      ops: [{
+        op: 'add-node',
+        node: {
+          id: 'connect-other',
+          type: 'perf',
+          position: { x: 240, y: 80 },
+          inputs: [],
+          outputs: [],
+          data: { name: '另一节点' },
+        },
+      }],
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const second = prepared.document.graph.nodes.find((node) => node.id === 'connect-other')
+    const result = applyPatchGraphOps(prepared.document, {
       ops: [{
         op: 'connect',
         source: endpoints.source ?? first!.id,
@@ -418,7 +466,7 @@ describe('applyPatchGraphOps', () => {
   })
 
   test('set-formula upserts an existing formula in meta.formulas', () => {
-    const doc = normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument)
+    const doc = withFormulas(normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument))
     const before = doc.formulas!['fx-dmg']!
     const result = applyPatchGraphOps(doc, {
       ops: [{
@@ -442,7 +490,7 @@ describe('applyPatchGraphOps', () => {
   })
 
   test('set-formula creates a new formula when absent', () => {
-    const doc = normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument)
+    const doc = withFormulas(normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument))
     expect(doc.formulas!['fx-new']).toBeUndefined()
     const result = applyPatchGraphOps(doc, {
       ops: [{
@@ -463,7 +511,7 @@ describe('applyPatchGraphOps', () => {
   })
 
   test('set-formula rejects formula.id mismatching formulaId', () => {
-    const doc = normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument)
+    const doc = withFormulas(normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument))
     const result = applyPatchGraphOps(doc, {
       ops: [{
         op: 'set-formula',
@@ -477,7 +525,7 @@ describe('applyPatchGraphOps', () => {
   })
 
   test('set-formula rejects a missing formula or ast', () => {
-    const doc = normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument)
+    const doc = withFormulas(normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument))
     const missingFormula = applyPatchGraphOps(doc, {
       ops: [{ op: 'set-formula', formulaId: 'fx-dmg', formula: undefined as unknown as object }],
     })
@@ -489,7 +537,7 @@ describe('applyPatchGraphOps', () => {
   })
 
   test('remove-formula deletes a formula and fails when missing', () => {
-    const doc = normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument)
+    const doc = withFormulas(normalizeDocument(structuredClone(blueprint) as GraphLibraryDocument))
     expect(doc.formulas!['fx-heal']).toBeDefined()
     const removed = applyPatchGraphOps(doc, {
       ops: [{ op: 'remove-formula', formulaId: 'fx-heal' }],
@@ -544,6 +592,19 @@ describe('Agent 界面写入策略', () => {
       op: 'set-node-data',
       nodeId: 'entry',
       patch: { storyText: 'only graph data' },
+    })).toBe(false)
+  })
+
+  test('classifies interaction and edge producer writes as outline-owned design', () => {
+    expect(graphOpTouchesInteractionDesign({
+      op: 'set-node-data', nodeId: 'entry', patch: { interaction: { beat: 'choice' } },
+    })).toBe(true)
+    expect(graphOpTouchesInteractionDesign({
+      op: 'connect', source: 'entry', target: 'ending',
+      data: { design: { pillarBeatId: 'B01' } },
+    })).toBe(true)
+    expect(graphOpTouchesInteractionDesign({
+      op: 'set-node-data', nodeId: 'entry', patch: { storyText: '机械文案修复' },
     })).toBe(false)
   })
 

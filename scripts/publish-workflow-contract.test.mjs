@@ -31,3 +31,10 @@ test("does not re-inline a publish pipeline in this repo", () => {
   assert.doesNotMatch(workflow, /verify-release-artifact/u);
   assert.doesNotMatch(workflow, /--provenance/u);
 });
+
+const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+
+test("uses the shared source security gate before dependency installation", () => {
+  assert.match(ciWorkflow, /release-security:\n    uses: ForgeaX-Games\/forgeax-ci\/\.github\/workflows\/release-security\.yml@[a-f0-9]{40}\n/u);
+  assert.doesNotMatch(ciWorkflow, /run: bash scripts\/run-trufflehog-release-scan\.sh/u);
+});

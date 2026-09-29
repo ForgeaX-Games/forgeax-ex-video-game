@@ -4,9 +4,9 @@ import type {
   ServiceCapability,
   VideoGenerationGateway,
 } from '@forgeax/extension-host/contracts'
-import type { ExtensionContext } from '@forgeax/extension-host/node'
+import type { SeedContext } from '@forgeax/extension-host/node'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import blueprint from './host/fixtures/nodia.blueprint.json'
+import { EMPTY_LIBRARY_DOCUMENT } from '@/authoring/blueprint/empty-library'
 import { getAssetIdFromArgs, createGameVideoService } from './host/extension-service'
 import { createInitialWorkflowState, WorkflowStateError } from './host/workflow-state'
 import { host, tools } from './host'
@@ -31,7 +31,7 @@ afterEach(() => vi.restoreAllMocks())
 
 class MemoryFiles {
   readonly entries = new Map<string, Uint8Array>([
-    ['blueprint.json', encoder.encode(JSON.stringify(blueprint))],
+    ['blueprint.json', encoder.encode(JSON.stringify(EMPTY_LIBRARY_DOCUMENT))],
     ['assets/manifest.json', encoder.encode(JSON.stringify({ version: 2, assets: [] }))],
   ])
 
@@ -125,7 +125,8 @@ function createContext() {
         if (id === 'media.video.visual-styles.list') return { items: [] }
         throw new Error('Capabilities are unavailable in this test context')
       } },
-    } satisfies ExtensionContext,
+      options: {},
+    } satisfies SeedContext,
     files,
     media,
     models,
@@ -134,16 +135,61 @@ function createContext() {
 
 const manifestTools = [
   ['game-video:get-graph', 'getGraph', {}],
-  ['game-video:save-graph', 'saveGraph', { project: blueprint }],
+  ['game-video:save-graph', 'saveGraph', { project: EMPTY_LIBRARY_DOCUMENT }],
   ['game-video:patch-graph', 'patchGraph', {
     ops: [{
       op: 'set-node-field',
-      nodeId: blueprint.graph.nodes[0]!.id,
+      nodeId: EMPTY_LIBRARY_DOCUMENT.graph.nodes[0]!.id,
       field: 'name',
       value: 'Patched opening',
     }],
   }],
-  ['game-video:patch-node-media', 'patchNodeMedia', {}],
+  ['game-video:compile-blueprint-outline', 'compileBlueprintOutline', {
+    entry: 'entry',
+    idempotencyKey: 'outline:parity',
+    chapters: [{ id: 'entry', name: '起点', pillarBeatId: 'B01', beat: 'narrative' }],
+    routes: [],
+  }],
+  ['game-video:create-blueprint-outline-skeleton', 'createBlueprintOutlineSkeleton', {
+    entry: 'entry',
+    idempotencyKey: 'outline-skeleton:parity',
+    chapters: [{ id: 'entry', name: '起点', pillarBeatId: 'B01', beat: 'narrative' }],
+  }],
+  ['game-video:configure-blueprint-outline-node', 'configureBlueprintOutlineNode', {
+    nodeId: 'entry',
+    idempotencyKey: 'outline-node:entry:parity',
+    actions: [],
+    settlements: [],
+    outgoingRoutes: [],
+  }],
+  ['game-video:configure-blueprint-node', 'configureBlueprintNode', {
+    nodeId: EMPTY_LIBRARY_DOCUMENT.graph.nodes[0]!.id,
+    settlements: [{ trigger: { kind: 'at', seconds: 1 } }],
+  }],
+  ['game-video:patch-node-media', 'patchNodeMedia', {
+    activityRevision: 1,
+    expectedGraphRevision: 0,
+    graphSnapshotToken: 'parity-game:0',
+    expectedAssetRevision: 0,
+    idempotencyKey: 'video-presets:parity',
+    bindings: [{
+      nodeRef: {
+        blueprintId: EMPTY_LIBRARY_DOCUMENT.manifest.mainPackId,
+        nodeId: EMPTY_LIBRARY_DOCUMENT.graph.nodes[0]!.id,
+      },
+      media: {
+        kind: 'video',
+        prompt: 'A bounded provider-neutral preset',
+        generation: {
+          schemaVersion: 1,
+          durationSeconds: 8,
+          generateAudio: false,
+          mode: 't2v',
+          references: {},
+        },
+      },
+    }],
+  }],
   ['game-video:patch-rules', 'patchRules', {
     ops: [{ op: 'upsert-variable', variableId: 'var_clues', name: '线索', initial: 0 }],
   }],
@@ -208,6 +254,12 @@ const manifestTools = [
     label: '选项按钮',
     inputs: [{ key: 'label', label: '文字', valueType: 'string', default: '选项' }],
     events: [{ id: 'select', label: '选择' }],
+    gameplaySemantics: {
+      roles: ['player-choice'], purpose: '承载剧情选项', stateBindings: [],
+      eventSemantics: [{ event: 'select', intent: '选择选项', requiredConsequences: ['feedback', 'advance'], stateMutationOwner: 'settlement', downstreamPayoff: '下游呈现选择结果' }],
+      requiredCompanions: [], recommendedSettlements: ['choice-event-route'],
+      requiredFeedback: ['选择后锁定'], antiPatterns: ['无差异合流'],
+    },
     implementation: `function OptionButton(props) {
       return React.createElement('button', {
         onClick: function () { props.emit?.('select') },
@@ -217,6 +269,39 @@ const manifestTools = [
 ] as const
 
 describe('game-video host module', () => {
+  test.each([
+    ['tavern', '酒馆'],
+  ] as const)('creates the %s template seed from initialize options', async (template, nodeName) => {
+    const seedRun = createContext()
+    Object.assign(seedRun.context, { options: { template } })
+
+    const seed = await host.gamePackage!.createSeed(seedRun.context)
+    await expect(host.gamePackage!.validateSeed(seed)).resolves.toBeUndefined()
+
+    expect(seed.blueprint).toMatchObject({
+      graph: {
+        nodes: expect.arrayContaining([
+          expect.objectContaining({ type: 'perf', data: expect.objectContaining({ name: nodeName }) }),
+        ]),
+      },
+    })
+    expect(decoder.decode(seedRun.files.entries.get('extra/copied.txt'))).toBe(
+      `${template}-extra\n`,
+    )
+  })
+
+  test('rejects a template seed that lost its entry node', async () => {
+    const seedRun = createContext()
+    Object.assign(seedRun.context, { options: { template: 'tavern' } })
+    const seed = await host.gamePackage!.createSeed(seedRun.context)
+    const blueprint = seed.blueprint as typeof EMPTY_LIBRARY_DOCUMENT
+    blueprint.manifest.packs[blueprint.manifest.mainPackId]!.graph.nodes.shift()
+
+    await expect(host.gamePackage!.validateSeed(seed)).rejects.toThrow(
+      'entry node id',
+    )
+  })
+
   test('exports the manifest-ordered tool map and host integrations', async () => {
     const seedRun = createContext()
     expect(Object.keys(tools)).toEqual(manifestTools.map(([id]) => id))
@@ -370,14 +455,16 @@ describe('game-video host module', () => {
       encoder.encode(JSON.stringify(pillarComplete)),
     )
 
-    // 支柱确认门守在功能开发第一步，即总脉络。
+    // 总脉络是支柱的编译产物：走 MCP 工具面进来的调用一律被拒，连支柱门都不必看。
+    // 这道拒绝比原来的 `workflow.gate.required` 更靠前——那时它意味着「等门开了
+    // 再来」，而现在没有任何时机能让 agent 开启它。
     await expect(tools['game-video:begin-activity']!(run.context, {
       activity: 'blueprint.outline',
       expectedWorkflowRevision: pillarComplete.revision,
     })).rejects.toMatchObject({
       ok: false,
       error: {
-        code: 'workflow.gate.required',
+        code: 'workflow.activity.compiler-owned',
         target: 'workflow',
         retryable: false,
         details: { currentRevision: pillarComplete.revision },

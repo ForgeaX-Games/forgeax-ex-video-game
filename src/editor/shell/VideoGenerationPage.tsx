@@ -415,9 +415,9 @@ export function VideoGenerationPage({
   return (
     <div className="wgv-generation-page">
       {showBreadcrumb ? (
-        <header className="wgv-generation-page-head">
-          <div className="wgv-generation-breadcrumb" aria-label={t('videoAssets.generate.breadcrumbAria')}>
-            <button type="button" onClick={returnFromGeneration}>{t('videoAssets.title')}</button>
+        <header className="generation-page-head">
+          <div className="generation-page-breadcrumb" aria-label={t('videoAssets.generate.breadcrumbAria')}>
+            <button type="button" onClick={returnFromGeneration}>{t('assetCatalog.root.video')}</button>
             <span aria-hidden>/</span>
             <strong>{t('videoAssets.generate.pageTitle')}</strong>
           </div>
@@ -468,26 +468,6 @@ const VIDEO_GENERATION_PAGE_CSS = `
   background: var(--wgv-page-bg);
   color: var(--wgv-page-text);
 }
-.wgv-generation-page-head {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  flex: none;
-  min-height: 48px;
-  padding: 0 24px;
-  border-bottom: 1px solid rgba(255,255,255,.1);
-  background: var(--wgv-page-panel);
-}
-.wgv-generation-breadcrumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--wgv-page-muted);
-  font-size: 13px;
-}
-.wgv-generation-breadcrumb button { padding: 0; border: 0; background: transparent; color: var(--wgv-page-muted); cursor: pointer; font: inherit; }
-.wgv-generation-breadcrumb button:hover, .wgv-generation-breadcrumb button:focus-visible { color: #fff; outline: none; }
-.wgv-generation-breadcrumb strong { color: var(--wgv-page-text); font-weight: 700; }
 .wgv-generation-page > .vgen-sheet {
   position: relative;
   inset: auto;

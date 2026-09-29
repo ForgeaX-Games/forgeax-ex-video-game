@@ -96,7 +96,7 @@ describe('work scale completion gates', () => {
     expect(result.evidence[0]).toMatchObject({ status: 'pass', checkId: 'outline.node-count-matches-scale' })
   })
 
-  it('accepts short scale within the range of 8 to 15 nodes and warns outside', async () => {
+  it('accepts short scale within the range of 8 to 15 nodes, warns below min, and fails above max', async () => {
     for (const count of [8, 10, 15]) {
       const result = await validateProjectForActivity(
         context(count),
@@ -128,7 +128,8 @@ describe('work scale completion gates', () => {
       ['outline.node-count-matches-scale'],
       workflow('短篇（10个章节）'),
     )
-    expect(overResult.evidence[0]?.status).toBe('warn')
+    expect(overResult.evidence[0]?.status).toBe('fail')
+    expect(overResult.ok).toBe(false)
     expect(overResult.evidence[0]?.issues?.[0]?.code).toBe('outline.node-count-mismatch')
   })
 
@@ -149,7 +150,8 @@ describe('work scale completion gates', () => {
       ['outline.node-count-matches-scale'],
       workflow('短篇（10个章节）'),
     )
-    expect(overBudget.evidence[0]?.status).toBe('warn')
+    expect(overBudget.evidence[0]?.status).toBe('fail')
+    expect(overBudget.ok).toBe(false)
     expect(overBudget.evidence[0]?.issues?.[0]?.code).toBe('outline.node-count-mismatch')
   })
 

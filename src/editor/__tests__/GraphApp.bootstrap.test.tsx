@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { GraphApp } from '../GraphApp'
@@ -168,13 +168,16 @@ test('boots the left pane from the host handshake without GameBootstrap chrome a
     '.ga-root.is-pane-left .ns-sidebar { width: 100%; min-width: 0; }',
   )
   // 行操作仅 hover 显示（display:none），用 hidden:true 校验直接图标按钮权限。
-  expect(screen.getByRole('button', { name: '重命名 主蓝图', hidden: true })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '删除 主蓝图', hidden: true })).toBeNull()
-  expect(screen.queryByRole('button', { name: '设为入口 主蓝图', hidden: true })).toBeNull()
+  // 删除/设为主按钮的 label 不区分蓝图，必须按行限定，否则会命中其它蓝图的同名按钮。
+  const mainRow = screen.getByText('主蓝图').closest('[role="treeitem"]') as HTMLElement
+  expect(within(mainRow).getByRole('button', { name: '重命名 主蓝图', hidden: true })).toBeTruthy()
+  expect(within(mainRow).queryByRole('button', { name: '删除该蓝图', hidden: true })).toBeNull()
+  expect(within(mainRow).queryByRole('button', { name: '设为主蓝图', hidden: true })).toBeNull()
 
-  expect(screen.getByRole('button', { name: '重命名 子蓝图', hidden: true })).toBeTruthy()
-  expect(screen.getByRole('button', { name: '删除 子蓝图', hidden: true })).toBeTruthy()
-  expect(screen.getByRole('button', { name: '设为入口 子蓝图', hidden: true })).toBeTruthy()
+  const childRow = screen.getByText('子蓝图').closest('[role="treeitem"]') as HTMLElement
+  expect(within(childRow).getByRole('button', { name: '重命名 子蓝图', hidden: true })).toBeTruthy()
+  expect(within(childRow).getByRole('button', { name: '删除该蓝图', hidden: true })).toBeTruthy()
+  expect(within(childRow).getByRole('button', { name: '设为主蓝图', hidden: true })).toBeTruthy()
 })
 
 test('left pane waits instead of erroring while the package is still uninitialized', async () => {
@@ -236,6 +239,13 @@ test('renders an empty center workspace while brief.collecting has no selectable
   expect(injectedStyles.get('graph-app-shell')).toContain(
     '.ga-root.is-pane-center:has(.ga-main[data-production-empty])',
   )
+  expect(screen.queryByText('blueprint')).toBeNull()
+})
+
+test('renders the empty icon before a workflow projection exists', () => {
+  const { container } = render(<GraphApp pane="center" gameId="arrival-game" autoInitialize />)
+
+  expect(container.querySelector('[data-production-empty="true"] img')).toBeTruthy()
   expect(screen.queryByText('blueprint')).toBeNull()
 })
 

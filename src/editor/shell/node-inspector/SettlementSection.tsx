@@ -10,10 +10,16 @@ import { Fragment, useEffect, useRef, type ReactNode } from 'react'
 import type { Entity, GameEdge, GameGraph, GameNode, GameNodeData, GraphCondition, NodeAction, Overlay, RoutingSettlement, Variable } from '@/runtime/core/schema/graph-schema'
 import type { Reaction } from '@/runtime/core/schema/node-config-schema'
 import {
+  removeSettlementSpawn,
   setSettlementAdvanceTarget,
   updateEventRouteTiming,
   type NodeDataPatch,
 } from '@/authoring/graph/graph-edit'
+import {
+  createSettlementReaction,
+  removeSettlementAction,
+  removeSettlementReaction,
+} from '@/authoring/graph/settlement-edit'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { ConditionEditor, type EditorPickerCtx } from '../editors'
 import { scrollIntoViewWithin } from '../focus-scroll'
@@ -29,7 +35,7 @@ import {
   NodeActionsEditor,
   nodeActionAddOptions,
 } from '../NodeActionsEditor'
-import { LooseNumberInput } from '../TermChainEditor'
+import { LooseNumberInput } from '../LooseNumberInput'
 import { NiAddMenu, NiField, NiIcon, NiSection, NiSelect, NiSubPanel, niIconMaskCss } from '../ni-ui'
 import {
   AdvanceTargetRow,
@@ -265,6 +271,8 @@ function LifecycleReactionsEditor({
   advanceEdgeFor,
   advanceTargetFor,
   onAdvanceTargetChange,
+  onRemoveSettlement,
+  onRemoveSettlementAction,
   routingSettlement,
   onSetAdvanceTiming,
   componentOptions,
@@ -292,6 +300,8 @@ function LifecycleReactionsEditor({
   advanceEdgeFor: (edgeId: string) => GameEdge | undefined
   advanceTargetFor: (edgeId: string) => string
   onAdvanceTargetChange: (settlementIndex: number, actionIndex: number, targetId: string) => void
+  onRemoveSettlement: (settlementIndex: number) => void
+  onRemoveSettlementAction: (settlementIndex: number, actionIndex: number) => void
   routingSettlement?: RoutingSettlement
   onSetAdvanceTiming: (
     edgeId: string,
@@ -320,7 +330,7 @@ function LifecycleReactionsEditor({
   const removeAt = (i: number) => {
     if (focusedIndex === i) onFocusIndex?.(null)
     else if (focusedIndex != null && focusedIndex > i) onFocusIndex?.(focusedIndex - 1)
-    commit(settlements.filter((_, j) => j !== i))
+    onRemoveSettlement(i)
   }
   useEffect(() => {
     if (focusAnchorRevision == null || focusedIndex == null) return
@@ -333,7 +343,6 @@ function LifecycleReactionsEditor({
 
   return (
     <div className="ni-st-list">
-      {settlements.length === 0 ? <div className="ni-st-empty">{translateUi('ui.copy.1c9261662487')}</div> : null}
       {settlements.map((r, i) => {
         const atMs = lifecycleAtMs(r, durationMs)
         const legacy = isLifecycle(r) ? legacyPhaseHint(r) : null
@@ -524,6 +533,7 @@ function LifecycleReactionsEditor({
                         </>
                       )
                     }}
+                    onRemove={(actionIndex) => onRemoveSettlementAction(i, actionIndex)}
                     onChange={writeActions}
                   />
                 </div>
@@ -543,14 +553,13 @@ function LifecycleReactionsEditor({
         }))}
         onSelect={(value) => {
           const nextIndex = settlements.length
-          commit([...settlements, {
-            when: settlementWhenFor(value as SettlementTriggerType, {
-              atMs: Math.max(0, Math.round(insertMs ?? 0)),
-              componentValue: componentOptions[0]?.value ?? '',
-            }),
-            // 空动作：作者自己点「添加动作」再选效果 / 添加连线 / 绑界面，不预塞一条效果。
-            do: [],
-          }])
+          const when = settlementWhenFor(value as SettlementTriggerType, {
+            atMs: Math.max(0, Math.round(insertMs ?? 0)),
+            componentValue: componentOptions[0]?.value ?? '',
+          })
+          if (when.type !== 'at' && when.type !== 'watch' && when.type !== 'state') return
+          // 空动作：作者自己点「添加动作」再选效果 / 添加连线 / 绑界面，不预塞一条效果。
+          commit([...settlements, createSettlementReaction(when)])
           onFocusIndex?.(nextIndex)
         }}
       />
@@ -628,6 +637,15 @@ export function SettlementSection({
           onAdvanceTargetChange={(settlementIndex, actionIndex, targetId) => onChange(
             setSettlementAdvanceTarget(graph, node.id, settlementIndex, actionIndex, targetId),
           )}
+          onRemoveSettlement={(settlementIndex) => onChange(
+            removeSettlementReaction(graph, node.id, settlementIndex),
+          )}
+          onRemoveSettlementAction={(settlementIndex, actionIndex) => {
+            const action = (d.reactions ?? []).filter(isSettlement)[settlementIndex]?.do[actionIndex]
+            onChange(action?.kind === 'spawn'
+              ? removeSettlementSpawn(graph, node.id, settlementIndex, actionIndex)
+              : removeSettlementAction(graph, node.id, settlementIndex, actionIndex))
+          }}
           routingSettlement={d.routingSettlement}
           onSetAdvanceTiming={(edgeId, transition, settlement) => {
             const edge = graph.edges.find((candidate) => candidate.id === edgeId)

@@ -14,7 +14,7 @@ import {
   readNodePosition,
 } from '@/runtime/core/schema/react-flow-schema'
 import type { NodeAction, Reaction } from '@/runtime/core/schema/node-config-schema'
-import { isLifecycleReaction, isSettlementReaction } from '@/runtime/core/schema/node-config-schema'
+import { isLifecycleReaction, isSettlementReaction, overlayMountId } from '@/runtime/core/schema/node-config-schema'
 import { isSettlementAdvanceHandle, SETTLEMENT_ADVANCE_HANDLE_PREFIX } from '@/authoring/graph/flow-handle-labels'
 import { clampSettlementSpawnTtlMs, nodePlayDurationMs } from '@/authoring/graph/timeline-geometry'
 
@@ -174,9 +174,37 @@ export function removeNode(graph: GameGraph, id: string): GameGraph {
   }
 }
 
+function rewriteGraphRefs(
+  value: unknown,
+  nodeIds: ReadonlyMap<string, string>,
+  edgeIds: ReadonlyMap<string, string>,
+): unknown {
+  if (Array.isArray(value)) return value.map((item) => rewriteGraphRefs(item, nodeIds, edgeIds))
+  if (!value || typeof value !== 'object') return value
+  const out: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'nodeId' && typeof item === 'string') out[key] = nodeIds.get(item) ?? item
+    else if (key === 'edgeId' && typeof item === 'string') out[key] = edgeIds.get(item) ?? item
+    else out[key] = rewriteGraphRefs(item, nodeIds, edgeIds)
+  }
+  return out
+}
+
 /** 深拷贝节点 data（overlayNodes 引用同一 overlay 目录项；child id 在目录侧）。 */
-function cloneNodePayload(src: GameNode, nodeId: string, offset: { x: number; y: number }): GameNode {
-  const data = structuredClone(src.data)
+function cloneNodePayload(
+  src: GameNode,
+  nodeId: string,
+  offset: { x: number; y: number },
+  refs: {
+    nodeIds: ReadonlyMap<string, string>
+    edgeIds: ReadonlyMap<string, string>
+  },
+): GameNode {
+  const data = rewriteGraphRefs(
+    structuredClone(src.data),
+    refs.nodeIds,
+    refs.edgeIds,
+  ) as GameNode['data']
   const process = getSubProcess(src.data)
   if (process) (data as GameNode['data'] & { subProcess: SubProcess }).subProcess = cloneSubProcess(process)
   const name = data.name?.trim() ?? ''
@@ -204,22 +232,10 @@ function cloneSubProcess(process: SubProcess): SubProcess {
   }
   collect(process.graph)
 
-  const rewriteRefs = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(rewriteRefs)
-    if (!value || typeof value !== 'object') return value
-    const out: Record<string, unknown> = {}
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (key === 'nodeId' && typeof item === 'string') out[key] = nodeIds.get(item) ?? item
-      else if (key === 'edgeId' && typeof item === 'string') out[key] = edgeIds.get(item) ?? item
-      else out[key] = rewriteRefs(item)
-    }
-    return out
-  }
-
   const cloneGraph = (source: GameGraph): GameGraph => ({
     ...source,
     nodes: source.nodes.map((node) => {
-      const data = rewriteRefs(structuredClone(node.data)) as GameNode['data']
+      const data = rewriteGraphRefs(structuredClone(node.data), nodeIds, edgeIds) as GameNode['data']
       const nested = getSubProcess(node.data)
       if (nested) (data as GameNode['data'] & { subProcess: SubProcess }).subProcess = {
         entry: nodeIds.get(nested.entry) ?? nested.entry,
@@ -232,7 +248,7 @@ function cloneSubProcess(process: SubProcess): SubProcess {
       id: edgeIds.get(edge.id)!,
       source: nodeIds.get(edge.source) ?? edge.source,
       target: nodeIds.get(edge.target) ?? edge.target,
-      data: rewriteRefs(structuredClone(edge.data)) as GameEdge['data'],
+      data: rewriteGraphRefs(structuredClone(edge.data), nodeIds, edgeIds) as GameEdge['data'],
     })),
   })
 
@@ -245,29 +261,36 @@ function cloneSubProcess(process: SubProcess): SubProcess {
 export function duplicateNodes(
   graph: GameGraph,
   sourceIds: readonly string[],
-  opts: { offset?: { x: number; y: number } } = {},
+  opts: {
+    offset?: { x: number; y: number }
+    nodeIdForSource?: Readonly<Record<string, string>>
+  } = {},
 ): { graph: GameGraph; nodeIds: string[] } {
   const idSet = new Set(sourceIds)
   const sources = graph.nodes.filter((n) => idSet.has(n.id))
   if (sources.length === 0) return { graph, nodeIds: [] }
   const offset = opts.offset ?? { x: 48, y: 48 }
   const idMap = new Map<string, string>()
+  for (const src of sources) idMap.set(src.id, opts.nodeIdForSource?.[src.id] ?? newId('n'))
+  const internalEdges = graph.edges.filter((edge) => idSet.has(edge.source) && idSet.has(edge.target))
+  const edgeIdMap = new Map(internalEdges.map((edge) => [edge.id, newId('edge')]))
   const created: GameNode[] = []
   for (const src of sources) {
-    const nid = newId('n')
-    idMap.set(src.id, nid)
-    created.push(cloneNodePayload(src, nid, offset))
+    created.push(cloneNodePayload(src, idMap.get(src.id)!, offset, {
+      nodeIds: idMap,
+      edgeIds: edgeIdMap,
+    }))
   }
   const newEdges: GameEdge[] = []
-  for (const e of graph.edges) {
-    if (!idSet.has(e.source) || !idSet.has(e.target)) continue
+  for (const e of internalEdges) {
     const ns = idMap.get(e.source)!
     const nt = idMap.get(e.target)!
     newEdges.push({
       ...structuredClone(e),
-      id: newId('edge'),
+      id: edgeIdMap.get(e.id)!,
       source: ns,
       target: nt,
+      data: rewriteGraphRefs(structuredClone(e.data), idMap, edgeIdMap) as GameEdge['data'],
     })
   }
   return {
@@ -368,7 +391,8 @@ function countHandleEdges(graph: GameGraph, source: string, handle: string): num
 
 /**
  * 在源节点写入一条 `when.event.id === handle` 的 advance reaction。
- * 挂载选择：已有同名 event reaction 的挂载 > 已有任意 event reaction 的挂载 > 首个挂载；
+ * 挂载选择：已有同名 event reaction 的挂载 > handle 命中的挂载命名空间（多挂载时形如
+ * `M__2:ying`） > 已有任意 event reaction 的挂载 > 首个挂载；
  * 无挂载则挂 `node.data.reactions`（避免写到 HUD 这类无交互事件的挂载上）。
  */
 function ensureEventAdvanceReaction(node: GameNode, handle: string, edgeId: string): GameNode {
@@ -379,10 +403,13 @@ function ensureEventAdvanceReaction(node: GameNode, handle: string, edgeId: stri
     let best = 0
     let bestScore = -1
     for (let i = 0; i < mounts.length; i++) {
-      const rs = mounts[i]!.reactions ?? []
+      const mount = mounts[i]!
+      const rs = mount.reactions ?? []
       const same = rs.some((r) => r.when.type === 'event' && r.when.id === handle)
       const anyEv = rs.some((r) => r.when.type === 'event')
-      const score = (same ? 2 : 0) + (anyEv ? 1 : 0)
+      // 多挂载事件命名空间：handle 形如 `${mountId}:...` 时归属即该挂载，优先于 anyEv 启发。
+      const owned = handle.startsWith(`${overlayMountId(mount)}:`)
+      const score = (same ? 4 : 0) + (owned ? 2 : 0) + (anyEv ? 1 : 0)
       if (score > bestScore) {
         bestScore = score
         best = i
@@ -692,7 +719,7 @@ export function removeSettlementSpawn(
   })
 }
 
-function settlementReactionAbsoluteIndex(reactions: Reaction[], settlementIndex: number): number {
+export function settlementReactionAbsoluteIndex(reactions: Reaction[], settlementIndex: number): number {
   let seen = -1
   return reactions.findIndex((reaction) => isSettlementReaction(reaction) && ++seen === settlementIndex)
 }
@@ -705,7 +732,7 @@ function graphReferencesAdvanceEdge(graph: GameGraph, edgeId: string): boolean {
   )
 }
 
-function removeOrphanSettlementAdvanceEdge(graph: GameGraph, edgeId: string | undefined): GameGraph {
+export function removeOrphanSettlementAdvanceEdge(graph: GameGraph, edgeId: string | undefined): GameGraph {
   if (!edgeId || graphReferencesAdvanceEdge(graph, edgeId)) return graph
   const edge = graph.edges.find((candidate) => candidate.id === edgeId)
   if (!edge || !isSettlementAdvanceHandle(edge.sourceHandle ?? 'default')) return graph
@@ -722,6 +749,7 @@ export function setSettlementAdvanceTarget(
   settlementIndex: number,
   actionIndex: number,
   targetId: string,
+  preferredEdgeId?: string,
 ): GameGraph {
   const node = graph.nodes.find((candidate) => candidate.id === nodeId)
   const reactions = node?.data.reactions
@@ -743,7 +771,12 @@ export function setSettlementAdvanceTarget(
   if (targetId === nodeId || !graph.nodes.some((candidate) => candidate.id === targetId)) return graph
 
   let next = graph
-  let edge = currentEdge?.source === nodeId && currentEdge.target === targetId ? currentEdge : undefined
+  let edge = preferredEdgeId
+    ? graph.edges.find((candidate) => candidate.id === preferredEdgeId
+      && candidate.source === nodeId && candidate.target === targetId)
+    : undefined
+  if (preferredEdgeId && !edge) return graph
+  edge ??= currentEdge?.source === nodeId && currentEdge.target === targetId ? currentEdge : undefined
   edge ??= graph.edges.find((candidate) => candidate.source === nodeId && candidate.target === targetId)
   if (!edge && currentEdge?.source === nodeId && isSettlementAdvanceHandle(currentEdge.sourceHandle ?? 'default')) {
     next = reconnect(graph, currentEdge.id, { target: targetId })

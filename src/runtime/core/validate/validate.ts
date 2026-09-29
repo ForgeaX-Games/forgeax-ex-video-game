@@ -11,9 +11,15 @@ import { getSubFlowPack, getSubProcess } from '../schema/graph-schema'
 import { isPosition } from '../schema/react-flow-schema'
 import { expandNodeOverlays } from '../schema/expand-overlay'
 import { overlayMountId } from '../schema/node-config-schema'
-import { eventsFromParams, overlayReactionKey } from '../schema/overlay-events'
+import {
+  aggregateNodeOverlayEvents,
+  eventReactionKeys,
+  eventsFromParams,
+  overlayReactionKey,
+} from '../schema/overlay-events'
+import type { ComponentEvent, ComponentManifest, OverlayEventRef } from '../schema/node-config-schema'
 import { collectRefs } from '../engine/expr'
-import { deriveOutputs, getComponent } from '../registry/component-registry'
+import { deriveOutputs, getComponent, getComponentManifest } from '../registry/component-registry'
 import { defaultNodeKindRegistry, resolveNodeType } from '../nodes'
 
 export interface Issue {
@@ -31,6 +37,8 @@ export interface ValidateOpts {
   items?: Iterable<string>
   /** scenario.ui.overlays —— 展开 OverlayNode 做 component / handle 校验。 */
   overlays?: Record<string, Overlay>
+  /** 宿主按项目注入的组件事件契约；用于校验不在内建 registry 中的 authored 组件。 */
+  componentEvents?: ReadonlyMap<string, { events: readonly ComponentEvent[] }>
   /**
    * `assets/manifest` 里 `kind: 'audio'` 的资产 id 表，用于校验 bgm.ref 能否解析。
    * 缺省 = 调用方没有资产表 → 只能给 warn（见 checkBgm）。
@@ -73,11 +81,78 @@ function spawnLocalsUsed(inputs: Record<string, unknown> | undefined): string[] 
   return [...used]
 }
 
+/** 深挖 reaction do 里的 `eventPayload.<key>` 引用（`{expr}` 数值通道 + `{ref}` 字符串通道），供事件出参校验。 */
+function collectEventKeys(value: unknown, out: Set<string>): void {
+  if (value == null || typeof value !== 'object') return
+  if (Array.isArray(value)) {
+    for (const v of value) collectEventKeys(v, out)
+    return
+  }
+  const o = value as Record<string, unknown>
+  if (typeof o.expr === 'string') {
+    try {
+      for (const k of collectRefs(o.expr).eventPayload) out.add(k)
+    } catch {
+      // 表达式本身不合法 —— 由 walkRefs 的 expr 规则负责报告。
+    }
+  }
+  if (typeof o.ref === 'string' && o.ref.startsWith('eventPayload.')) {
+    out.add(o.ref.slice('eventPayload.'.length))
+  }
+  for (const v of Object.values(o)) collectEventKeys(v, out)
+}
+
+function checkEventPayloadOutputs(
+  reaction: Reaction,
+  matchingEvents: readonly { outputs?: readonly { key: string }[] }[],
+  at: string,
+  issues: Issue[],
+): void {
+  const used = new Set<string>()
+  for (const action of reaction.do) collectEventKeys(action, used)
+  if (used.size === 0) return
+  if (reaction.when.type !== 'event') {
+    issues.push({
+      level: 'error',
+      code: 'ref.eventPayload.unavailable',
+      msg: `eventPayload 出参只能在组件事件反应里读取（当前为 ${reaction.when.type} 反应）`,
+      at,
+    })
+    return
+  }
+  // 未注入项目级 authored 契约时无法判断事件出参；事件本身的存在性由对应结构规则负责。
+  if (matchingEvents.length === 0) return
+
+  const allowed = matchingEvents
+    .map((event) => new Set(event.outputs?.map((output) => output.key) ?? []))
+    .reduce((intersection, keys) => new Set([...intersection].filter((key) => keys.has(key))))
+  for (const key of used) {
+    if (!allowed.has(key)) {
+      issues.push({
+        level: 'error',
+        code: 'ref.eventPayload.output.missing',
+        msg: `eventPayload.${key} 未在事件 '${reaction.when.id}' 的 outputs 中声明`,
+        at,
+      })
+    }
+  }
+}
+
+function matchingMountEvents(
+  reaction: Reaction,
+  refs: readonly OverlayEventRef[],
+): OverlayEventRef[] {
+  if (reaction.when.type !== 'event') return []
+  const eventId = reaction.when.id
+  return refs.filter((ref) => eventReactionKeys(ref.localEventId, ref.childId, ref.mountId).includes(eventId))
+}
+
 /** Overlay 目录 reactions 是比挂载 Reaction 更窄的持久化契约，逐字段 fail-loud。 */
 function checkOverlayReactions(
   overlay: Overlay,
   overlays: Record<string, Overlay>,
   issues: Issue[],
+  resolveManifest: (componentId: string) => ComponentManifest | undefined,
 ): void {
   const raw = (overlay as { reactions?: unknown }).reactions
   if (raw === undefined) return
@@ -88,7 +163,7 @@ function checkOverlayReactions(
   const allowed = new Set<string>()
   for (const child of overlay.children) {
     const declared = eventsFromParams(child.inputs)
-    const events = declared.length ? declared : (getComponent(child.component)?.events ?? [])
+    const events = declared.length ? declared : (resolveManifest(child.component)?.events ?? [])
     for (const event of events) allowed.add(overlayReactionKey(child.id, event.id))
   }
   const seen = new Set<string>()
@@ -481,6 +556,11 @@ function validateGraphScope(
   const issues: Issue[] = []
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const overlays = opts?.overlays
+  const resolveManifest = (componentId: string): ComponentManifest | undefined => {
+    const contract = opts?.componentEvents?.get(componentId)
+    if (contract) return { id: componentId, events: [...contract.events] }
+    return getComponentManifest(componentId)
+  }
 
   for (const node of graph.nodes) {
     if (state.nodeIds.has(node.id)) {
@@ -557,7 +637,7 @@ function validateGraphScope(
     const children = expandNodeOverlays(overlays, n).flatMap((i) => i.children)
     for (const el of children) {
       const plugin = getComponent(el.component)
-      if (!plugin) {
+      if (!plugin && !opts?.componentEvents?.has(el.component)) {
         issues.push({
           level: 'error',
           code: 'component.unknown',
@@ -566,7 +646,7 @@ function validateGraphScope(
         })
         continue
       }
-      for (const problem of plugin.validate?.(el.inputs) ?? []) {
+      for (const problem of plugin?.validate?.(el.inputs) ?? []) {
         issues.push({
           level: 'error',
           code: 'component.invalid',
@@ -576,7 +656,9 @@ function validateGraphScope(
       }
     }
   }
-  for (const overlay of Object.values(overlays ?? {})) checkOverlayReactions(overlay, overlays ?? {}, issues)
+  for (const overlay of Object.values(overlays ?? {})) {
+    checkOverlayReactions(overlay, overlays ?? {}, issues, resolveManifest)
+  }
 
   // 4) 不可达节点（蓝图根缺省从 nodes[0]；内嵌子流程从显式 entry）
   if (graph.nodes.length > 0) {
@@ -629,11 +711,17 @@ function validateGraphScope(
     }
     const edgeIds = new Set(graph.edges.map((e) => e.id))
     for (const n of graph.nodes) {
-      const packs: Array<{ reactions?: Reaction[]; at: string }> = [
-        { reactions: n.data.reactions, at: `node:${n.id}.reactions` },
+      const allEventRefs = aggregateNodeOverlayEvents(
+        n.data.overlayNodes ?? [],
+        overlays,
+        resolveManifest,
+      )
+      const packs: Array<{ reactions?: Reaction[]; at: string; eventRefs: OverlayEventRef[] }> = [
+        { reactions: n.data.reactions, at: `node:${n.id}.reactions`, eventRefs: [] },
         ...(n.data.overlayNodes ?? []).map((m, mi) => ({
           reactions: m.reactions,
           at: `node:${n.id}.overlayNodes[${mi}].reactions`,
+          eventRefs: allEventRefs.filter((ref) => ref.mountId === overlayMountId(m)),
         })),
       ]
       const overlayMountIds = new Set((n.data.overlayNodes ?? []).map(overlayMountId))
@@ -641,6 +729,7 @@ function validateGraphScope(
         for (let i = 0; i < (pack.reactions ?? []).length; i++) {
           const r = pack.reactions![i]!
           const at = `${pack.at}[${i}]`
+          checkEventPayloadOutputs(r, matchingMountEvents(r, pack.eventRefs), at, issues)
           if (r.when.type === 'state') walkRefs(r.when.condition, ctx, at, issues)
           if (r.when.type === 'complete' && r.when.if) walkRefs(r.when.if, ctx, at, issues)
           // watch 的局部量由被观察值提供；演出相位结算靠同一 do 内在前的数值 effect 采样；
@@ -696,6 +785,19 @@ function validateGraphScope(
             }
           }
         }
+      }
+    }
+    for (const [overlayId, overlay] of Object.entries(overlays ?? {})) {
+      for (let index = 0; index < (overlay.reactions ?? []).length; index++) {
+        const reaction = overlay.reactions![index]!
+        const at = `overlay:${overlayId}.reactions[${index}]`
+        const matchingEvents = overlay.children.flatMap((child) => {
+          const dynamicEvents = eventsFromParams(child.inputs)
+          const events = dynamicEvents.length ? dynamicEvents : (resolveManifest(child.component)?.events ?? [])
+          return events.filter((event) => overlayReactionKey(child.id, event.id) === reaction.when.id)
+        })
+        checkEventPayloadOutputs(reaction as Reaction, matchingEvents, at, issues)
+        walkRefs(reaction.do, ctx, at, issues)
       }
     }
   }

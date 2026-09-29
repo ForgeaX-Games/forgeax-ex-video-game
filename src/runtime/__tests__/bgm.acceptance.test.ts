@@ -11,7 +11,7 @@
  * 相同时才算被钉住；各自私有的只有图的形状与那一处配置。
  *
  * 节点命名两种写法刻意一致（`n_open` / `enter` / `a_my` / `b_ai` / `t_end` / `win` / `lose`），
- * 于是驱动器与断言都能共用。**不动** 出厂 `demo/blueprint.json`；富内容样例在测试 fixtures。
+ * 于是驱动器与断言都能共用。**不动** 出厂空库文档；富内容样例在测试 fixtures。
  */
 import { describe, expect, it } from 'vitest'
 import { GraphRuntime } from '../core/engine/engine'

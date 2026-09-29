@@ -5,7 +5,7 @@
 import type { NodeHandle } from '@/runtime/core/schema/graph-schema'
 
 const BUILTIN: Record<string, string> = {
-  default: '默认推进',
+  default: '默认输出',
   pass: '成功',
   fail: '失败',
   good: '良好',
@@ -36,7 +36,7 @@ export function flowHandleOption(h: NodeHandle): { value: string; label: string 
 /** 合并 deriveOutputs + 边上已用到的 handle，去重保序。 */
 export function mergeFlowHandles(
   derived: NodeHandle[],
-  extraIds: Iterable<string>,
+  extraIds: Iterable<string | { id: string; label?: string }>,
 ): Array<{ value: string; label: string }> {
   const seen = new Set<string>()
   const out: Array<{ value: string; label: string }> = []
@@ -46,6 +46,9 @@ export function mergeFlowHandles(
     out.push({ value: id, label: flowHandleDisplay(id, label) })
   }
   for (const h of derived) push(h.id, h.label)
-  for (const id of extraIds) push(id)
+  for (const x of extraIds) {
+    if (typeof x === 'string') push(x)
+    else push(x.id, x.label)
+  }
   return out
 }

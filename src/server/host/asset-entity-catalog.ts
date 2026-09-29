@@ -211,6 +211,29 @@ export function mergeAssetEntityDefinitions(
   return { ...manifest, assetCatalog }
 }
 
+/**
+ * 只写入目录里还不存在的角色/场景。重编译支柱时不得覆盖建模已经写好的外观。
+ */
+export function seedMissingAssetDefinitions(
+  manifest: AssetManifest,
+  definitions: {
+    characters?: Readonly<Record<string, CharacterDefinition>>
+    scenes?: Readonly<Record<string, SceneDefinition>>
+  },
+): AssetManifest {
+  const existing = assetEntityDefinitions(manifest)
+  const characters: Record<string, CharacterDefinition> = {}
+  for (const [id, definition] of Object.entries(definitions.characters ?? {})) {
+    if (!existing.characters[id]) characters[id] = definition
+  }
+  const scenes: Record<string, SceneDefinition> = {}
+  for (const [id, definition] of Object.entries(definitions.scenes ?? {})) {
+    if (!existing.scenes[id]) scenes[id] = definition
+  }
+  if (Object.keys(characters).length === 0 && Object.keys(scenes).length === 0) return manifest
+  return mergeAssetEntityDefinitions(manifest, { characters, scenes })
+}
+
 export function assetEntityDefinitions(manifest: AssetManifest): {
   characters: Record<string, CharacterDefinition>
   scenes: Record<string, SceneDefinition>

@@ -16,13 +16,6 @@ export const RETRY_LEDGER_FILE = '.forgeax/extensions/game-video/retry-ledger.js
 /** 同码连续失败达到这个次数就不再重试。 */
 export const RETRY_BUDGET = 2
 
-/**
- * `playtest.validating` 完成门：连续校验失败超过该次数后，下一次 `complete_activity`
- * 放行（仍保留失败证据），避免硬门把后续验证卡死。
- * 例如阈值为 2：第 1、2 次拒绝，第 3 次及以后放行。
- */
-export const PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES = 2
-
 /** 账本上限：只用于诊断当前活动，不需要保留历史。 */
 const MAX_ENTRIES = 64
 

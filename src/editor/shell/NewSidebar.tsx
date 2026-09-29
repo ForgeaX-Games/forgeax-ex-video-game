@@ -10,8 +10,8 @@ import { createPortal } from 'react-dom'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { countOverlayReferences } from '@/authoring/graph/overlay-edit'
 import { useGraphScenario } from '../persist/graphScenarioStore'
-import { BASIC_UI_FOLDER_ID, CUSTOM_UI_FOLDER_ID, ensureUiTree } from '../persist/ui-tree'
-import { broadcastUiTreeIntent } from '../persist/graphUiTreeSync'
+import { CUSTOM_UI_FOLDER_ID, ensureUiTree } from '../persist/ui-tree'
+import { broadcastUiTreeIntent, requestUiTemplateCompose } from '../persist/graphUiTreeSync'
 import { useUiSelection } from '../persist/uiSelectionStore'
 import { useGraphView, type GraphView } from '../persist/graphViewStore'
 import { useRuleSelection, type RuleSection } from '../persist/ruleSelectionStore'
@@ -45,32 +45,12 @@ export interface NavNode {
   isEntry?: boolean
   /** 内建保留项：可选择查看，但不提供重命名或删除能力。 */
   readOnly?: boolean
-  leadingIcon?: 'asset-library'
   ruleTarget?: { section: RuleSection, itemId?: string }
   documentType?: DocumentType
   projectComponentId?: string
   productionAvailability?: ModuleAvailability
   children?: NavNode[]
 }
-
-const AssetLibraryIcon = (
-  <svg
-    aria-hidden
-    width="12"
-    height="12"
-    viewBox="0 0 12 12"
-    fill="none"
-    preserveAspectRatio="none"
-    overflow="visible"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path
-      id="Vector"
-      d="M1.212 12C0.876 12 0.59 11.882 0.354 11.646C0.118 11.41 0 11.1243 0 10.7888V2.6145C0 2.4685 0.02325 2.331 0.06975 2.202C0.11625 2.073 0.18625 1.95425 0.27975 1.84575L1.44825 0.44325C1.55675 0.29675 1.6925 0.18625 1.8555 0.11175C2.0185 0.0372501 2.19325 0 2.37975 0H9.59175C9.77775 0 9.95475 0.0372501 10.1227 0.11175C10.2907 0.18625 10.429 0.2965 10.5375 0.4425L11.7203 1.875C11.8138 1.9835 11.8837 2.10475 11.9302 2.23875C11.9767 2.37225 12 2.51225 12 2.65875V10.7888C12 11.1238 11.882 11.4095 11.646 11.646C11.41 11.882 11.1243 12 10.7888 12H1.212ZM1.035 2.106H10.95L9.9525 0.9075C9.904 0.8595 9.8485 0.82125 9.786 0.79275C9.7235 0.76425 9.6585 0.75 9.591 0.75H2.394C2.327 0.75 2.262 0.7645 2.199 0.7935C2.136 0.8225 2.081 0.861 2.034 0.909L1.035 2.106ZM8.24925 2.856H3.75V6.9585C3.75 7.1885 3.84475 7.3635 4.03425 7.4835C4.22375 7.6035 4.4195 7.6105 4.6215 7.5045L6 6.822L7.37925 7.5045C7.58075 7.61 7.77625 7.603 7.96575 7.4835C8.15525 7.3635 8.25 7.1885 8.25 6.9585L8.24925 2.856Z"
-      fill="currentColor"
-    />
-  </svg>
-)
 
 function buildNavTree(
   blueprints: Parameters<typeof blueprintListItems>[0],
@@ -137,7 +117,7 @@ function buildAssetNavNode(): NavNode {
     label: translateUi('sidebar.assets'),
     kind: 'entry',
     view: 'assets',
-    leadingIcon: 'asset-library',
+    externallyExpandable: true,
   }
 }
 
@@ -298,24 +278,6 @@ const NEW_SIDEBAR_CSS = `
   height: 20px;
   margin-right: 8px;
 }
-.ns-sidebar button.ns-leading {
-  box-sizing: border-box;
-  flex: none;
-  width: 20px;
-  height: 20px;
-  min-width: 0;
-  min-height: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 8px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ns-text-80);
-}
-.ns-sidebar button.ns-leading { cursor: pointer; }
-.ns-sidebar button.ns-leading svg { display: block; width: 12px; height: 12px; flex: none; }
 .ns-label {
   flex: 1;
   min-width: 0;
@@ -587,7 +549,6 @@ function toViewNodes(nodes: readonly UiTreeViewNode[]): UiTreeViewNode[] {
     }
     return {
       ...node,
-      readOnly: node.id === BASIC_UI_FOLDER_ID, // 控件分组只读
       managementLocked: node.id === CUSTOM_UI_FOLDER_ID, // 模板分组保留新增，但不可改名或删除
       children: toViewNodes(node.children ?? []),
     }
@@ -694,8 +655,8 @@ function NsRow({
             <button
               type="button"
               className="ns-act"
-              aria-label={formatUi('sidebar.action.setEntry', { name: node.label })}
-              data-tip={translateUi('ui.copy.de2577d75167')}
+              aria-label={translateUi('sidebar.action.setMainBlueprint')}
+              data-tip={translateUi('sidebar.action.setMainBlueprint')}
               onClick={() => bp.setMain(node.id)}
             >
               {HomeIcon}
@@ -703,8 +664,8 @@ function NsRow({
             <button
               type="button"
               className={`ns-act is-danger${bp.pendingDeleteId === node.id ? ' is-on' : ''}`}
-              aria-label={formatUi('sidebar.action.delete', { name: node.label })}
-              data-tip={translateUi('ui.copy.3755f56f2f83')}
+              aria-label={translateUi('sidebar.action.deleteBlueprint')}
+              data-tip={translateUi('sidebar.action.deleteBlueprint')}
               aria-expanded={bp.pendingDeleteId === node.id}
               onClick={(e) => {
                 if (bp.pendingDeleteId === node.id) bp.cancelDelete()
@@ -818,7 +779,7 @@ function NsRow({
           }
         }}
       >
-        {isExpandable && node.leadingIcon !== 'asset-library' && (
+        {isExpandable && (
           <button
             type="button"
             className={`ns-chev${isExpanded ? '' : ' is-collapsed'}`}
@@ -831,21 +792,8 @@ function NsRow({
             {ChevronIcon}
           </button>
         )}
-        {!isExpandable && node.leadingIcon == null ? (
+        {!isExpandable ? (
           <span className="ns-chev-spacer" aria-hidden />
-        ) : null}
-        {node.leadingIcon === 'asset-library' ? (
-          <button
-            type="button"
-            className="ns-leading"
-            aria-label={formatUi(isExpanded ? 'sidebar.action.collapse' : 'sidebar.action.expand', { name: node.label })}
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggle(node.id)
-            }}
-          >
-            {AssetLibraryIcon}
-          </button>
         ) : null}
         {isEditing ? (
           <input
@@ -1268,7 +1216,7 @@ function NewSidebarContent({ uiNavMode }: NewSidebarContentProps): JSX.Element {
       <div className="ns-scroll" role="tree" aria-label={translateUi('ui.copy.b8cc0cb648bf')}>
         {navTree.map((node) => (
           <Fragment key={node.id}>
-            {node.id === 'assets' ? <AssetCatalogSection gameId={gameId} /> : <NsRow
+            {node.id === 'assets' ? <AssetCatalogSection gameId={gameId} tabKinds={['character', 'scene', 'video', 'image', 'icon', 'audio', 'font']} /> : <NsRow
               node={node}
               depth={0}
               expanded={expanded}
@@ -1329,7 +1277,9 @@ function NewSidebarContent({ uiNavMode }: NewSidebarContentProps): JSX.Element {
                   usageByOverlay={overlayUsage}
                   projectComponentLabels={projectComponentLabels}
                   selectedTreeNodeId={selectedTreeNodeId}
+                  active={view === 'ui'}
                   baseDepth={1}
+                  selectableFolderIds={[CUSTOM_UI_FOLDER_ID]}
                   onSelect={(treeNode) => {
                     const overlayId = treeNode.kind === 'scheme' ? (treeNode.overlayId ?? null) : null
                     selectUiNode(treeNode.id, overlayId)
@@ -1339,6 +1289,12 @@ function NewSidebarContent({ uiNavMode }: NewSidebarContentProps): JSX.Element {
                   onAddScheme={(parentId, name) => {
                     createUiScheme(parentId, name)
                   }}
+                  onRequestAddScheme={() => {
+                    setView('ui')
+                    clearUiSelection()
+                    broadcastUiTreeIntent({ type: 'select', treeNodeId: null, overlayId: null })
+                    requestUiTemplateCompose()
+                  }}
                   onRename={(nodeId, name) => renameUiNode(nodeId, name)}
                   onDelete={(treeNode) => {
                     if (!treeNode.readOnly) removeUiNode(treeNode.id)
@@ -1347,6 +1303,7 @@ function NewSidebarContent({ uiNavMode }: NewSidebarContentProps): JSX.Element {
                     setComponentDelete({ id: componentId, label, trigger })
                   }}
                 />
+                <AssetCatalogSection gameId={gameId} tabKinds={['control']} showRoot={false} />
               </div>
             ) : null}
           </Fragment>

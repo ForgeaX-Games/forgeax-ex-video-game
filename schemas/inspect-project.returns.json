@@ -14,18 +14,28 @@
         "interactionDensity",
         "maxBattlepackLoopDepth",
         "decisionConsequenceRate",
+        "edgeProducerCoverageRate",
+        "pillarTraceCoverageRate",
+        "downstreamPayoffCoverageRate",
+        "combatLoopClosureRate",
         "stateActivityRate",
         "formulaConsumptionRate",
         "feedbackCoverageRate",
+        "stateLifecycleCoverageRate",
         "differentiatedEndingCount"
       ],
       "properties": {
         "interactionDensity": { "type": "number", "minimum": 0, "maximum": 1 },
         "maxBattlepackLoopDepth": { "type": ["integer", "null"], "minimum": 1 },
         "decisionConsequenceRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "edgeProducerCoverageRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "pillarTraceCoverageRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "downstreamPayoffCoverageRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "combatLoopClosureRate": { "type": "number", "minimum": 0, "maximum": 1 },
         "stateActivityRate": { "type": "number", "minimum": 0, "maximum": 1 },
         "formulaConsumptionRate": { "type": "number", "minimum": 0, "maximum": 1 },
         "feedbackCoverageRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stateLifecycleCoverageRate": { "type": "number", "minimum": 0, "maximum": 1 },
         "differentiatedEndingCount": { "type": "integer", "minimum": 0 }
       }
     }

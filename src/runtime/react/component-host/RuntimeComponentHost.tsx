@@ -17,7 +17,7 @@ export interface OverlayRendererRegistration {
 export interface RuntimeComponentHostProps {
   registration: OverlayRendererRegistration
   overlay: OverlaySnap
-  emit?: (key: string) => void
+  emit?: (key: string, payload?: Record<string, unknown>) => void
   ctx?: SkinCtx
   preview?: boolean
   previewTimeMs?: number

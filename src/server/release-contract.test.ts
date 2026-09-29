@@ -14,6 +14,10 @@ const expectedTools = [
   'game-video:get-graph',
   'game-video:save-graph',
   'game-video:patch-graph',
+  'game-video:compile-blueprint-outline',
+  'game-video:create-blueprint-outline-skeleton',
+  'game-video:configure-blueprint-outline-node',
+  'game-video:configure-blueprint-node',
   'game-video:patch-node-media',
   'game-video:patch-rules',
   'game-video:patch-characters',
@@ -46,7 +50,7 @@ const expectedTools = [
   'game-video:upsert-document',
   'game-video:upsert-component',
 ]
-const reviewedExtensionHostSpec = '0.3.0'
+const reviewedExtensionHostSpec = '0.3.3'
 let compiledBackendUrl: string
 
 const forbiddenLegacyHostRoutes = [
@@ -65,7 +69,6 @@ function containsForbiddenLegacyRoute(source: string, route: string): boolean {
 // These routes belong to the current main-branch runtime/builders. They are
 // intentionally not part of the migration surface being gated here.
 const mainOwnedRuntimeFiles = new Set([
-  'scripts/build-game-components.mjs',
   'src/runtime/react/component-host/index.ts',
   'src/runtime/react/play/GamePlayer.tsx',
 ])
@@ -186,7 +189,7 @@ describe('release identity', () => {
   it('resolves the reviewed extension host package', () => {
     const lock = readFileSync(resolve(root, 'bun.lock'), 'utf8')
 
-    expect(lock).toContain('"@forgeax/extension-host@0.3.0"')
+    expect(lock).toContain('"@forgeax/extension-host@0.3.3"')
     expect(lock).not.toContain('git+ssh://git@github.com/ForgeaX-Games/forgeax-extension-host')
     expect(lock).not.toMatch(/file:vendor\/forgeax-extension-host/)
     expect(lock).not.toMatch(/@forgeax\/extension-host[^\n]*\/Users\//)
@@ -298,7 +301,7 @@ describe('release identity', () => {
   })
 
   it('derives game identity from the host binding for every public tool', () => {
-    expect(manifest.contributes.tools).toHaveLength(34)
+    expect(manifest.contributes.tools).toHaveLength(38)
 
     for (const tool of manifest.contributes.tools) {
       const schemaPath = resolve(root, tool.args)

@@ -10,8 +10,10 @@
 import type { GameScenario, GraphLibraryDocument, OverlayChild, OverlayNode, GameGraph } from '@/runtime/core/schema/graph-schema'
 import { getSubProcess } from '@/runtime/core/schema/graph-schema'
 import type { Overlay } from '@/runtime/core/schema/node-config-schema'
-import { overlayMountId } from '@/runtime/core/schema/node-config-schema'
+import { createOverlayMount, overlayMountId } from '@/runtime/core/schema/node-config-schema'
 import { mergeChild, resolveMountChildren } from '@/runtime/core/schema/expand-overlay'
+import { resolveMountLayoutForChildren } from '@/runtime/core/schema/layout'
+import { disconnect, patchNodeData } from './graph-edit'
 
 export function nodeOverlayId(nodeId: string): string {
   return `node:${nodeId}`
@@ -83,6 +85,91 @@ export function primaryOverlayMount(
   const mounts = node?.data.overlayNodes ?? []
   if (!node || !mounts.length) return undefined
   return mounts[contentMountIndex(node, mounts)]
+}
+
+/** Graph-level mount primitive shared by the inspector, video editor, and aggregate commands. */
+export function mountOverlayOnGraph(
+  graph: GameGraph,
+  nodeId: string,
+  overlayId: string,
+  definition: Overlay,
+  layout?: OverlayNode['layout'],
+): { graph: GameGraph; mountId?: string } {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId)
+  if (!node) return { graph }
+  const mounts = node.data.overlayNodes ?? []
+  const created = createOverlayMount(mounts, overlayId)
+  const resolvedLayout = resolveMountLayoutForChildren(
+    layout,
+    definition.children.map((child) => child.layout),
+  )
+  const mount = { ...created, ...(resolvedLayout ? { layout: resolvedLayout } : {}) }
+  return {
+    graph: setNodeOverlayNodes(graph, nodeId, [...mounts, mount]),
+    mountId: overlayMountId(mount),
+  }
+}
+
+/**
+ * Mount an existing catalog overlay with the same defaults used by the node inspector.
+ * The returned mount id lets aggregate commands configure the new instance without an
+ * intermediate read. Missing nodes or catalog overlays are deliberate no-ops; strict
+ * callers validate them before invoking this authoring primitive.
+ */
+export function mountOverlay(
+  scenario: GameScenario,
+  nodeId: string,
+  overlayId: string,
+  layout?: OverlayNode['layout'],
+): { scenario: GameScenario; mountId?: string } {
+  const node = scenario.graph.nodes.find((candidate) => candidate.id === nodeId)
+  const definition = scenario.ui?.overlays?.[overlayId]
+  if (!node || !definition) return { scenario }
+  const mounted = mountOverlayOnGraph(scenario.graph, nodeId, overlayId, definition, layout)
+  return {
+    scenario: { ...scenario, graph: mounted.graph },
+    mountId: mounted.mountId,
+  }
+}
+
+/**
+ * Unmount one interface and cascade the event routes owned by its children.
+ * Callers provide catalog event ids because authoring stays independent from the runtime registry.
+ */
+export function unmountOverlay(
+  scenario: GameScenario,
+  nodeId: string,
+  mountId: string,
+  eventIds: readonly string[] = [],
+): GameScenario {
+  const node = scenario.graph.nodes.find((candidate) => candidate.id === nodeId)
+  const mount = node?.data.overlayNodes?.find((candidate) => overlayMountId(candidate) === mountId)
+  if (!node || !mount) return scenario
+  const handles = new Set([
+    ...eventIds,
+    ...(mount.reactions ?? []).flatMap((reaction) => reaction.when.type === 'event' ? [reaction.when.id] : []),
+  ])
+  let graph = scenario.graph
+  for (const handle of handles) {
+    const edges = graph.edges.filter(
+      (edge) => edge.source === nodeId && (edge.sourceHandle ?? 'default') === handle,
+    )
+    for (const edge of edges) graph = disconnect(graph, edge.id)
+  }
+  const current = graph.nodes.find((candidate) => candidate.id === nodeId)
+  if (!current) return scenario
+  const mounts = (current.data.overlayNodes ?? []).filter(
+    (candidate) => overlayMountId(candidate) !== mountId,
+  )
+  const legacyReactions = current.data.reactions?.filter(
+    (reaction) => !(reaction.when.type === 'event' && handles.has(reaction.when.id)),
+  )
+  graph = patchNodeData(graph, nodeId, {
+    overlayNodes: mounts.length ? mounts : undefined,
+    reactions: legacyReactions?.length ? legacyReactions : undefined,
+  })
+  const next = { ...scenario, graph }
+  return mount.overlay.startsWith('node:') ? dropOverlayIfUnreferenced(next, mount.overlay) : next
 }
 
 /**

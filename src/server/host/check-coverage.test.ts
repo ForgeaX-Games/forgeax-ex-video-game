@@ -43,6 +43,7 @@ describe('校验器覆盖率', () => {
       'outline.node-count-matches-scale',
       'outline.declarations-complete',
       'outline.declaration-budget',
+      'outline.causal-chain',
     ]) {
       expect(implemented.has(checkId), checkId).toBe(true)
     }
@@ -50,15 +51,29 @@ describe('校验器覆盖率', () => {
 
   it('汇总整装的 finalization 闸门与选择语义校验都在', () => {
     const finalization = [...implemented].filter((checkId) => checkId.startsWith('finalization.'))
-    expect(finalization).toHaveLength(13)
+    expect(finalization).toHaveLength(16)
+    expect(finalization).toContain('finalization.causal-quality')
     expect(finalization).toContain('finalization.work-scale-budget')
     expect(finalization).toContain('finalization.plan-wired')
+    expect(finalization).toContain('finalization.state-lifecycle')
+    expect(finalization).toContain('finalization.outcome-proof')
     expect(ACTIVITY_CONTRACTS['game.finalizing']?.hardChecks).toContain('graph.choice-consequence')
   })
 
   it('玩法契约的三段闸门都有实现', () => {
     // 契约由总脉络声明、数值线交付、整装落地，缺任一段就退回「各自猜」。
-    for (const checkId of ['outline.interaction-plan', 'rules.plan-formulas', 'finalization.plan-wired']) {
+    for (const checkId of [
+      'outline.interaction-plan',
+      'outline.causal-chain',
+      'rules.plan-formulas',
+      'ui.event-routing-only',
+      'rules.settlement-ownership',
+      'finalization.plan-wired',
+      'finalization.state-lifecycle',
+      'finalization.outcome-proof',
+      'finalization.causal-quality',
+      'playtest.semantic-quality',
+    ]) {
       expect(implemented.has(checkId), checkId).toBe(true)
     }
   })

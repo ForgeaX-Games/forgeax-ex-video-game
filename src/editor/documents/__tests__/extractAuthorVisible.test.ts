@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractAuthorVisible } from '../extractAuthorVisible'
+import { authorDocumentMarkdown, extractAuthorVisible } from '../extractAuthorVisible'
 
 const PILLAR = [
   '# 黑神话 · 支柱设计',
@@ -195,6 +195,70 @@ describe('extractAuthorVisible', () => {
     expect(result).not.toContain('schema_version')
     expect(result).toContain('```text')
     expect(result).toContain('五行山下')
+  })
+
+  it('hides v4 pillar IR JSON from the author document view', () => {
+    const result = extractAuthorVisible([
+      '# 草船借箭',
+      '',
+      '## 角色',
+      '- **诸葛亮**',
+      '',
+      '```pillar-interaction-contract',
+      '{"schemaVersion":4,"beats":[]}',
+      '```',
+    ].join('\n'))
+
+    expect(result).toContain('诸葛亮')
+    expect(result).not.toContain('schemaVersion')
+    expect(result).not.toContain('pillar-interaction-contract')
+  })
+
+  it('rebuilds pillar tables from the stored IR even when the markdown layer is hollow', () => {
+    const hollow = [
+      '# 草船借箭',
+      '',
+      '## 角色',
+      '- 诸葛亮',
+      '',
+      '```pillar-interaction-contract',
+      JSON.stringify({
+        schemaVersion: 4,
+        title: '草船借箭',
+        cast: [{ name: '诸葛亮', summary: '羽扇纶巾，青衣布履，面容清癯从容，手持羽毛扇调度水军。' }],
+        settings: [{ name: '长江', summary: '冬夜长江大雾锁江，草船隐没在水气里，远处偶见敌营火把。' }],
+        mainLoop: '受箭交差',
+        variables: [{ id: 'arrowCount', label: '箭矢', initial: 0, max: 100000 }],
+        formulas: [{ id: 'gain', expression: 'floor(20 + rand() * 10)' }],
+        beats: [{
+          id: 'B08',
+          narrativeIntent: '雾夜受箭',
+          staging: '长江大雾中草船舷侧受箭，火把隐约，镜头贴着船舷跟随诸葛亮抬手示意。',
+          playerInformation: ['当前箭矢'],
+          uiCapabilities: ['combat-command'],
+          actions: [{
+            id: 'heavy',
+            intent: '聚船受箭',
+            stateMutationOwner: 'settlement',
+            requiredRole: 'combat-command',
+            effect: { target: 'var.arrowCount', op: 'add', formulaId: 'gain' },
+            stateChange: '箭矢上升',
+            immediateFeedback: '飘字',
+            downstreamPayoff: '草人满箭',
+            exitIntent: '继续',
+          }],
+          settlements: [],
+        }],
+      }),
+      '```',
+    ].join('\n')
+
+    const visible = authorDocumentMarkdown('pillar', hollow)
+    expect(visible).toContain('**界面配置**')
+    expect(visible).toContain('**条件结算**')
+    expect(visible).toContain('箭矢')
+    expect(visible).toContain('floor(20 + rand() * 10)')
+    expect(visible).not.toContain('schemaVersion')
   })
 
   it('returns an empty string for empty or whitespace-only input', () => {

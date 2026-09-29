@@ -8,6 +8,7 @@ import Ajv2020 from 'ajv/dist/2020.js'
 import { describe, expect, test } from 'vitest'
 import { nodeVideoEntityId } from '@/authoring/assets/registry-types'
 import { activityContract } from '@/workflow/activity-contracts'
+import { gameVideoMcpToolName } from '@/workflow/mcp-tool-name'
 import { WRITE_SCOPES } from '@/workflow/contracts'
 import { createInitialWorkflowState, VIDEO_GAME_WORKFLOW_FILE } from './workflow-state'
 import { graphSnapshotToken } from './graph-projection'
@@ -251,7 +252,7 @@ describe('video preset binding', () => {
     const validating = activityContract('video.presets.validating')
 
     expect(contract.allowedToolNames).toContain(
-      'mcp__as-mate-tools__extension__game_video__patch_node_media',
+      gameVideoMcpToolName('patch-node-media'),
     )
     expect(contract.mutationSequence).toContain('patch-node-media')
     expect(contract.hardChecks).toEqual(expect.arrayContaining([
@@ -259,7 +260,7 @@ describe('video preset binding', () => {
       'video.presets.binding-receipt',
     ]))
     expect(validating.allowedToolNames).not.toContain(
-      'mcp__as-mate-tools__extension__game_video__patch_node_media',
+      gameVideoMcpToolName('patch-node-media'),
     )
     expect(WRITE_SCOPES['video.presets.validating']).toEqual([])
     expect(validating.requiredInputs).toContainEqual({
@@ -468,23 +469,59 @@ describe('video preset binding', () => {
     )
   })
 
-  test.each([
-    ['graph', { expectedGraphRevision: 6 }],
-    ['graph snapshot', { graphSnapshotToken: 'binding-game:6' }],
-    ['asset manifest', { expectedAssetRevision: 10 }],
-  ])('rejects a stale %s without partial writes', async (_label, override) => {
+  test('rebases across unrelated graph and asset-manifest writes', async () => {
     const { context, files } = createContext()
+    const graph = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    graph.revision = 8
+    graph.scopeRevisions.ui = 8
+    files.entries.set('blueprint.json', json(graph))
+    const assets = JSON.parse(decoder.decode(files.entries.get('assets/manifest.json')!))
+    assets.revision = 12
+    assets.scopeRevisions.scenes = 12
+    files.entries.set('assets/manifest.json', json(assets))
+
+    const result = await patchNodeMedia(context)(binding)
+
+    expect(validateReturn(result), JSON.stringify(validateReturn.errors)).toBe(true)
+    expect(result).toMatchObject({ ok: true, graphRevision: 9, assetRevision: 13 })
+  })
+
+  test.each([
+    ['node media', 'blueprint.json', 'node.media', 8],
+    ['video projection', 'assets/manifest.json', 'videos', 12],
+  ])('rejects a stale %s scope without partial writes', async (
+    _label,
+    path,
+    scope,
+    revision,
+  ) => {
+    const { context, files } = createContext()
+    const document = JSON.parse(decoder.decode(files.entries.get(path)!))
+    document.revision = revision
+    document.scopeRevisions = { ...(document.scopeRevisions ?? {}), [scope]: revision }
+    files.entries.set(path, json(document))
     const graphBefore = decoder.decode(files.entries.get('blueprint.json')!)
     const manifestBefore = decoder.decode(files.entries.get('assets/manifest.json')!)
 
-    const result = await patchNodeMedia(context)({ ...binding, ...override })
+    const result = await patchNodeMedia(context)(binding)
 
     expect(validateReturn(result), JSON.stringify(validateReturn.errors)).toBe(true)
-    expect(result).toMatchObject({ ok: false })
+    expect(result).toMatchObject({ ok: false, errorCode: 'revision.conflict' })
     expect(decoder.decode(files.entries.get('blueprint.json')!)).toBe(graphBefore)
-    expect(decoder.decode(files.entries.get('assets/manifest.json')!)).toBe(
-      manifestBefore,
-    )
+    expect(decoder.decode(files.entries.get('assets/manifest.json')!)).toBe(manifestBefore)
+  })
+
+  test('rejects a snapshot token that does not match its expected graph revision', async () => {
+    const { context, files } = createContext()
+    const graphBefore = decoder.decode(files.entries.get('blueprint.json')!)
+
+    const result = await patchNodeMedia(context)({
+      ...binding,
+      graphSnapshotToken: graphSnapshotToken('binding-game', 6),
+    })
+
+    expect(result).toMatchObject({ ok: false, errorCode: 'snapshot.stale' })
+    expect(decoder.decode(files.entries.get('blueprint.json')!)).toBe(graphBefore)
   })
 
   test('rejects an unknown NodeRef without partial writes', async () => {
@@ -601,5 +638,56 @@ describe('video preset binding', () => {
       errorCode: 'workflow.node-media.dedicated-operation-required',
     })
     expect(decoder.decode(files.entries.get('blueprint.json')!)).toBe(before)
+  })
+
+  test('allows binding before character and scene previews exist', async () => {
+    const { context, files } = createContext()
+    const assets = JSON.parse(decoder.decode(files.entries.get('assets/manifest.json')!))
+    delete assets.assetCatalog.entities.character.c1.current
+    delete assets.assetCatalog.entities.scene.s1.current
+    files.entries.set('assets/manifest.json', json(assets))
+
+    const result = await patchNodeMedia(context)({
+      ...binding,
+      bindings: [{
+        ...binding.bindings[0],
+        media: {
+          ...binding.bindings[0]!.media,
+          generation: {
+            schemaVersion: 1,
+            durationSeconds: 8,
+            generateAudio: false,
+            mode: 't2v',
+            resolution: '1080p',
+            references: {},
+          },
+        },
+      }],
+    })
+
+    expect(result).toMatchObject({ ok: true })
+  })
+
+  test('rejects a prompt that only repeats the chapter title', async () => {
+    const { context, files } = createContext()
+    const graphBefore = decoder.decode(files.entries.get('blueprint.json')!)
+
+    const result = await patchNodeMedia(context)({
+      ...binding,
+      bindings: [{
+        ...binding.bindings[0],
+        media: {
+          ...binding.bindings[0]!.media,
+          prompt: '山道遇虎',
+        },
+      }],
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'validation.failed',
+    })
+    expect(JSON.stringify(result.errors)).toMatch(/prompt/u)
+    expect(decoder.decode(files.entries.get('blueprint.json')!)).toBe(graphBefore)
   })
 })

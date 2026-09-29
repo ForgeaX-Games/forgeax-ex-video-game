@@ -1,5 +1,5 @@
 import { useT } from '../../../../i18n'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { KinoImageGenerationParams, KinoImageSize } from '@/runtime/core/schema/kino-image-schema'
 import {
   GenerationOptionGroup,
@@ -28,6 +28,7 @@ export interface ImageLikeParametersProps extends GenerationInteractionProps {
   children?: ReactNode
   className?: string
   modelDisabled?: boolean
+  showResolution?: boolean
 }
 
 const SIZE_VALUES: readonly KinoImageSize[] = [
@@ -55,6 +56,7 @@ export function ImageParameters({
       interaction={interaction}
       modelDisabled={modelDisabled}
       className="generation-image-parameters"
+      showResolution
     >
       {children}
     </ImageLikeParameters>
@@ -70,8 +72,10 @@ export function ImageLikeParameters({
   interaction,
   className,
   modelDisabled = false,
+  showResolution = true,
 }: ImageLikeParametersProps): JSX.Element {
   const t = useT()
+  const [resolution, setResolution] = useState('2K')
   const sizeOptions: readonly GenerationParameterOption<KinoImageSize>[] = SIZE_VALUES.map((size) => ({
     value: size,
     label: sizeLabel(size),
@@ -91,9 +95,19 @@ export function ImageLikeParameters({
           onChange={(model) => onChange({ ...value, model: model || undefined })}
         />
       </GenerationParameterField>
-      <GenerationParameterField label={t('imageGeneration.size')} interaction={interaction}>
+      {showResolution ? <GenerationParameterField label={t('videoAssets.generate.resolution')} interaction={interaction}>
         <GenerationOptionGroup
-          label={t('imageGeneration.size')}
+          label={t('videoAssets.generate.resolution')}
+          value={resolution}
+          options={[{ value: '2K', label: t('imageGeneration.resolution2k') }]}
+          interaction={interaction}
+          onChange={setResolution}
+          className="generation-resolution-options"
+        />
+      </GenerationParameterField> : null}
+      <GenerationParameterField label={t('imageGeneration.ratio')} interaction={interaction}>
+        <GenerationSelectField
+          label={t('imageGeneration.ratio')}
           value={value.size}
           options={sizeOptions}
           interaction={interaction}
@@ -112,5 +126,5 @@ function sizeLabel(size: KinoImageSize): string {
     '2496x1664': '3:2',
     '1664x2496': '2:3',
   }
-  return `${labels[size]} ${size.replace('x', '×')}`
+  return labels[size]
 }

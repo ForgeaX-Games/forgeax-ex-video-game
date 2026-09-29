@@ -75,6 +75,17 @@ describe('UiTreeView', () => {
     expect(props.onSelect).not.toHaveBeenCalled()
   })
 
+  it('selects an explicitly selectable folder while its arrow remains available for expanding', () => {
+    const props = setup({ selectableFolderIds: ['folder-root'] })
+
+    fireEvent.click(screen.getByRole('button', { name: '战斗界面 文件夹' }))
+    expect(props.onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'folder-root' }))
+    expect(screen.getByText('首领战')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '收起战斗界面' }))
+    expect(screen.queryByText('首领战')).toBeNull()
+  })
+
   it('selects a scheme with both tree and overlay identity', () => {
     const props = setup()
     fireEvent.click(screen.getByRole('button', { name: '展开战斗界面' }))
@@ -127,19 +138,40 @@ describe('UiTreeView', () => {
     expect(props.onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: 'folder-root' }))
   })
 
-  it('composes a named interface below a folder and omits add actions from schemes', () => {
+  it('creates a named interface from the shared dialog and omits add actions from schemes', () => {
     const props = setup()
 
     fireEvent.click(screen.getByLabelText('新增界面 战斗界面'))
-    fireEvent.click(screen.getByRole('button', { name: '展开首领战' }))
-    const input = screen.getByPlaceholderText('新建界面名称')
+    const dialog = screen.getByRole('dialog', { name: '界面添加' })
+    const input = screen.getByRole('textbox', { name: '界面名称' })
     fireEvent.change(input, { target: { value: '战斗结算' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(props.onAddScheme).toHaveBeenCalledWith('folder-root', '战斗结算')
+    expect(dialog).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '展开首领战' }))
     expect(screen.queryByLabelText('新增界面 首领 HUD')).toBeNull()
     expect(screen.getByLabelText('重命名 首领 HUD')).toBeTruthy()
     expect(screen.getByLabelText('删除 首领 HUD')).toBeTruthy()
+  })
+
+  it('routes the interface-template add action to the main region when provided', () => {
+    const onRequestAddScheme = vi.fn()
+    setup({
+      nodes: [{
+        id: 'ui-folder:custom',
+        kind: 'folder',
+        name: '界面模板',
+        managementLocked: true,
+        children: [],
+      }],
+      onRequestAddScheme,
+    })
+
+    fireEvent.click(screen.getByLabelText('新增界面 界面模板'))
+
+    expect(onRequestAddScheme).toHaveBeenCalledWith('ui-folder:custom')
+    expect(screen.queryByRole('dialog', { name: '界面添加' })).toBeNull()
   })
 
   it.each([0, 3])('keeps generated-control deletion at the far right when usage is %i', (usage) => {

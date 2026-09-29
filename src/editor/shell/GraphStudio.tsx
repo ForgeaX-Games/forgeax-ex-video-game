@@ -17,12 +17,12 @@ import {
   getInspectorActive,
   getInspectorMountOptions,
   subscribeInspectorActive,
+  type NodeSelectionSource,
 } from '@/editor/host-init'
 import { GraphCanvas } from '@/editor/graph/canvas/GraphCanvas'
 import { NodeInspector, type VideoOption } from './NodeInspector'
 import { NodePanelTabBar, type NodePanelTab } from './NodePanelTabBar'
 import { NodePreviewStage } from './NodePreviewStage'
-import { VersionPicker } from './VersionPicker'
 import { PlayerRootContext } from '@/runtime/react/component-host/rendererRegistry'
 import { createCoreSkinRegistry } from '@/runtime/react/component-host'
 import { claimPlayerFocus, releasePlayerFocus } from '@/runtime/react/input/playerFocus'
@@ -34,7 +34,7 @@ import { removeMountGraph } from '../video/graphMaterialOps'
 import { resolveCatalogMediaSrc } from './media'
 import { catalogEntityOptions, useAssetCatalog } from '@/editor/assets/asset-catalog'
 import { useClipPerformanceEnd, videoDurationCapReached, MissingVideoNotice } from '@/runtime/react/play'
-import { addNode } from '@/authoring/graph/graph-edit'
+import { executeBlueprintGraphCommand } from '@/authoring/commands/blueprint-graph-command'
 import type { GameNode, NodeMedia } from '@/runtime/core/schema/graph-schema'
 import type { Formula } from '@/authoring/blueprint/formula-authoring'
 import { docToPack, metaFromDocument, packToDoc } from '@/authoring/blueprint/blueprint-project'
@@ -71,20 +71,17 @@ interface PlayAnchor {
   graphPath: string[]
 }
 
-/** 工具条暖色皮肤（对齐旧 gc- 目录风格）。 */
-function ensureToolbarStyle(): void {
+/** 节点配置列布局皮肤（预览开合宽度）。 */
+function ensureNodePanelStyle(): void {
   if (typeof document === 'undefined') return
-  let s = document.getElementById('gv-graph-toolbar-style') as HTMLStyleElement | null
+  let s = document.getElementById('gv-node-panel-style') as HTMLStyleElement | null
   if (!s) {
     s = document.createElement('style')
-    s.id = 'gv-graph-toolbar-style'
+    s.id = 'gv-node-panel-style'
     document.head.appendChild(s)
   }
   // 每次写回，避免 HMR 后旧 CSS 残留。
   s.textContent = `
-    .gv-graph-toolbar{position:relative;z-index:2;flex-shrink:0;background:#1b1713;border-bottom:1px solid #2e2924;color:#f6f1e9}
-    .gv-graph-toolbar button,.gv-graph-toolbar select{background:#252019;border:1px solid #403830;color:#f6f1e9;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
-    .gv-graph-toolbar button:hover,.gv-graph-toolbar select:hover{background:#2f2923;border-color:#f08840}
     .gv-node-panel{
       /* 配置列宽与预览开合无关；预览内容始终保持 target 宽度，只有裁切轨道 0 ↔ target 在动。 */
       --gv-form-w:clamp(${FORM_W_MIN}px,28vw,500px);
@@ -202,7 +199,7 @@ function PreviewTogglePill({ open, onToggle, anchor = 'panel-edge' }: {
 
 export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Element {
   bootEditorSkins()
-  ensureToolbarStyle()
+  ensureNodePanelStyle()
   const {
     inspectorEl,
     previewEl,
@@ -230,7 +227,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   // 共享场景 store（蓝图/实体/变量/规则/场景/试玩 并行视图共用同一份 graph+meta+持久化）。
   const graph = useGraphScenario((s) => s.graph)
   const game = useGraphScenario((s) => s.game)
-  const isDraft = useGraphScenario((s) => s.isDraft)
   const fitSignal = useGraphScenario((s) => s.fitSignal)
   const loadEpoch = useGraphScenario((s) => s.loadEpoch)
   const runKey = useGraphScenario((s) => s.runKey)
@@ -267,7 +263,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   // 节点配置「引用蓝图」下拉：由 blueprints 派生为 SubFlowPackDef 列表（不落盘 packs）；
   // 含 main（子蓝图可引用主蓝图），自引用/成环由 isRefAllowed 过滤。
   const blueprints = useGraphScenario((s) => s.blueprints)
-  const mainBlueprintId = useGraphScenario((s) => s.mainBlueprintId)
   const activeBlueprintId = useGraphScenario((s) => s.activeBlueprintId)
   const selectBlueprint = useGraphScenario((s) => s.selectBlueprint)
   const importBlueprint = useGraphScenario((s) => s.importBlueprint)
@@ -288,9 +283,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const variables = useGraphScenario((s) => s.meta.variables)
   // meta.formulas 在 schema 里存为 `Record<string, unknown>`（runtime ↛ editor）；编辑器侧窄化回 Formula。
   const formulas = useGraphScenario((s) => s.meta.formulas) as Record<string, Formula> | undefined
-  // 保存 = 打版本：一次性存 blueprint + 组件（服务端钩子）+ git tag vN。
-  const doCommit = useGraphScenario((s) => s.commit)
-  const reset = useGraphScenario((s) => s.reset)
   const bumpRun = useGraphScenario((s) => s.bumpRun)
 
   // 选中节点走共享 store（视频/界面等其它视图据此编辑同一节点）。
@@ -299,13 +291,21 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const videoGenerationOpen = useVideoGenerationPanel((s) => s.open)
   const setVideoGenerationTarget = useVideoGenerationPanel((s) => s.setNodeTarget)
   const closeVideoGeneration = useVideoGenerationPanel((s) => s.close)
+  // The shared store is also written by Agent/host navigation. Keep the
+  // selection origin alongside it so only a direct canvas gesture may switch
+  // the host from Agent to the node configuration tab.
+  const selectionSourceRef = useRef<NodeSelectionSource>('programmatic')
+  const setNodeSelection = useCallback((nodeId: string | null, source: NodeSelectionSource) => {
+    selectionSourceRef.current = source
+    setSelected(nodeId)
+  }, [setSelected])
   // 宿主用 onNodeSelect 驱动它自己的面板切换（如 Agent ↔ 节点编辑），所以只能上报
   // 真实的「选中态迁移」。`undefined` = 还没报过；挂载时若本来就没选中节点，那不是
   // 一次清空，不能上报 null —— 否则用户手动切到「节点编辑」空态就会被踢回 Agent。
-  const notifyHostNodeSelect = useCallback((nodeId: string | null) => {
+  const notifyHostNodeSelect = useCallback((nodeId: string | null, source: NodeSelectionSource) => {
     if (!onNodeSelect) return
     try {
-      onNodeSelect(nodeId)
+      onNodeSelect(nodeId, source)
     } catch (err) {
       console.error('[game-video] onNodeSelect failed', err)
     }
@@ -317,7 +317,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     if (previous === selected) return
     notifiedNodeRef.current = selected
     if (previous === undefined && selected == null) return
-    notifyHostNodeSelect(selected)
+    const source = selectionSourceRef.current
+    selectionSourceRef.current = 'programmatic'
+    notifyHostNodeSelect(selected, source)
   }, [selected, onNodeSelect, notifyHostNodeSelect])
   // 一级页签：Agent（预留空态）｜{节点名}调试面板。纯 UI 展示态，不进蓝图协议与持久化。
   const [nodePanelTab, setNodePanelTab] = useState<NodePanelTab>('config')
@@ -838,10 +840,10 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       outputs: [],
       data: { name: '新演出节点' },
     }
-    setCanvasGraph((g) => addNode(g, node))
+    setCanvasGraph((graph) => executeBlueprintGraphCommand(graph, { op: 'add-node', node }))
     // 新节点还没有预览内容，首次配置时只展示表单；后续手动展开会重新成为全局偏好。
     setPreviewOpenPersisted(false)
-    setSelected(id)
+    setNodeSelection(id, 'user')
   }
 
   // 规则的运行时字段变化后重建 session：新试玩读取最新模板，不把新值热灌进旧运行态。
@@ -946,17 +948,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     pendingJumpRef.current = anchor
     setPlayNonce((n) => n + 1)
   }, [activeBlueprintId, drillStack])
-  /**
-   * 试玩当前蓝图：松开节点钉住 + 打开浮层 + 重建 session，从本蓝图 `entry` 开跑。
-   * session 的根已经是 `activeBlueprintId`，所以这里只要不带 jump 锚点，`start()` 自己会落到入口。
-   */
-  const playCurrentBlueprint = useCallback(() => {
-    setPlayPaused(false)
-    setPlayFrom(null)
-    pendingJumpRef.current = null
-    setPlayOpen(true)
-    setPlayNonce((n) => n + 1)
-  }, [])
   /** 浮层重开：回到钉住的入口节点；无钉住时回退整局 bumpRun。 */
   const restartPlayFrom = useCallback(() => {
     setPlayPaused(false)
@@ -1017,14 +1008,14 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       return
     }
     if (getSubProcess(n.data)) {
-      setSelected(null)
+      setNodeSelection(null, 'user')
       setDrillStack((s) => [...s, id])
     }
   }
 
   const leaveToRoot = () => {
     setDrillStack([])
-    setSelected(null)
+    setNodeSelection(null, 'user')
   }
   /** 画布面包屑 = 该蓝图在侧栏里的位置（蓝图根 → …文件夹 → 蓝图）+ 蓝图内的下钻层。 */
   const crumbs: { id: string; label: string; onClick?: () => void }[] = [
@@ -1045,26 +1036,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       onPointerDownCapture={clearPreviewFocusFromPointer}
       style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#0e0c09', color: '#f6f1e9', isolation: 'isolate' }}
     >
-      {/* 顶部工具条：历史版本 → 保存 → 重置 → 草稿提示；产品侧栏已接管导航，先隐藏不删。 */}
-      <div className="gv-graph-toolbar" style={{ padding: 8, display: 'none', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <VersionPicker />
-        <button type="button" onClick={() => void doCommit()} title={translateUi('ui.copy.969fe32704ff')}>{translateUi('ui.copy.ec9aa4b72673')}</button>
-        <button
-          type="button"
-          style={{ display: 'none' }}
-          onClick={() => { if (confirm('重置为内置 demo 数据？当前未保存的编辑将丢失。')) reset() }}
-          title={translateUi('ui.copy.b4f06adfb3f8')}
-        >
-          {translateUi('ui.copy.2a5b22d041a6')}</button>
-        {isDraft ? (
-          <span
-            style={{ opacity: 0.85, fontSize: 12, color: '#ffc53d' }}
-            title={translateUi('ui.copy.d1d7db12a381')}
-          >
-            {translateUi('ui.copy.4c13956c7150')}</span>
-        ) : null}
-      </div>
-
       {videoOptionsError ? (
         <div role="alert" style={{ flex: 'none', padding: '6px 10px', color: '#ff8f8f', fontSize: 11 }}>
           {translateUi('ui.copy.96b8be23b47c')}{videoOptionsError}
@@ -1160,8 +1131,11 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           onJump={(nodeId) => {
             if (!showingForeignPlayGraph) {
               const alreadySelected = useGraphScenario.getState().selectedNodeId === nodeId
-              setSelected(nodeId)
-              if (alreadySelected) notifyHostNodeSelect(nodeId)
+              setNodeSelection(nodeId, 'user')
+              if (alreadySelected) {
+                selectionSourceRef.current = 'programmatic'
+                notifyHostNodeSelect(nodeId, 'user')
+              }
               return
             }
             setSnap(sessionRef.current.jump(nodeId, {
@@ -1172,14 +1146,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             setPlayEpoch((n) => n + 1)
           }}
           onDrill={showingForeignPlayGraph ? undefined : onDrill}
-          onPaneClick={() => setSelected(null)}
+          onPaneClick={() => setNodeSelection(null, 'user')}
           onAddNode={showingForeignPlayGraph ? undefined : addPerfNode}
           onFitLayout={showingForeignPlayGraph ? undefined : applyCanvasLayout}
-          onPlayBlueprint={
-            showingForeignPlayGraph || activeBlueprintId === mainBlueprintId
-              ? undefined
-              : playCurrentBlueprint
-          }
           onPlay={showingForeignPlayGraph ? undefined : jump}
           onReference={showingForeignPlayGraph ? undefined : handleReference}
             onGenerateVideo={showingForeignPlayGraph || drillStack.length > 0 ? undefined : handleGenerateVideo}
@@ -1274,7 +1243,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                   hud: snap.hud,
                   condition: { state: session.runtime.state, visited: session.runtime.state.visited },
                 }}
-                onEmit={(elementId, key) => { if (!playPaused) setSnap(sessionRef.current.emitEvent(elementId, key)) }}
+                onEmit={(elementId, key, payload) => { if (!playPaused) setSnap(sessionRef.current.emitEvent(elementId, key, payload)) }}
                 onTick={(nowMs) => setSnap(sessionRef.current.tick(nowMs))}
                 onPerformanceEnd={endPerformance}
                 paused={playPaused}
@@ -1430,7 +1399,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                     activeTab={nodePanelTab}
                     configLabel={nodeConfigLabel}
                     onTabChange={setNodePanelTab}
-                    onClose={() => setSelected(null)}
+                    onClose={() => setNodeSelection(null, 'user')}
                   />
                 )}
                 {/* Agent 页签内容区：暂留空，仅占位撑满本列。外置模式下不渲染。 */}

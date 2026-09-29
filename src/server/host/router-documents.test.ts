@@ -5,6 +5,63 @@ import { createInitialWorkflowState, VIDEO_GAME_WORKFLOW_FILE } from './workflow
 
 const decoder = new TextDecoder()
 const encoder = new TextEncoder()
+const VALID_PILLAR = [
+  '# Pillar',
+  '## 角色\n主角。',
+  '## 场景\n起点。',
+  '## 主循环\n玩家选择并进入结果。',
+  '## 互动节拍\nB01：玩家推进。',
+  '## 界面反馈\n显示推进反馈。',
+  '## 结算与分支\n推进后进入结果。',
+  '## 战斗回合\n每回合包含决策与退出条件。',
+  '```pillar-interaction-contract',
+  JSON.stringify({
+    schemaVersion: 4,
+    endings: [
+      { id: 'ending-win', title: '完成', summary: '玩家完成目标' },
+      { id: 'ending-exit', title: '离开', summary: '玩家安全离开' },
+    ],
+    beats: [
+      {
+        id: 'B01',
+        narrativeIntent: '玩家选择推进或离开',
+        staging: '主角站在昏暗起点观察前路，镜头从背后跟随，气氛紧张。',
+        playerInformation: ['当前目标'],
+        uiCapabilities: ['选择反馈'],
+        actions: [
+          {
+            id: 'advance', intent: '推进', stateMutationOwner: 'none', requiredRole: 'player-choice',
+            exit: { kind: 'beat', toBeatId: 'B02' },
+            stateChange: '不修改持久状态', immediateFeedback: '显示推进',
+            downstreamPayoff: '下游展示推进结果', exitIntent: '进入下一步',
+          },
+          {
+            id: 'exit', intent: '离开', stateMutationOwner: 'none', requiredRole: 'player-choice',
+            exit: { kind: 'ending', endingId: 'ending-exit' },
+            stateChange: '不修改持久状态', immediateFeedback: '显示离开',
+            downstreamPayoff: '下游展示安全离开', exitIntent: '进入离开结局',
+          },
+        ],
+        settlements: [],
+      },
+      {
+        id: 'B02',
+        narrativeIntent: '玩家完成目标',
+        staging: '主角抵达明亮终点准备完成任务，镜头向前推进，气氛振奋。',
+        playerInformation: ['终点'],
+        uiCapabilities: ['完成反馈'],
+        actions: [{
+          id: 'finish', intent: '完成目标', stateMutationOwner: 'none', requiredRole: 'player-choice',
+          exit: { kind: 'ending', endingId: 'ending-win' },
+          stateChange: '不修改持久状态', immediateFeedback: '显示完成',
+          downstreamPayoff: '下游展示胜利结果', exitIntent: '进入完成结局',
+        }],
+        settlements: [],
+      },
+    ],
+  }),
+  '```',
+].join('\n')
 
 function contextFor(files: Record<string, string>): {
   context: ExtensionContext
@@ -94,8 +151,9 @@ describe('game-video document routing', () => {
           meta: { documentType: 'pillar' },
         }],
       }),
+      // 作者确认会重新证明一遍这份支柱画得出来，所以门的测试也要用真支柱。
       'docs/demo_pillar.md': [
-        '# 游戏支柱',
+        VALID_PILLAR,
         'character_preview_estimate:',
         '  character_count: 4',
         '  image_count: 4',
@@ -384,7 +442,7 @@ describe('game-video document routing', () => {
   it('registers existing file when content omitted', async () => {
     const { context, files } = contextFor({
       'assets/manifest.json': JSON.stringify({ version: 2, assets: [] }),
-      'docs/demo_pillar.md': '# Pillar',
+      'docs/demo_pillar.md': VALID_PILLAR,
     })
     const router = createGameVideoRouter(context)
 
@@ -400,12 +458,12 @@ describe('game-video document routing', () => {
 
     expect(res.status).toBe(200)
     const body = JSON.parse(decoder.decode(res.body))
-    expect(body.document).toMatchObject({
+    expect(body.document, JSON.stringify(body)).toMatchObject({
       id: 'doc-pillar',
       name: '支柱',
       documentType: 'pillar',
     })
-    expect(files['docs/demo_pillar.md']).toBe('# Pillar')
+    expect(files['docs/demo_pillar.md']).toBe(VALID_PILLAR)
     const manifest = JSON.parse(files['assets/manifest.json']!)
     expect(manifest.assets).toEqual([
       expect.objectContaining({
@@ -565,5 +623,66 @@ describe('game-video document routing', () => {
     }
     expect(Object.keys(files).filter((path) => path.startsWith('docs/'))).toEqual([])
     expect(JSON.parse(files['assets/manifest.json']!).assets).toEqual([])
+  })
+
+  it('refuses rewriting a legal core after Host apply while pillar is working', async () => {
+    const initial = createInitialWorkflowState('game-1')
+    const workflow = {
+      ...initial,
+      activity: 'document.pillar',
+      activityStatus: 'working',
+      gates: {
+        ...initial.gates,
+        core: {
+          status: 'approved',
+          revision: 1,
+          evidenceRef: 'author:core:A',
+          approvedAt: '2026-09-09T07:10:40.000Z',
+        },
+      },
+      activities: {
+        ...initial.activities,
+        'document.core': { revision: 1, status: 'complete', artifactRefs: [], evidence: [] },
+        'document.pillar': { revision: 1, status: 'working', artifactRefs: [], evidence: [] },
+      },
+    }
+    const { context, files } = contextFor({
+      'assets/manifest.json': JSON.stringify({
+        version: 2,
+        assets: [{
+          id: 'doc-core',
+          kind: 'document',
+          name: '核心',
+          status: 'ready',
+          mimeType: 'text/markdown',
+          provider: { kind: 'local', ref: 'docs/caochuanjiejian_core.md' },
+          createdAt: 1,
+          updatedAt: 2,
+          meta: { documentType: 'core' },
+        }],
+      }),
+      'docs/caochuanjiejian_core.md': '# 草船借箭\n    schema_version: 1\n    selected_option: A\n    option_count: 3\n',
+      [VIDEO_GAME_WORKFLOW_FILE]: JSON.stringify(workflow),
+    })
+    const router = createGameVideoRouter(context)
+
+    const res = await router.handle({
+      ...request('documents/upsert'),
+      method: 'POST',
+      headers: { 'content-type': ['application/json'] },
+      body: encoder.encode(JSON.stringify({
+        documentType: 'core',
+        slug: 'cao-chuan-jie-jian',
+        content: '# drifted core\n    selected_option: A\n',
+      })),
+    })
+
+    expect(res.status).toBe(200)
+    const body = JSON.parse(decoder.decode(res.body))
+    expect(body.document).toBeNull()
+    expect(body.error).toMatch(/document\.core\.rewrite-forbidden/)
+    expect(body.error).toContain('docs/caochuanjiejian_core.md')
+    expect(files['docs/cao-chuan-jie-jian_core.md']).toBeUndefined()
+    expect(files['docs/caochuanjiejian_core.md']).toContain('selected_option: A')
   })
 })

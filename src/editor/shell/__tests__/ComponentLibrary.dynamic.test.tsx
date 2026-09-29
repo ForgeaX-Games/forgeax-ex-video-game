@@ -13,9 +13,13 @@ import {
 import { useGraphScenario } from '../../persist/graphScenarioStore'
 import { ComponentLibrary, OVERLAY_PRESET_MIME } from '../ComponentLibrary'
 import { clearErrorReports, getErrorReports } from '@/lib/diagnostics/error-report'
+import type { AssetCatalog } from '@/editor/assets/asset-catalog'
 
 const extensionFetch = vi.fn()
 const removeProjectComponentReferences = vi.fn(async () => true)
+const assetCatalogMock = vi.hoisted(() => ({
+  catalog: { folders: [], placements: {} } as Pick<AssetCatalog, 'folders' | 'placements'>,
+}))
 
 const COMPONENT_ID = 'project.option-button'
 const moduleUrl = vi.fn(() => [
@@ -34,11 +38,20 @@ vi.mock('../../../lib/extension-host', () => ({
   readExtensionJson: async (response: Response) => response.json(),
 }))
 
+vi.mock('@/editor/assets/asset-catalog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/editor/assets/asset-catalog')>()
+  return {
+    ...actual,
+    useAssetCatalog: () => ({ catalog: assetCatalogMock.catalog, loading: false, error: null, refresh: vi.fn() }),
+  }
+})
+
 afterEach(() => {
   cleanup()
   unregisterComponent(COMPONENT_ID)
   extensionFetch.mockReset()
   removeProjectComponentReferences.mockClear()
+  assetCatalogMock.catalog = { folders: [], placements: {} }
   useGraphScenario.setState({ game: '', removeProjectComponentReferences })
   clearErrorReports()
 })
@@ -58,6 +71,28 @@ describe('ComponentLibrary dynamic catalog', () => {
     const { container } = render(<ComponentLibrary />)
 
     expect(screen.getByText('项目选项按钮')).toBeTruthy()
+    expect(container.querySelector(`[data-component-id="${COMPONENT_ID}"]`)).toBeTruthy()
+  })
+
+  it('uses control placements to show folders before their contained controls', () => {
+    const OptionButton = (): JSX.Element => <button type="button">Option</button>
+    const manifest = { id: COMPONENT_ID, label: '项目选项按钮', inputs: [], events: [] }
+    registerComponent(COMPONENT_ID, manifest)
+    registerOverlayRenderer(COMPONENT_ID, OptionButton, manifest)
+    assetCatalogMock.catalog = {
+      folders: [{ id: 'folder-controls', tabKind: 'control', parentId: null, name: '战斗', sortKey: '战斗', createdAt: 1, updatedAt: 1 }],
+      placements: {
+        [`control:${COMPONENT_ID}`]: { folderId: 'folder-controls', sortKey: '项目选项按钮', createdAt: 1, updatedAt: 1 },
+      },
+    }
+
+    const { container } = render(<ComponentLibrary />)
+
+    const folder = container.querySelector<HTMLElement>('[data-folder-id="folder-controls"]')!
+    expect(folder).toBeTruthy()
+    expect(folder.querySelector('.component-thumbnail-stage')).toBeTruthy()
+    expect(container.querySelector(`[data-component-id="${COMPONENT_ID}"]`)).toBeNull()
+    fireEvent.click(folder)
     expect(container.querySelector(`[data-component-id="${COMPONENT_ID}"]`)).toBeTruthy()
   })
 
@@ -105,7 +140,7 @@ describe('ComponentLibrary dynamic catalog', () => {
     expect(setData).toHaveBeenCalledWith(OVERLAY_PRESET_MIME, COMPONENT_ID)
   })
 
-  it('shows deletion only for project components and requires confirmation', async () => {
+  it('does not expose destructive control actions from the library card', async () => {
     const game = `game-${crypto.randomUUID()}`
     useGraphScenario.setState({ game, removeProjectComponentReferences })
     await act(async () => {
@@ -117,22 +152,12 @@ describe('ComponentLibrary dynamic catalog', () => {
     }), { status: 200, headers: { 'content-type': 'application/json' } }))
 
     render(<ComponentLibrary />)
-    expect(screen.getByRole('button', { name: '删除控件 项目选项按钮' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '删除控件 项目选项按钮' })).toBeNull()
     expect(screen.queryByRole('button', { name: /删除控件 字幕/ })).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: '删除控件 项目选项按钮' }))
-    expect(screen.getByRole('dialog', { name: '删除控件 项目选项按钮' }))
-      .toHaveTextContent('工程中使用该控件的界面和节点引用将一并清除')
-    expect(extensionFetch).not.toHaveBeenCalled()
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
-    })
-    expect(removeProjectComponentReferences).toHaveBeenCalledWith(COMPONENT_ID)
-    expect(extensionFetch).toHaveBeenCalledWith(`components/${COMPONENT_ID}`, { method: 'DELETE' })
+    expect(removeProjectComponentReferences).not.toHaveBeenCalled()
   })
 
-  it('keeps deletion available when the editor game state changes after catalog loading', async () => {
+  it('keeps a project control visible when the editor game state changes after catalog loading', async () => {
     const loadedGame = `game-${crypto.randomUUID()}`
     await act(async () => {
       await refreshGameComponents(loadedGame)
@@ -144,7 +169,7 @@ describe('ComponentLibrary dynamic catalog', () => {
 
     render(<ComponentLibrary />)
 
-    expect(screen.getByRole('button', { name: '删除控件 项目选项按钮' })).toBeTruthy()
+    expect(screen.getByText('项目选项按钮')).toBeTruthy()
   })
 
   it('isolates a broken generated preview without showing its exception in the library', async () => {

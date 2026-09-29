@@ -100,6 +100,7 @@ export function ComponentEventsEditor({
   renderRoute,
   onCatalogChange,
   onMountActionsChange,
+  onRemoveMountAction,
 }: {
   events: OverlayEventRef[]
   catalogReactions?: OverlayReaction[]
@@ -120,6 +121,7 @@ export function ComponentEventsEditor({
   renderRoute?: (event: OverlayEventRef) => ReactNode
   onCatalogChange?: (next: OverlayReaction[] | undefined) => void
   onMountActionsChange?: (event: OverlayEventRef, actions: NodeAction[]) => void
+  onRemoveMountAction?: (event: OverlayEventRef, actionIndex: number) => void
 }): JSX.Element {
   if (!events.length) {
     return <div style={{ fontSize: 11, opacity: 0.6 }}>{translateUi('ui.copy.48f184462db4')}</div>
@@ -174,6 +176,9 @@ export function ComponentEventsEditor({
             onCreateVariable={onCreateVariable}
             onCreateFormula={onCreateFormula}
             renderAdvance={renderRoute ? () => renderRoute(event) : undefined}
+            onRemove={mode === 'mount' && onRemoveMountAction
+              ? (actionIndex) => onRemoveMountAction(event, actionIndex)
+              : undefined}
             onChange={write}
           />
         )

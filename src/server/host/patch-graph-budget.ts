@@ -55,18 +55,33 @@ function collectTouchedIds(
   const nodes = new Set<string>()
   const edges = new Set<string>()
   for (const op of ops) {
-    const nodeId = stringField(op, 'nodeId')
-      ?? stringField(op, 'afterId')
-      ?? stringField(op.node, 'id')
-    if (nodeId) nodes.add(nodeId)
+    for (const nodeId of [
+      stringField(op, 'nodeId'),
+      stringField(op, 'afterId'),
+      stringField(op, 'beforeId'),
+      stringField(op.node, 'id'),
+    ]) {
+      if (nodeId) nodes.add(nodeId)
+    }
+
+    if (Array.isArray(op.copies)) {
+      for (const copy of op.copies) {
+        const sourceId = stringField(copy, 'sourceId')
+        const targetId = stringField(copy, 'targetId')
+        if (sourceId) nodes.add(sourceId)
+        if (targetId) nodes.add(targetId)
+      }
+    }
 
     const edgeId = stringField(op, 'edgeId') ?? stringField(op.edge, 'id')
     if (edgeId) edges.add(edgeId)
     const operation = stringField(op, 'op') ?? ''
-    if (operation === 'connect' || operation === 'disconnect') {
+    if (operation === 'connect' || operation === 'reconnect') {
       const source = stringField(op, 'source')
       const target = stringField(op, 'target')
-      if (source && target) edges.add(`${source}->${target}`)
+      if (source) nodes.add(source)
+      if (target) nodes.add(target)
+      if (!edgeId && source && target) edges.add(`${source}->${target}`)
     }
   }
   return { nodes, edges }

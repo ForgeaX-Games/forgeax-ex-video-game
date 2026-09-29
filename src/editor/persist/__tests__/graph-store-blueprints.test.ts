@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useGraphScenario } from '../graphScenarioStore'
-import { NODIA_DEMO_PROJECT } from '@/authoring/demo/demo'
+import { EMPTY_LIBRARY_DOCUMENT } from '@/authoring/blueprint/empty-library'
 
 beforeEach(() => {
-  const p = structuredClone(NODIA_DEMO_PROJECT)
+  const p = structuredClone(EMPTY_LIBRARY_DOCUMENT)
   const mainId = p.manifest.mainPackId
   useGraphScenario.setState({
     blueprints: p.manifest.packs,

@@ -1,4 +1,5 @@
-import { useId, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import {
   useResolvedGenerationInteraction,
   type GenerationInteractionProps,
@@ -91,27 +92,99 @@ export function GenerationSelectField<T extends string | number = string>({
   const generatedId = useId()
   const { state } = useResolvedGenerationInteraction(interaction)
   const disabled = explicitlyDisabled || state.disabled || state.readOnly || state.busy
+  const [open, setOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState<CSSProperties>()
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const listboxId = `${id ?? generatedId}-listbox`
+  const selectedOption = options.find((option) => option.value === value)
+  const selectedLabel = selectedOption?.label ?? placeholder ?? ''
+
+  useEffect(() => {
+    if (!open) return
+
+    const updateMenuPosition = (): void => {
+      const rect = triggerRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const scrollContainer = triggerRef.current?.closest<HTMLElement>('.generation-surface__parameters')
+      const containerRect = scrollContainer?.getBoundingClientRect()
+      const containerCanScroll = scrollContainer
+        && (scrollContainer.scrollHeight > scrollContainer.clientHeight
+          || scrollContainer.scrollWidth > scrollContainer.clientWidth)
+      if (containerCanScroll && containerRect
+        && (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom
+          || rect.right <= containerRect.left || rect.left >= containerRect.right)) {
+        setOpen(false)
+        return
+      }
+      setMenuPosition({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+    }
+    const closeWhenOutside = (event: PointerEvent): void => {
+      const target = event.target as Node
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
+    }
+    updateMenuPosition()
+    document.addEventListener('pointerdown', closeWhenOutside)
+    window.addEventListener('resize', updateMenuPosition)
+    window.addEventListener('scroll', updateMenuPosition, true)
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside)
+      window.removeEventListener('resize', updateMenuPosition)
+      window.removeEventListener('scroll', updateMenuPosition, true)
+    }
+  }, [open])
+
+  const toggleOpen = (): void => {
+    if (!disabled) setOpen((current) => !current)
+  }
+  const selectOption = (option: GenerationParameterOption<T>): void => {
+    onChange(option.value)
+    setOpen(false)
+    triggerRef.current?.focus()
+  }
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.key === 'Escape') {
+      setOpen(false)
+      return
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      toggleOpen()
+    }
+  }
+
   return (
-    <label className={`generation-select-field${className ? ` ${className}` : ''}`} htmlFor={id ?? generatedId}>
+    <div className={`generation-select-field${className ? ` ${className}` : ''}`}>
       <span className="generation-visually-hidden">{label}</span>
-      <select
+      <button
+        ref={triggerRef}
         id={id ?? generatedId}
+        type="button"
+        className="generation-select-trigger"
+        role="combobox"
         aria-label={label}
-        value={value === undefined ? '' : String(value)}
         disabled={disabled}
-        onChange={(event) => {
-          const next = options.find((option) => String(option.value) === event.target.value)
-          if (next) onChange(next.value)
-        }}
-      >
-        {placeholder ? <option value="">{placeholder}</option> : null}
-        {options.map((option) => (
-          <option key={String(option.value)} value={String(option.value)}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        aria-expanded={open}
+        aria-controls={listboxId}
+        data-value={value === undefined ? '' : String(value)}
+        onClick={toggleOpen}
+        onKeyDown={handleKeyDown}
+      >{selectedLabel}</button>
+      {open ? createPortal(
+        <div ref={menuRef} id={listboxId} className="generation-select-menu" style={menuPosition} role="listbox" aria-label={label}>
+          {options.map((option) => (
+            <button
+              key={String(option.value)}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              onClick={() => selectOption(option)}
+            >{option.label}</button>
+          ))}
+        </div>,
+        document.body,
+      ) : null}
+    </div>
   )
 }
 

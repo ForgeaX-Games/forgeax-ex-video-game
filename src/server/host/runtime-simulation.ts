@@ -1,10 +1,15 @@
 import type { ExtensionContext } from '@forgeax/extension-host/node'
 import { GraphSession } from '@/runtime/core/engine/session'
 import type { GameEdge, GameGraph, GraphLibraryDocument } from '@/runtime/core/schema/graph-schema'
-import { ensureBuiltinSchemes } from '@/authoring/demo/builtin-schemes'
+import { eventsFromParams } from '@/runtime/core/schema/graph-schema'
+import { expandNodeOverlays } from '@/runtime/core/schema/expand-overlay'
+import { ensureBuiltinSchemes } from '@/authoring/overlays/builtin-schemes'
 import { toRuntimeScenario } from '@/authoring/blueprint/formula-authoring'
 import type { ValidationEvidence, ValidationIssue, VideoGameActivity } from '../../workflow/contracts'
 import { inspectProject } from './project-inspection'
+import { componentContractMap } from './component-catalog'
+
+const REPRESENTATIVE_RNG_SEEDS = [0, 1, 7] as const
 
 interface BlueprintSimulation {
   blueprintId: string
@@ -16,6 +21,8 @@ interface BlueprintSimulation {
   sampledEdgePaths: string[][]
   runtimeVisitedNodeIds: string[]
   runtimeTraversedEdgeIds: string[]
+  runtimeSeeds: number[]
+  runtimeRunCount: number
   issues: ValidationIssue[]
 }
 
@@ -103,22 +110,54 @@ function analyzeGraph(blueprintId: string, entry: string, graph: GameGraph): Blu
     sampledEdgePaths: uniqueEdgePaths,
     runtimeVisitedNodeIds: [],
     runtimeTraversedEdgeIds: [],
+    runtimeSeeds: [],
+    runtimeRunCount: 0,
     issues,
   }
 }
 
-function advanceThroughEdge(session: GraphSession, edge: GameEdge): void {
+function advanceThroughEdge(
+  session: GraphSession,
+  edge: GameEdge,
+  project: GraphLibraryDocument,
+  blueprintId: string,
+): void {
   const before = session.snapshot
   let after = before
   const handle = edge.sourceHandle ?? 'default'
   if (handle === 'default') {
     after = session.performanceEnd()
   } else {
-    const interactiveElement = before.overlayMounts.flatMap((mount) => mount.children)[0]
-    if (!interactiveElement) {
-      throw new Error(`节点 ${edge.source} 的出口 ${handle} 没有可接收选择输入的界面元素`)
+    const node = project.manifest.packs[blueprintId]?.graph.nodes.find((candidate) => candidate.id === edge.source)
+    const producerRef = edge.data?.design?.producer.kind === 'component-event'
+      ? edge.data.design.producer.ref
+      : undefined
+    const separator = producerRef?.lastIndexOf('.') ?? -1
+    const producerComponent = separator > 0 ? producerRef!.slice(0, separator) : undefined
+    const eventId = separator > 0 ? producerRef!.slice(separator + 1) : handle
+    const contracts = componentContractMap()
+    const authoringChildren = node
+      ? expandNodeOverlays(project.ui?.overlays ?? {}, node).flatMap((mount) => mount.children)
+      : []
+    const exactChild = authoringChildren.find((child) => {
+        if (producerComponent && child.component !== producerComponent) return false
+        const dynamic = eventsFromParams(child.inputs).map((event) => event.id)
+        const events = dynamic.length > 0 ? dynamic : (contracts.get(child.component)?.events.map((event) => event.id) ?? [])
+        return events.includes(eventId)
+      })
+    // 旧蓝图没有 edge.data.design，历史 TextOption 还可能使用任意 handle；只对这种存量数据
+    // 保留首元素回放。新蓝图一旦声明 producer，就必须精确命中组件和事件。
+    const authoringChild = exactChild ?? (!producerRef ? authoringChildren[0] : undefined)
+    if (authoringChild?.window && !before.overlayMounts.flatMap((mount) => mount.children)
+      .some((child) => child.elementId === authoringChild.id)) {
+      after = session.tick(authoringChild.window.startMs ?? 0)
     }
-    after = session.emitEvent(interactiveElement.elementId, handle)
+    const interactiveElement = after.overlayMounts.flatMap((mount) => mount.children)
+      .find((child) => child.elementId === authoringChild?.id)
+    if (!interactiveElement) {
+      throw new Error(`节点 ${edge.source} 的出口 ${handle} 没有与 producer 对齐的可交互界面元素`)
+    }
+    after = session.emitEvent(interactiveElement.elementId, eventId)
   }
   if (!after.traversedEdgeIds.includes(edge.id)) {
     throw new Error(`真实运行时没有沿目标边 ${edge.id} (${edge.source} -> ${edge.target}) 推进`)
@@ -143,7 +182,10 @@ function runGraphSessions(
   try {
     const edgesById = new Map(pack.graph.edges.map((edge) => [edge.id, edge]))
     for (const edgePath of simulation.sampledEdgePaths) {
-      const session = new GraphSession(scenario, { rootBlueprintId: simulation.blueprintId, rngSeed: 0 })
+      for (const rngSeed of REPRESENTATIVE_RNG_SEEDS) {
+      const session = new GraphSession(scenario, { rootBlueprintId: simulation.blueprintId, rngSeed })
+      simulation.runtimeSeeds.push(rngSeed)
+      simulation.runtimeRunCount += 1
       let snapshot = session.start()
       // `start()` 会沿默认出口自动推进若干节点（例如 entry → n1 → n2），而采样路径是
       // 从入口开始逐边枚举的。两者天然错位：重放到第一条边时运行时已经在下游了。
@@ -163,7 +205,7 @@ function runGraphSessions(
             + `请检查该节点的出口条件或 reaction 是否让运行时提前离开了这条路径`,
           )
         }
-        advanceThroughEdge(session, edge)
+        advanceThroughEdge(session, edge, authoringScenario, simulation.blueprintId)
         snapshot = session.snapshot
         for (const nodeId of snapshot.visited) visited.add(nodeId)
         simulation.runtimeVisitedNodeIds.push(...snapshot.visited)
@@ -178,9 +220,11 @@ function runGraphSessions(
       ) {
         throw new Error(`路径 ${edgePath.join(' -> ')} 未到达终局或等待玩家输入的停留点`)
       }
+      }
     }
     simulation.runtimeVisitedNodeIds = [...new Set(simulation.runtimeVisitedNodeIds)]
     simulation.runtimeTraversedEdgeIds = [...new Set(simulation.runtimeTraversedEdgeIds)]
+    simulation.runtimeSeeds = [...new Set(simulation.runtimeSeeds)]
   } catch (cause) {
     simulation.issues.push({
       level: 'error',
@@ -200,6 +244,7 @@ export async function simulatePassA(
   ok: boolean
   projectRevision: number
   simulations: BlueprintSimulation[]
+  qualityMetrics: Awaited<ReturnType<typeof inspectProject>>['qualityMetrics']
   evidence: ValidationEvidence
 }> {
   const inspected = await inspectProject(context)
@@ -223,7 +268,7 @@ export async function simulatePassA(
     activityRevision,
     projectRevision: inspected.projectRevision,
     checkId: 'playtest.all-required-paths-reach-terminal',
-    status: 'pass',
+    status: issues.some((entry) => entry.level === 'error') ? 'fail' : 'pass',
     observedAt: new Date().toISOString(),
     details: {
       engine: 'GraphSession',
@@ -235,8 +280,18 @@ export async function simulatePassA(
       terminalPathSampleCount: simulations.reduce((sum, item) => sum + item.sampledPaths.length, 0),
       restPathSampleCount: simulations.reduce((sum, item) => sum + item.sampledPaths.length, 0),
       restPointCount: simulations.reduce((sum, item) => sum + item.restNodeIds.length, 0),
+      rngSeeds: REPRESENTATIVE_RNG_SEEDS,
+      runtimeRunCount: simulations.reduce((sum, item) => sum + item.runtimeRunCount, 0),
+      qualityMetrics: inspected.qualityMetrics,
     },
     ...(issues.length ? { issues } : {}),
   }
-  return { schemaVersion: 1, ok: true, projectRevision: inspected.projectRevision, simulations, evidence }
+  return {
+    schemaVersion: 1,
+    ok: evidence.status === 'pass',
+    projectRevision: inspected.projectRevision,
+    simulations,
+    qualityMetrics: inspected.qualityMetrics,
+    evidence,
+  }
 }

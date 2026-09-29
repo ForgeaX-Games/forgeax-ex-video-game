@@ -194,14 +194,6 @@ const NODE_ACTIONS_CSS = `
   background: var(--ni-w-05);
   color: var(--ni-w-100) !important;
 }
-/*
- * 每行的「删除」在这里没有意义，收起来。EffectsEditor 在本面板是 allowAdd={false}，
- * 一条 effect 动作永远只装一个效果，所以这个按钮只会把 effects 清成空数组、留下一条
- * 空动作；真正的「删掉这条响应」是卡片头那颗垃圾桶。旧色板面板可以加多个效果，
- * 那里仍然需要它，所以只在本作用域藏，不改 editors.tsx。
- * （撤回留着——它撤的是运算符变换，另一回事。）
- */
-.ni-root .ni-na-card [data-effect-editor] > div:first-child > button:last-child { display: none; }
 
 /* ── 控件壳：卡片是 #1a1a1a，里面的控件亮一档到 #232323（稿子 15635:81491） ──
  * 下拉现在一律是 NiSelect：可见的是 .ni-select-shell，尺寸与内边距由 ni-ui 自己给足
@@ -617,6 +609,7 @@ export function NodeActionsEditor({
   onCreateFormula,
   labelWidth,
   renderAdvance,
+  onRemove,
   onChange,
 }: {
   actions: NodeAction[]
@@ -637,10 +630,16 @@ export function NodeActionsEditor({
   onCreateFormula?: FormulaCreateHandler
   labelWidth?: CSSProperties['width']
   renderAdvance?: (action: Extract<NodeAction, { kind: 'advance' }>, index: number) => ReactNode
+  /** 可选的领域删除入口；节点面板用它复用会同步清理连线的共享原语。 */
+  onRemove?: (index: number) => void
   onChange: (next: NodeAction[]) => void
 }): JSX.Element {
   const patchAt = (i: number, action: NodeAction) =>
     onChange(actions.map((current, index) => (index === i ? action : current)))
+  const removeAt = (i: number) => {
+    if (onRemove) onRemove(i)
+    else onChange(actions.filter((_, index) => index !== i))
+  }
   injectStyleOnce('ni-node-actions', NODE_ACTIONS_CSS)
   const appendEffect = () => onChange([...actions, {
     kind: 'effect',
@@ -705,7 +704,7 @@ export function NodeActionsEditor({
                 type="button"
                 aria-label={isPropertyEffect ? translateUi('ui.copy.625719481bd4') : translateUi('ui.copy.cffc6967479b')}
                 title={`${translateUi('ui.template.2f9daa828907')}${propertyTitle}`}
-                onClick={() => onChange(actions.filter((_, index) => index !== i))}
+                onClick={() => removeAt(i)}
               >
                 <TrashIcon />
               </button>
@@ -720,7 +719,7 @@ export function NodeActionsEditor({
                 size={12}
                 danger
                 ariaLabel={removeActionLabel(action)}
-                onClick={() => onChange(actions.filter((_, index) => index !== i))}
+                onClick={() => removeAt(i)}
               />
             </div>
           )}
@@ -746,7 +745,7 @@ export function NodeActionsEditor({
               propertyLayout={propertyLayout}
               onChange={(effects) => {
                 if (propertyLayout && !effects?.length) {
-                  onChange(actions.filter((_, index) => index !== i))
+                  removeAt(i)
                   return
                 }
                 patchAt(i, { kind: 'effect', effects: effects ?? [] })

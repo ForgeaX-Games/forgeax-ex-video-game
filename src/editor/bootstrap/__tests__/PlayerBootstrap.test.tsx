@@ -26,8 +26,6 @@ vi.mock('../../persist/persist-client', async (importOriginal) => {
     ...actual,
     loadStore: vi.fn(),
     saveProject: vi.fn(async () => ({ ok: true })),
-    currentVersion: vi.fn(async () => ({ tag: null, commitHash: null, dirty: false })),
-    listVersions: vi.fn(async () => []),
   }
 })
 
@@ -64,7 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   client.ready.mockResolvedValue({ gameId: 'handshake-game' })
   client.gamePackage.status.mockResolvedValue({ state: 'initialized' })
-  vi.mocked(loadStore).mockResolvedValue({ project: document, revision: null, versions: [] })
+  vi.mocked(loadStore).mockResolvedValue({ project: document, revision: null })
   useGraphScenario.setState({
     game: '',
     demo: null,
@@ -92,7 +90,7 @@ test('waits for the handshake and package document before rendering the player',
 test('keeps the player unmounted after a package load failure and retries without saving an empty document', async () => {
   vi.mocked(loadStore)
     .mockRejectedValueOnce(new Error('temporary package read failure'))
-    .mockResolvedValueOnce({ project: document, revision: null, versions: [] })
+    .mockResolvedValueOnce({ project: document, revision: null })
 
   render(<PlayerBootstrap />)
 

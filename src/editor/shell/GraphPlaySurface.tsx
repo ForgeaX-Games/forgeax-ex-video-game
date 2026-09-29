@@ -528,7 +528,7 @@ export function GraphPlaySurface({ scenario: _scenario }: { scenario: GameScenar
             overlayMounts={snap?.overlayMounts ?? []}
             skins={skins ?? undefined}
             skinCtx={skinCtx}
-            onEmit={(elementId, key) => { const s = sessionRef.current; if (!paused && s) setSnap(s.emitEvent(elementId, key)) }}
+            onEmit={(elementId, key, payload) => { const s = sessionRef.current; if (!paused && s) setSnap(s.emitEvent(elementId, key, payload)) }}
             onTick={(nowMs) => { const s = sessionRef.current; if (s) setSnap(s.tick(nowMs)) }}
             onPerformanceEnd={endPerformance}
             // 就地落音量：等 effect 那一拍，换片的头几帧会用元素默认的满音量喊出来。

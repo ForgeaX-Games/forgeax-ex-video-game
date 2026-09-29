@@ -77,7 +77,7 @@ describe('GraphConfigView overlay usage', () => {
     )
 
     expect(screen.getByRole('button', { name: '＋ 新建公式' })).toBeTruthy()
-    expect(screen.getByRole('textbox', { name: '搜索公式' })).toBeTruthy()
+    expect(screen.getByRole('searchbox', { name: '搜索公式' })).toBeTruthy()
   })
 
   it('counts references from the main blueprint and unopened sub-blueprints', () => {
@@ -109,9 +109,60 @@ describe('GraphConfigView overlay usage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '展开 界面' }))
-    fireEvent.click(screen.getByRole('button', { name: '展开模板' }))
+    fireEvent.click(screen.getByRole('button', { name: '展开界面模板' }))
     expect(screen.getByText('⇢2')).toBeTruthy()
     expect(screen.queryByText('被 2 个节点引用')).toBeNull()
+  })
+
+  it('shows a searchable custom-interface library until a scheme is selected', () => {
+    const graph: GameGraph = { nodes: [], edges: [] }
+    const overlays = {
+      'scheme-combat': { id: 'scheme-combat', title: '战斗', children: [] },
+      'scheme-bag': { id: 'scheme-bag', title: '背包', children: [] },
+      'base:joystick': { id: 'base:joystick', title: '摇杆控件', children: [] },
+    }
+    useGraphScenario.setState({
+      game: 'game-nodia-fighting',
+      booted: true,
+      blueprints: { main: blueprint('main', graph) },
+      mainBlueprintId: 'main',
+      activeBlueprintId: 'main',
+      graph,
+      meta: {
+        ui: { overlays },
+        uiTree: {
+          root: [{
+            kind: 'folder',
+            id: CUSTOM_UI_FOLDER_ID,
+            name: '自定义界面',
+            children: [
+              { kind: 'scheme', id: 'combat-node', overlayId: 'scheme-combat' },
+              { kind: 'scheme', id: 'bag-node', overlayId: 'scheme-bag' },
+            ],
+          }, {
+            kind: 'folder',
+            id: 'ui-folder:basic',
+            name: '控件',
+            children: [{ kind: 'scheme', id: 'joystick-node', overlayId: 'base:joystick' }],
+          }],
+        },
+      },
+    })
+    const scenario: GameScenario = { version: 'test', graph, ui: { overlays } }
+    render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
+
+    expect(screen.getByLabelText('界面模板列表')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '打开界面 战斗' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '打开界面 背包' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '打开界面 摇杆控件' })).toBeNull()
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '背包' } })
+    expect(screen.queryByRole('button', { name: '打开界面 战斗' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '打开界面 背包' }))
+    expect(useUiSelection.getState()).toMatchObject({
+      selectedTreeNodeId: 'bag-node',
+      selectedOverlayId: 'scheme-bag',
+    })
   })
 
   it('renders the selected node-local overlay instead of falling back to the first global scheme', () => {
@@ -165,8 +216,6 @@ describe('GraphConfigView overlay usage', () => {
       meta: { ui: { overlays } },
     })
     expect(useGraphScenario.getState().createUiScheme(CUSTOM_UI_FOLDER_ID)).not.toBeNull()
-    const scenario: GameScenario = { version: 'test', graph, ui: { overlays } }
-    render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
 
     expect(Object.values(useGraphScenario.getState().meta.ui?.overlays ?? {})
       .some((overlay) => overlay.title === '新方案 2')).toBe(true)
@@ -200,6 +249,7 @@ describe('GraphConfigView overlay usage', () => {
       meta: { entities, ui: { overlays } },
     })
     const scenario: GameScenario = { version: 'test', graph, entities, ui: { overlays } }
+    useUiSelection.getState().selectUiNode('hud-node', 'hud')
     render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
 
     const hpSelect = screen.getAllByRole('combobox', { name: '数值内容' })[0]!
@@ -248,6 +298,7 @@ describe('GraphConfigView overlay usage', () => {
     })
     useGraphView.setState({ view: 'ui' })
     const scenario: GameScenario = { version: 'test', graph, ui: { overlays } }
+    useUiSelection.getState().selectUiNode('hud-node', 'hud')
     render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
 
     const back = screen.getByTitle('back')

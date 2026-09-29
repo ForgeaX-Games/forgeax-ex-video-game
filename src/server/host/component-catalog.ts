@@ -10,13 +10,21 @@
  * 这里只做投影，不复制一份定义，避免两处漂移。
  */
 import { localComponentManifests } from '@/runtime/core/component-catalog'
-import type { ComponentLayoutContract, ComponentTimingContract } from '@/runtime/core/schema/node-config-schema'
+import type {
+  ComponentLayoutContract,
+  ComponentOutput,
+  ComponentTimingContract,
+} from '@/runtime/core/schema/node-config-schema'
+import {
+  gameplaySemanticsForComponent,
+  type ComponentGameplaySemantics,
+} from '@/workflow/gameplay-semantics'
 
 export interface ComponentContract {
   id: string
   label?: string
-  /** 元件抛出的事件 id：写节点 reaction 的 `when: { type: 'event', id }` 用这些。 */
-  events: Array<{ id: string, label?: string }>
+  /** 元件抛出的事件；outputs 声明 reaction 可读取的 `eventPayload.<key>`。 */
+  events: Array<{ id: string, label?: string, outputs?: ComponentOutput[] }>
   /** 元件接受的输入键；`numberExpr` 类型可以绑变量、实体属性或公式表达式。 */
   inputs: Array<{
     key: string
@@ -32,6 +40,8 @@ export interface ComponentContract {
   layout?: ComponentLayoutContract
   /** 机器可读的显示/交互生命周期约束。 */
   timing?: ComponentTimingContract
+  /** 玩法语义：设计阶段据此把组件与状态、反馈、结算和下游演出组合起来。 */
+  gameplaySemantics?: ComponentGameplaySemantics
 }
 
 export function componentContracts(): ComponentContract[] {
@@ -42,9 +52,13 @@ export function componentContracts(): ComponentContract[] {
       ...(manifest.prompt ? { prompt: manifest.prompt } : {}),
       ...(manifest.layout ? { layout: manifest.layout } : {}),
       ...(manifest.timing ? { timing: manifest.timing } : {}),
+      ...(gameplaySemanticsForComponent(manifest.id)
+        ? { gameplaySemantics: gameplaySemanticsForComponent(manifest.id) }
+        : {}),
       events: (manifest.events ?? []).map((event) => ({
         id: event.id,
         ...(event.label ? { label: event.label } : {}),
+        ...(event.outputs?.length ? { outputs: event.outputs } : {}),
       })),
       inputs: (manifest.inputs ?? []).map((input) => ({
         key: input.key,
@@ -63,6 +77,7 @@ export function authoredComponentContracts(
     id: string
     label?: string
     prompt?: string
+    gameplaySemantics?: ComponentGameplaySemantics
     inputs?: Array<{
       key: string
       label?: string
@@ -70,7 +85,7 @@ export function authoredComponentContracts(
       component?: string
       default?: unknown
     }>
-    events: Array<{ id: string; label?: string }>
+    events: Array<{ id: string; label?: string; outputs?: ComponentOutput[] }>
   }>,
 ): ComponentContract[] {
   return manifests
@@ -78,9 +93,11 @@ export function authoredComponentContracts(
       id: manifest.id,
       ...(manifest.label ? { label: manifest.label } : {}),
       ...(manifest.prompt ? { prompt: manifest.prompt } : {}),
+      ...(manifest.gameplaySemantics ? { gameplaySemantics: manifest.gameplaySemantics } : {}),
       events: manifest.events.map((event) => ({
         id: event.id,
         ...(event.label ? { label: event.label } : {}),
+        ...(event.outputs?.length ? { outputs: event.outputs } : {}),
       })),
       inputs: (manifest.inputs ?? []).map((input) => ({
         key: input.key,

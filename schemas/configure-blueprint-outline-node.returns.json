@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:configure-blueprint-outline-node returns",
+  "type": "object",
+  "description": "Configures one existing outline node and replaces only that node's outgoing routes. Returns revision, configured/pending node ids, current hard-check evidence and readyToComplete."
+}

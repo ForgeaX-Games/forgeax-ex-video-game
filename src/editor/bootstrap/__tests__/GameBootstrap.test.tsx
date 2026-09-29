@@ -85,11 +85,25 @@ test('closes the guide on no without writing, then retries a failed initialize',
 })
 
 test('renders inconsistent packages as an explicit non-retryable error', async () => {
-  client.gamePackage.status.mockResolvedValueOnce({ state: 'inconsistent', missing: ['blueprint.json'] })
+  client.gamePackage.status.mockResolvedValue({ state: 'inconsistent', missing: ['blueprint.json'] })
   render(<GameBootstrap onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
   expect(await screen.findByText('Video game files are inconsistent')).toBeTruthy()
   expect(screen.getByRole('alert').textContent).toContain('blueprint.json')
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+})
+
+test('retries a transient inconsistent status before showing the corruption screen', async () => {
+  client.gamePackage.status
+    .mockResolvedValueOnce({ state: 'inconsistent', missing: ['assets/manifest.json'] })
+    .mockResolvedValueOnce({ state: 'initialized' })
+  const boot = vi.fn()
+
+  render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
+
+  await waitFor(() => expect(boot).toHaveBeenCalledTimes(1))
+  expect(screen.getByText('workspace')).toBeTruthy()
+  expect(screen.queryByText('Video game files are inconsistent')).toBeNull()
+  expect(client.gamePackage.status).toHaveBeenCalledTimes(2)
 })
 
 test('surfaces an initialized package load failure and does not mount the workspace', async () => {
@@ -101,6 +115,25 @@ test('surfaces an initialized package load failure and does not mount the worksp
   expect(await screen.findByText('Initialization failed')).toBeTruthy()
   expect(screen.getByRole('alert').textContent).toContain('temporary package read failure')
   expect(screen.queryByText('workspace')).toBeNull()
+})
+
+test('retries a transient inconsistent package during the initial replacement transaction', async () => {
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'initialized' })
+  let attempts = 0
+  const boot = vi.fn(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      throw Object.assign(new Error('Game package is inconsistent and will not be overwritten'), {
+        code: 'package_inconsistent',
+      })
+    }
+  })
+
+  render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
+
+  await waitFor(() => expect(boot).toHaveBeenCalledTimes(2), { timeout: 2_000 })
+  expect(screen.getByText('workspace')).toBeTruthy()
+  expect(screen.queryByText('Initialization failed')).toBeNull()
 })
 
 test('explains that direct top-level loading requires a Extension host', async () => {
@@ -155,18 +188,51 @@ test('boots the explicit in-process game id instead of the iframe handshake id',
   await waitFor(() => expect(boot).toHaveBeenCalledWith('arrival-game'))
 })
 
-test('auto-initializes an uninitialized package without showing the guide', async () => {
+test('keeps the workflow shell mounted for an uninitialized package', async () => {
   client.gamePackage.status.mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
   client.gamePackage.initialize.mockResolvedValueOnce({ state: 'initialized', missing: [], initialized: true })
   const boot = vi.fn()
 
   render(<GameBootstrap autoInitialize onBoot={boot}><div>workspace</div></GameBootstrap>)
 
-  await waitFor(() => expect(boot).toHaveBeenCalledTimes(1))
+  expect(await screen.findByText('workspace')).toBeTruthy()
+  expect(boot).not.toHaveBeenCalled()
   expect(screen.getByText('workspace')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Create from template' })).toBeNull()
   expect(client.gamePackage.status).toHaveBeenCalledTimes(1)
-  expect(client.gamePackage.initialize).toHaveBeenCalledTimes(1)
+  expect(client.gamePackage.initialize).not.toHaveBeenCalled()
+})
+
+test('keeps the workflow shell mounted while a deferred package is re-checked', async () => {
+  client.gamePackage.status
+    .mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
+    .mockReturnValueOnce(new Promise(() => {}))
+
+  render(<GameBootstrap autoInitialize onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
+
+  expect(await screen.findByText('workspace')).toBeTruthy()
+  await waitFor(() => expect(client.gamePackage.status).toHaveBeenCalledTimes(2), { timeout: 3_000 })
+  expect(screen.getByText('workspace')).toBeTruthy()
+  expect(screen.queryByText('Checking the video game workspace…')).toBeNull()
+})
+
+test('starts the workflow shell without showing a checking screen while status is pending', () => {
+  client.gamePackage.status.mockReturnValue(new Promise(() => {}))
+
+  render(<GameBootstrap autoInitialize onBoot={vi.fn()}><div>workspace</div></GameBootstrap>)
+
+  expect(screen.getByText('workspace')).toBeTruthy()
+  expect(screen.queryByText('Checking the video game workspace…')).toBeNull()
+})
+
+test('boots a partial package once the blueprint already exists', async () => {
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'partial', missing: ['assets/manifest.json'] })
+  const boot = vi.fn()
+
+  render(<GameBootstrap autoInitialize onBoot={boot}><div>workspace</div></GameBootstrap>)
+
+  await waitFor(() => expect(boot).toHaveBeenCalledWith('accepted-game'))
+  expect(screen.getByText('workspace')).toBeTruthy()
 })
 
 test('still shows the guide for an uninitialized package when autoInitialize is off', async () => {

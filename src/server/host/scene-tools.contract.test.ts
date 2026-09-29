@@ -4,6 +4,7 @@ import manifest from '../../../forgeax-extension.json'
 import patchScenesArgs from '../../../schemas/patch-scenes.args.json'
 import generateScenePreviewsArgs from '../../../schemas/generate-scene-previews.args.json'
 import { ACTIVITY_CONTRACTS } from '../../workflow/activity-contracts'
+import { qualifyAsMateMcpName, toMcpName } from '../../workflow/mcp-tool-name'
 
 /**
  * 接线契约：活动契约里授权的工具必须真实存在。
@@ -31,19 +32,19 @@ describe('场景工具已接线', () => {
 
   it('assets.scene 授权 patch_scenes 以便交付后新建仅资产库场景', () => {
     expect(ACTIVITY_CONTRACTS['assets.scene'].allowedToolNames).toContain(
-      'mcp__as-mate-tools__extension__game_video__patch_scenes',
+      qualifyAsMateMcpName(toMcpName('game-video:patch-scenes')),
     )
   })
 
   it('活动契约授权的每个扩展工具都真实存在', () => {
-    const declared = new Set(
-      Object.values(ACTIVITY_CONTRACTS)
-        .flatMap((contract) => contract.allowedToolNames)
-        .filter((name) => name.includes('game_video__'))
-        // MCP 名 `..._game_video__patch_scenes` → 工具 id `game-video:patch-scenes`
-        .map((name) => `game-video:${name.split('game_video__')[1]!.replace(/_/g, '-')}`),
+    const exposed = new Set(
+      manifest.contributes.tools
+        .filter((tool) => tool.exposedToAI)
+        .map((tool) => qualifyAsMateMcpName(toMcpName(tool.id))),
     )
-    const missing = [...declared].filter((id) => !toolIds.has(id))
+    const missing = Object.values(ACTIVITY_CONTRACTS)
+      .flatMap((contract) => contract.allowedToolNames)
+      .filter((name) => !exposed.has(name))
     expect(missing).toEqual([])
   })
 

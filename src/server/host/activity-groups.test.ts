@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import beginActivitySchema from '../../../schemas/begin-activity.args.json'
 import { ACTIVITY_CONTRACTS } from '../../workflow/activity-contracts'
+import { gameVideoMcpToolName } from '../../workflow/mcp-tool-name'
 import {
   ACTIVITY_GROUPS,
   ASSET_PIPELINE_ACTIVITIES,
@@ -111,11 +112,26 @@ describe('activity groups', () => {
     expect(isWriteScopeAllowed('rules.binding', ['graph', 'ui'])).toBe(true)
   })
 
-  it('makes finalizing the full blueprint writer', () => {
+  // 写域保留（编译器写的正是 graph/ui/rules 这三个域），但工具面为空：
+  // 写这三个域的是 Host 的编译器，不是某个 agent。
+  it('keeps the full blueprint write scope on finalizing while granting it no tools', () => {
     expect(isWriteScopeAllowed('game.finalizing', ['graph', 'ui', 'rules'])).toBe(true)
-    const contract = ACTIVITY_CONTRACTS['game.finalizing']
-    expect(contract.allowedToolNames).toContain('mcp__as-mate-tools__extension__game_video__patch_rules')
-    expect(contract.domainGuide).not.toContain('不得在本活动新增或修改界面结构')
+    expect(ACTIVITY_CONTRACTS['game.finalizing'].allowedToolNames).toEqual([])
+  })
+
+  // 交付投影没有 agent 工具面：可玩性已在支柱确认前由 Host 验证。
+  it('denies playtest.validating any write scope on the compiled blueprint', () => {
+    expect(isWriteScopeAllowed('playtest.validating', ['graph'])).toBe(false)
+    expect(isWriteScopeAllowed('playtest.validating', ['ui'])).toBe(false)
+    expect(isWriteScopeAllowed('playtest.validating', ['rules'])).toBe(false)
+  })
+
+  it('denies playtest.validating any tool that rewrites the compiled blueprint', () => {
+    const allowed = ACTIVITY_CONTRACTS['playtest.validating'].allowedToolNames
+    for (const forbidden of ['patch-graph', 'configure-blueprint-node', 'patch-rules'] as const) {
+      expect(allowed, forbidden).not.toContain(gameVideoMcpToolName(forbidden))
+    }
+    expect(allowed).toEqual([])
   })
 
   it('declares a contract for every activity', () => {

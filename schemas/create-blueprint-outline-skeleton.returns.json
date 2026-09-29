@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:create-blueprint-outline-skeleton returns",
+  "type": "object",
+  "description": "Creates every outline node in one skeleton transaction. Returns the new revision, node count, pending node ids and a canvas focus hint. It intentionally does not require the incomplete graph to pass final outline checks."
+}

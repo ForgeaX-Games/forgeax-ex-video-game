@@ -11,9 +11,7 @@ import { t as translateUi } from '../../i18n'
  *   - 时间轴：第 0 轨投影只读视频条，其后按挂载级投影（`collectMountItemsFromNode`：
  *     一份挂载 = 一条）；循环视频另有仅限视频轨高度的媒体局部指针，节点逻辑播放头保持单调。
  *     拖动挂载条整体平移挂载内子件、删除移除整份挂载，写回
- *     `patchMaterialGraph`（mount 分支 → shiftMountWindowGraph）/`deleteMaterialGraph`；
- *   - 「添加控件」条 = **覆盖物挂载入口**：前 5 个未挂载的预设覆盖物点击直接挂载，
- *     第 6 个「更多」展开完整列表（等价 NodeInspector 的「＋挂载」）。
+ *     `patchMaterialGraph`（mount 分支 → shiftMountWindowGraph）/`deleteMaterialGraph`。
  *
  * 选中联动：点预览叠层 / 时间轴挂载条 → 上抛 `onFocusMount(mountId)`，右侧 NodeInspector
  * 据此只聚焦展开该覆盖物的配置卡片（其余折叠）。
@@ -38,12 +36,10 @@ import { resolveCatalogMediaSrc } from './media'
 import { useAssetCatalog } from '@/editor/assets/asset-catalog'
 import { videoDurationCapReached } from '@/runtime/react/play/videoTiming'
 import { resolveMountLayoutForChildren } from '@/runtime/core/schema/layout'
-import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
+import { MaterialTimeline } from '../video/MaterialTimeline'
 import { settlementInsertMsBeforePlayhead, type MaterialItem } from '../video/materialTimelineShared'
 import { collectNodeTimelineMarkers } from '../video/nodeTimelineMarkers'
 import { useVideoContentRect } from '@/runtime/react/play/useVideoContentRect'
-import { overlayDisplayLabel } from './schemeOverlays'
-import { listSchemeAndBaseOverlayIds } from '@/authoring/demo/builtin-schemes'
 import {
   overlayMountId,
 } from '@/runtime/core/schema/node-config-schema'
@@ -151,26 +147,6 @@ const NPS_CSS = `
 .nps-timeline-toggle-icon.is-collapse::before { transform: translate(-50%, -50%) rotate(225deg); }
 .nps-fx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
 .nps-fx-layer > div { position: absolute; inset: 0; }
-.nps-addbar { position: relative; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; flex: none; }
-.nps-addbar-label { font-size: 10px; letter-spacing: .08em; color: var(--gc-faint); margin-right: 2px; }
-.nps-addbar button {
-  display: inline-flex; align-items: center; gap: 4px;
-  border: 1px solid var(--gc-line-soft); background: var(--gc-panel2); color: var(--gc-text);
-  border-radius: 7px; padding: 3px 8px; font-size: 11px; cursor: pointer;
-}
-.nps-addbar button:hover:not(:disabled) { border-color: var(--gc-accent); background: var(--gc-accent-soft); }
-.nps-addbar button:disabled { opacity: .38; cursor: default; }
-.nps-addbar .nps-add-chip::before { content: "＋"; opacity: .7; }
-.nps-addbar-empty { font-size: 10px; color: var(--gc-faint); opacity: .8; }
-.nps-more-pop {
-  position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
-  min-width: 200px; max-width: 280px; max-height: 260px; overflow-y: auto;
-  background: var(--gc-panel); border: 1px solid var(--gc-line); border-radius: 9px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 5px; display: flex; flex-direction: column; gap: 2px;
-}
-.nps-more-pop button { justify-content: flex-start; width: 100%; border-color: transparent; background: transparent; }
-.nps-more-pop button:hover { background: var(--gc-accent-soft); border-color: var(--gc-accent-line); }
-.nps-more-empty { font-size: 11px; color: var(--gc-faint); padding: 6px 8px; }
 /* 时间轴宿主列：占满预览列剩余竖直空间（flex 链定界），轨道超出时滚动发生在时间轴视口内部，
    而不是顶高整列。mtl-root 沿链接力；视口自身地板高度由 --gc-timeline-h 保底。 */
 .nps-root .nps-timeline-host { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -341,7 +317,6 @@ function EditableNodePreviewStage({
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
   const [selectedSettlementSpawnId, setSelectedSettlementSpawnId] = useState<string | null>(null)
-  const [moreOpen, setMoreOpen] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const mountPreviewRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const settlementSpawnPreviewRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -506,19 +481,6 @@ function EditableNodePreviewStage({
   }, [scenario, node, playheadMs, maxMs])
   const previewClockValue = useMemo(() => ({ playing: isVideoPlaying, playheadMs }), [isVideoPlaying, playheadMs])
 
-  // 「添加控件」= 覆盖物挂载入口：候选与界面 tab 同一份（自定义覆盖物 + 基础覆盖物，打平；
-  // 见 builtin-schemes），已挂载的排除，前 5 直接列出，其余进「更多」。
-  const mountedOverlayIds = useMemo(
-    () => new Set((node.data.overlayNodes ?? []).map((m) => m.overlay)),
-    [node.data.overlayNodes],
-  )
-  const mountCandidateIds = useMemo(
-    () => listSchemeAndBaseOverlayIds(overlays).filter((id) => !mountedOverlayIds.has(id)),
-    [overlays, mountedOverlayIds],
-  )
-  const primaryCandidateIds = mountCandidateIds.slice(0, 5)
-  const moreCandidateIds = mountCandidateIds.slice(5)
-
   useEffect(() => {
     setSelectedOverlayId(selectedMountId)
     if (selectedMountId) setSelectedSettlementSpawnId(null)
@@ -533,7 +495,6 @@ function EditableNodePreviewStage({
     setIsVideoPlaying(false)
     setVideoDurationMs(null)
     setLoadError(false)
-    setMoreOpen(false)
     setSelectedOverlayId(focusedMountId ?? null)
     const video = videoRef.current
     if (video) {
@@ -691,7 +652,7 @@ function EditableNodePreviewStage({
       graph: setSettlementReactionMs(scenarioToEdit.graph, nodeToEdit.id, lifecycleIndex, ms),
     }))
   }
-  /** 「添加控件」点击 / 拖入：挂载一张覆盖物（可带落点 ms → 整体平移到该时刻）。 */
+  /** 时间轴拖入模板：挂载一张覆盖物（可带落点 ms → 整体平移到该时刻）。 */
   function mountOverlay(overlayId: string, atMs?: number): void {
     onEditScenario((s, n) => {
       const s1 = mountOverlayGraph(s, n, overlayId)
@@ -700,7 +661,6 @@ function EditableNodePreviewStage({
       return shiftMountWindowGraph(s1, n1, maxMs, overlayId, { startMs: atMs })
     })
     focusMount(overlayId)
-    setMoreOpen(false)
   }
 
   // ── 预览叠层画布（共享 OverlayCanvasInteraction）──────────────────────────
@@ -1110,52 +1070,6 @@ function EditableNodePreviewStage({
           <span className="nps-hud-time">{formatPreviewTime(playheadMs)}<span> / {formatPreviewTime(maxMs)}</span></span>
           {timelineToggle}
         </div>
-      </div>
-
-      {/* 「添加控件」= 覆盖物挂载入口：前 5 个未挂载覆盖物点击直接挂载，「更多」展开完整列表。 先暂时隐藏 */}
-      <div className="nps-addbar" style={{ display: 'none' }}>
-        <span className="nps-addbar-label">{translateUi('ui.copy.4e9017ca7a1e')}</span>
-        {primaryCandidateIds.length === 0 && moreCandidateIds.length === 0 ? (
-          <span className="nps-addbar-empty">{translateUi('ui.copy.f1489c98049a')}</span>
-        ) : null}
-        {primaryCandidateIds.map((id) => (
-          <button
-            key={id}
-            type="button"
-            className="nps-add-chip"
-            title={`${translateUi('ui.template.53b2a4c635b4')}${overlayDisplayLabel(id, overlays)}${translateUi('ui.template.9808568a716a')}`}
-            draggable
-            onClick={() => mountOverlay(id)}
-            onDragStart={(e) => {
-              e.dataTransfer.setData(MATERIAL_DND_MIME, id)
-              e.dataTransfer.effectAllowed = 'copy'
-            }}
-          >
-            {overlays?.[id]?.title?.trim() || id}
-          </button>
-        ))}
-        {moreCandidateIds.length > 0 ? (
-          <button
-            type="button"
-            className="nps-add-chip"
-            title={translateUi('ui.copy.4842599ef521')}
-            onClick={() => setMoreOpen((v) => !v)}
-          >
-            {translateUi('ui.copy.1d0df48b77d4')}</button>
-        ) : null}
-        {moreOpen ? (
-          <div className="nps-more-pop" onPointerLeave={() => setMoreOpen(false)}>
-            {moreCandidateIds.length === 0 ? (
-              <div className="nps-more-empty">{translateUi('ui.copy.643069829da6')}</div>
-            ) : (
-              moreCandidateIds.map((id) => (
-                <button key={id} type="button" onClick={() => mountOverlay(id)}>
-                  {overlayDisplayLabel(id, overlays)}
-                </button>
-              ))
-            )}
-          </div>
-        ) : null}
       </div>
 
       {timelineExpanded ? (

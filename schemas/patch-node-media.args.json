@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "wb-game-video:patch-node-media args",
+  "title": "game-video:patch-node-media args",
   "type": "object",
   "additionalProperties": false,
   "required": [

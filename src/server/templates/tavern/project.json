@@ -1,0 +1,10 @@
+{
+  "id": "__GAME_ID__",
+  "title": "__GAME_ID__",
+  "platform": "game-video",
+  "platformVersion": "1",
+  "entry": {
+    "blueprint": "blueprint.json",
+    "components": "dist/components"
+  }
+}

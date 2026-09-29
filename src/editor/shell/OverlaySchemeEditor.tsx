@@ -2,16 +2,16 @@ import { t as translateUi, tf as formatUi, useLocale } from '../../i18n'
 /**
  * OverlaySchemeEditor —— 单个「界面方案」（overlay）的展示 + 编辑。
  * 中栏 = 标题 + 画布 + 控件库/图层 tabs；右栏 = 选中组件的参数与事件。
- * 基础界面保留只读居中预览，但不显示设计框、不允许结构编辑，也不展示控件库。
  * 组件增删改经回调交给持有 scenario.ui.overlays 的上层（GraphConfigView）。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import type { CSSProperties, JSX } from 'react'
 import { createPortal } from 'react-dom'
 import { getInspectorMountOptions } from '@/editor/host-init'
 import type { Entity, Layout, Overlay, OverlayReaction, Variable } from '@/runtime/core/schema/graph-schema'
 import { OverlayCatalogPreview } from './OverlayCatalogPreview'
 import { ComponentLibrary } from './ComponentLibrary'
+import { CatalogSearchInput } from './CatalogSearchInput'
 import { componentTypeLabel } from './editors'
 import type { Formula } from '@/authoring/blueprint/formula-authoring'
 import {
@@ -27,11 +27,6 @@ import {
   keyConflictChildIds,
 } from './keyBindingConflicts'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
-import {
-  isPromptPolishUnavailableError,
-  OVERLAY_PROMPT_MAX_LENGTH,
-  polishOverlayPrompt,
-} from '@/editor/assets/generation/prompt-polish-api'
 
 const WORKSPACE_CSS = `
 .ose-root {
@@ -51,20 +46,22 @@ const WORKSPACE_CSS = `
   display:flex; flex:1 1 0; flex-direction:column; min-height:184px; overflow:hidden;
   background:#2c2c2c;
 }
+.ose-bottom.is-library { gap:16px; box-sizing:border-box; padding:16px; background:#333; }
+.ose-bottom.is-library .ose-panel,
+.ose-bottom.is-library .ocl-root { display:contents; }
+.ose-bottom.is-library .ocl-grid { padding:0; }
+.ose-bottom.is-library .ose-layers { padding:0; }
 .ose-stage-resizer {
-  position:relative; z-index:90; flex:0 0 5px; width:100%; padding:0; border:0;
-  border-top:1px solid rgba(255,255,255,.2); border-bottom:1px solid #1f1f1f;
-  background:#2c2c2c; cursor:ns-resize; touch-action:none;
+  position:absolute; z-index:90; top:var(--ose-stage-height); right:0; left:0;
+  width:100%; height:8px; padding:0; transform:translateY(-50%); border:0;
+  background:transparent; cursor:ns-resize; touch-action:none;
 }
-.ose-stage-resizer::after {
-  content:''; position:absolute; left:50%; top:1px; width:28px; height:1px;
-  transform:translateX(-50%); background:rgba(255,255,255,.28);
+.ose-stage-resizer:focus-visible { outline:2px solid #ff9c2a; outline-offset:-2px; }
+.ose-bottom-header {
+  display:flex; flex:none; align-items:center; height:31px; padding:0; box-sizing:border-box;
 }
-.ose-stage-resizer:hover,.ose-stage-resizer:focus-visible { background:#3a3a3a; outline:none; }
-.ose-stage-resizer:hover::after,.ose-stage-resizer:focus-visible::after { background:#ff9c2a; }
-.ose-stage-resizer:active { cursor:ns-resize; }
 .ose-tabs {
-  display:flex; flex:none; align-items:stretch; gap:18px; height:42px; padding:0 14px;
+  display:flex; align-self:stretch; align-items:stretch; gap:18px;
 }
 .ose-tabs button {
   position:relative; border:0; padding:0 2px; background:transparent; color:#a4a4a4;
@@ -72,15 +69,17 @@ const WORKSPACE_CSS = `
 }
 .ose-tabs button:hover { background:transparent; }
 .ose-tabs button[aria-selected="true"] { color:#ff9c2a; }
+.ose-bottom-header .catalog-search { margin-left:auto; }
 .ose-panel { flex:1; min-height:0; overflow:hidden; }
 .ose-layers { height:100%; padding:12px 14px 16px; box-sizing:border-box; overflow:auto; }
+.ose-layer-list { display:flex; flex-direction:column; gap:0; padding:0; }
 .ose-layer {
   display:flex; width:100%; gap:8px; align-items:center; box-sizing:border-box; min-height:32px;
   padding:5px 8px; border:1px solid transparent; border-bottom-color:rgba(255,255,255,.1);
   border-radius:0; cursor:pointer;
   text-align:left; background:transparent; color:#bbb;
 }
-.ose-layers.is-sortable .ose-layer { cursor:grab; touch-action:none; user-select:none; }
+.ose-layers.is-sortable .ose-layer { min-height:0; height:auto; padding:8px; cursor:grab; touch-action:none; user-select:none; }
 .ose-layers.is-dragging .ose-layer { cursor:grabbing; }
 .ose-layer.is-dragging { opacity:.55; }
 .ose-layer.is-drop-before,.ose-layer.is-drop-after { position:relative; }
@@ -90,12 +89,12 @@ const WORKSPACE_CSS = `
 }
 .ose-layer.is-drop-before::before { top:-1px; }
 .ose-layer.is-drop-after::after { bottom:-1px; }
-.ose-layer:hover { background:#363636; }
+.ose-layer:hover { background:rgba(255,255,255,.1); }
 .ose-layer:focus-visible { outline:2px solid #ff9c2a; outline-offset:-2px; }
 .ose-layer[aria-pressed="true"] { border-color:#ff9c2a; background:rgba(255,156,42,.1); color:#f1f1f1; }
 .ose-layer-dot { flex:none; width:7px; height:7px; border-radius:50%; background:#686868; }
 .ose-layer[aria-pressed="true"] .ose-layer-dot { background:#ff9c2a; box-shadow:0 0 0 3px rgba(255,156,42,.16); }
-.ose-layer-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ose-layer-label { flex:1; min-width:0; height:26px; padding:2px 0; overflow:hidden; font-size:16px; text-overflow:ellipsis; white-space:nowrap; }
 .ose-layer-id { opacity:.42; margin-left:6px; }
 .ose-sr-only {
   position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
@@ -105,26 +104,6 @@ const WORKSPACE_CSS = `
   flex:0 1 480px !important; width:39.3% !important; max-width:480px !important; min-width:280px !important;
   border-left-color:#1f1f1f !important; background:#2c2c2c !important;
 }
-.ose-prompt-editor {
-  display:flex; flex:none; align-items:center; gap:8px; padding:8px 14px;
-  border-bottom:1px solid rgba(255,255,255,.08); background:#303030;
-}
-.ose-prompt-editor-label { flex:none; font-size:11px; font-weight:600; color:#cfcfcf; }
-.ose-prompt-editor input {
-  flex:1; min-width:0; height:26px; padding:0 8px; box-sizing:border-box;
-  border:1px solid #1f1f1f; border-radius:4px; background:#242424; color:#e6e6e6;
-  font:inherit; font-size:12px;
-}
-.ose-prompt-editor input:focus-visible { outline:2px solid #ff9c2a; outline-offset:-1px; }
-.ose-prompt-polish {
-  flex:none; display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 10px;
-  border:1px solid rgba(255,156,42,.45); border-radius:4px;
-  background:rgba(255,156,42,.1); color:#ffb566; font:inherit; font-size:11px; cursor:pointer;
-}
-.ose-prompt-polish:hover:not(:disabled) { background:rgba(255,156,42,.18); }
-.ose-prompt-polish:disabled { opacity:.55; cursor:default; }
-.ose-prompt-editor-foot { flex:none; font-size:10px; line-height:1.3; max-width:180px; color:#8a8a8a; }
-.ose-prompt-editor-foot.is-error { color:#ff8d8d; }
 `
 
 function topmostChildId(children: Overlay['children']): string {
@@ -259,8 +238,6 @@ export interface OverlaySchemeEditorProps {
   duplicateOf?: readonly string[]
   onRename: (title: string) => void
   onRemove: () => void
-  /** 模板简介（Overlay.prompt）手动修改写回。 */
-  onPromptChange: (prompt: string) => void
   /** 组件库拖到画布落地：presetId（可选带初始 place）；返回新 child id（用于选中 + 拖入吸附）。 */
   onAddChild: (
     presetId: string,
@@ -294,7 +271,6 @@ export function OverlaySchemeEditor({
   onPatchChild,
   onReorderChildren,
   onReactionsChange,
-  onPromptChange,
   onCreateEntityAttribute,
   onCreateEntity,
   onCreateVariable,
@@ -302,16 +278,13 @@ export function OverlaySchemeEditor({
 }: OverlaySchemeEditorProps): JSX.Element {
   injectStyleOnce('overlay-scheme-workspace', WORKSPACE_CSS)
   const [selectedChildId, setSelectedChildId] = useState('')
-  // 模板简介（Overlay.prompt）：本地草稿失焦写回；「AI 润色」异步替换草稿并写回。
-  const [promptDraft, setPromptDraft] = useState<string | null>(null)
-  const [promptPolishing, setPromptPolishing] = useState(false)
-  const [promptPolishError, setPromptPolishError] = useState<string | null>(null)
   const workspaceRef = useRef<HTMLElement>(null)
   const resizingStageRef = useRef(false)
   const [stagePercent, setStagePercent] = useState(56)
   const [bottomTab, setBottomTab] = useState<'library' | 'layers'>(
     locked || overlay.children.length > 0 ? 'layers' : 'library',
   )
+  const [libraryQuery, setLibraryQuery] = useState('')
   const layerPressRef = useRef<{
     childId: string
     pointerId: number
@@ -416,6 +389,7 @@ export function OverlaySchemeEditor({
 
   useEffect(() => {
     setBottomTab(locked || overlay.children.length > 0 ? 'layers' : 'library')
+    setLibraryQuery('')
   }, [locked, overlayId])
 
   // 进入方案时默认选中视觉最上层组件（zIndex 高者优先，同层级后渲染者优先）；
@@ -427,41 +401,6 @@ export function OverlaySchemeEditor({
         ? current
         : topmostChildId(overlay.children))
   }, [overlayId, overlay.children])
-
-  // 切方案时清掉提示词本地草稿与润色态，让文本区回到该方案的落盘值。
-  useEffect(() => {
-    setPromptDraft(null)
-    setPromptPolishError(null)
-  }, [overlayId])
-
-  const promptValue = promptDraft ?? overlay.prompt ?? ''
-  const commitPrompt = (value: string): void => {
-    const trimmed = value.trim()
-    // 落盘值与输入一致时不写，避免无谓的 zundo 历史。
-    if (trimmed === (overlay.prompt ?? '')) {
-      setPromptDraft(null)
-      return
-    }
-    onPromptChange(trimmed)
-    setPromptDraft(null)
-  }
-  const polishPrompt = async (): Promise<void> => {
-    setPromptPolishing(true)
-    setPromptPolishError(null)
-    try {
-      const polished = await polishOverlayPrompt(promptValue, overlay.title ?? overlayId)
-      onPromptChange(polished)
-      setPromptDraft(null)
-    } catch (error) {
-      setPromptPolishError(translateUi(
-        isPromptPolishUnavailableError(error)
-          ? 'overlayPrompt.polishUnavailable'
-          : 'overlayPrompt.polishFailed',
-      ))
-    } finally {
-      setPromptPolishing(false)
-    }
-  }
 
   // Backspace/Delete 删除选中组件；经 onRemoveChild→setMeta 天然进 zundo 撤销历史。锁定态（基础覆盖物）不删。
   // 护栏：输入框/下拉/可编辑区、以及焦点在左侧方案列表（.gc-list）内一律放行给它们。
@@ -665,6 +604,7 @@ export function OverlaySchemeEditor({
         <button
           type="button"
           className="ose-stage-resizer"
+          style={{ '--ose-stage-height': `min(${stagePercent}%, calc(100% - ${MIN_BOTTOM_HEIGHT_PX}px), 56.25cqw)` } as CSSProperties}
           role="separator"
           aria-label={translateUi('ui.copy.c1d794ca8074')}
           aria-orientation="horizontal"
@@ -703,71 +643,42 @@ export function OverlaySchemeEditor({
           }}
         />
 
-        <div className="ose-prompt-editor" data-testid="overlay-prompt-editor">
-          <label className="ose-prompt-editor-label" htmlFor={`ose-prompt-${overlayId}`}>
-            {translateUi('overlayPrompt.label')}
-          </label>
-          <input
-            id={`ose-prompt-${overlayId}`}
-            value={promptValue}
-            maxLength={OVERLAY_PROMPT_MAX_LENGTH}
-            placeholder={translateUi('overlayPrompt.placeholder')}
-            onChange={(event) => setPromptDraft(event.target.value)}
-            onBlur={(event) => commitPrompt(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                commitPrompt(event.currentTarget.value)
-              }
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                setPromptDraft(null)
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="ose-prompt-polish"
-            disabled={promptPolishing}
-            onClick={polishPrompt}
-          >
-            {promptPolishing
-              ? translateUi('overlayPrompt.polishing')
-              : translateUi('overlayPrompt.polish')}
-          </button>
-          {promptPolishError ? (
-            <span className="ose-prompt-editor-foot is-error" role="status">
-              {promptPolishError}
-            </span>
-          ) : (
-            <span className="ose-prompt-editor-foot">
-              {translateUi('overlayPrompt.help')}
-            </span>
-          )}
-        </div>
-
-        <section className="ose-bottom" data-testid="overlay-library-region">
-          <div role="tablist" aria-label={translateUi('ui.copy.473a19fc85a7')} className="ose-tabs">
-            {!locked ? (
+        <section className="ose-bottom is-library" data-testid="overlay-library-region">
+          <div className="ose-bottom-header">
+            <div role="tablist" aria-label={translateUi('ui.copy.473a19fc85a7')} className="ose-tabs">
+              {!locked ? (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomTab === 'library'}
+                  onClick={() => setBottomTab('library')}
+                >
+                  {translateUi('ui.copy.af222a3bb664')}</button>
+              ) : null}
               <button
                 type="button"
                 role="tab"
-                aria-selected={bottomTab === 'library'}
-                onClick={() => setBottomTab('library')}
+                aria-selected={bottomTab === 'layers'}
+                onClick={() => setBottomTab('layers')}
               >
-                {translateUi('ui.copy.af222a3bb664')}</button>
+                {translateUi('ui.copy.ec4bca7dcc30')}</button>
+            </div>
+            {!locked && bottomTab === 'library' ? (
+              <CatalogSearchInput
+                ariaLabel={translateUi('ui.copy.346e069b7cd4')}
+                placeholder={translateUi('ui.copy.346e069b7cd4')}
+                value={libraryQuery}
+                onChange={setLibraryQuery}
+              />
             ) : null}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={bottomTab === 'layers'}
-              onClick={() => setBottomTab('layers')}
-            >
-              {translateUi('ui.copy.ec4bca7dcc30')}</button>
           </div>
           {bottomTab === 'library' && !locked ? (
             <div role="tabpanel" aria-label={translateUi('ui.copy.af222a3bb664')} className="ose-panel">
-              <ComponentLibrary />
+              <ComponentLibrary
+                query={libraryQuery}
+                onQueryChange={setLibraryQuery}
+                showSearch={false}
+              />
             </div>
           ) : (
             <div
@@ -783,6 +694,7 @@ export function OverlaySchemeEditor({
               {overlay.children.length === 0 ? (
                 <div style={{ fontSize: 11, opacity: 0.5 }}>{translateUi('ui.copy.e18f9be2c6df')}</div>
               ) : null}
+              <div className="ose-layer-list">
               {orderedLayers.map((child) => {
                 const selected = child.id === selectedChildId
                 const hotspotWarn = warnIds.has(child.id)
@@ -834,6 +746,7 @@ export function OverlaySchemeEditor({
                   </button>
                 )
               })}
+              </div>
               <div className="ose-sr-only" role="status" aria-live="polite">
                 {layerAnnouncementText}
               </div>

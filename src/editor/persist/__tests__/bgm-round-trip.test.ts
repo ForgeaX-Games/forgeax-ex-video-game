@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { documentFromBlueprints, metaFromDocument, normalizeDocument, MAIN_ID } from '@/authoring/blueprint/blueprint-project'
 import { useGraphScenario } from '../graphScenarioStore'
-import { NODIA_DEMO_PROJECT } from '@/authoring/demo/demo'
+import { EMPTY_LIBRARY_DOCUMENT } from '@/authoring/blueprint/empty-library'
 import type { BlueprintDoc, DocumentBgm, GraphLibraryDocument } from '@/runtime/core/schema/graph-schema'
 
 const BED: DocumentBgm = { ref: 'bgm-story', loop: true }
@@ -51,7 +51,7 @@ describe('document bgm survives the persist round-trip', () => {
 
 describe('store meta.bgm reaches the persisted + runtime scenario', () => {
   beforeEach(() => {
-    const p = structuredClone(NODIA_DEMO_PROJECT)
+    const p = structuredClone(EMPTY_LIBRARY_DOCUMENT)
     const mainId = p.manifest.mainPackId
     useGraphScenario.setState({
       blueprints: p.manifest.packs,

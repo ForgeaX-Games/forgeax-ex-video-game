@@ -191,6 +191,34 @@ describe('总脉络稳定 ID 级资产声明', () => {
     })
   })
 
+  it('在总脉络完成门直接拒绝下游无法建模的稳定 ID', async () => {
+    const context = createContext('blueprint.outline')
+    const service = createGameVideoService(context)
+    const result = await service.patchGraph({
+      ops: [{
+        op: 'set-node-data',
+        nodeId: 'entry',
+        patch: {
+          cast: [{ characterId: 'lu-su' }],
+          scenes: [{ sceneId: 'cao-chuan' }],
+        },
+      }],
+    }) as { ok: boolean }
+    expect(result.ok).toBe(true)
+
+    const declaration = await validateProjectForActivity(
+      context,
+      'blueprint.outline',
+      1,
+      ['outline.declarations-complete'],
+    )
+    const codes = declaration.evidence[0]!.issues?.map((entry) => entry.code) ?? []
+    expect(codes).toEqual(expect.arrayContaining([
+      'outline.character.invalid-id',
+      'outline.scene.invalid-id',
+    ]))
+  })
+
   it('资产定义尚未补齐时 game.finalizing 仍可继续修改蓝图逻辑', async () => {
     const context = createContext('blueprint.outline')
     const service = createGameVideoService(context)

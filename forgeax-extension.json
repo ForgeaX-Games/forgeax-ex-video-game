@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "@forgeax-extension/game-video",
-  "version": "0.26.1",
+  "version": "0.27.11",
   "displayName": {
     "zh": "视频游戏",
     "en": "Video Game Studio"
@@ -50,12 +50,16 @@
             "children": [
               {
                 "kind": "tabs",
-                "placements": ["sidebar"],
+                "placements": [
+                  "sidebar"
+                ],
                 "active": "sidebar"
               },
               {
                 "kind": "tabs",
-                "placements": ["workspace"],
+                "placements": [
+                  "workspace"
+                ],
                 "active": "workspace"
               }
             ]
@@ -144,8 +148,48 @@
         "returns": "./schemas/patch-graph.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "对宿主绑定游戏的蓝图执行原子增量修改。新建演出节点时写入 data.media.prompt 作为后续 Kino 视频生成的基础 prompt，真实视频生成前省略 media.ref。可选 blueprintId 指定蓝图，任一步失败或整本校验失败均不写盘。两种嵌套互斥、别混用：内嵌子流程 = attach-sub-process（节点私有子图，不接受 packId）；子蓝图 = make-empty-sub-flow-pack 建包后必须再用 set-sub-flow-pack 把节点指向它，只建包不绑定的子蓝图运行时永远进不去。",
-          "en": "Atomically patch a blueprint in the host-bound game. New performance nodes carry data.media.prompt as the base prompt for later Kino generation and omit media.ref until a real video exists. Optionally select blueprintId; any operation or document validation failure prevents all writes. The two nesting modes are mutually exclusive: an inline sub-process is attach-sub-process (node-private child graph, takes no packId), while a reusable blueprint needs make-empty-sub-flow-pack followed by set-sub-flow-pack to bind it to a node — a blueprint that is created but never bound is unreachable at runtime."
+          "zh": "对宿主绑定游戏执行原子蓝图库与拓扑事务：新建、重命名、删除、设为主蓝图；新增、删除、前后插入、复制、移动节点；以及新增、删除、保留 edgeId 改目标连线。这些操作复用前端相同的 authoring 领域方法。界面事件或结算连线优先使用 configure-blueprint-node。已交付项目可按作者明确对话指令继续修改且不重开 workflow。新建演出节点时写入 data.media.prompt 作为后续 Kino 视频生成的基础 prompt，真实视频生成前省略 media.ref。可选 blueprintId 指定蓝图，任一步失败或整本校验失败均不写盘。两种嵌套互斥：内嵌子流程使用 attach-sub-process；可复用子蓝图先 create-blueprint，再用 set-sub-flow-pack 绑定。",
+          "en": "Atomically edit host-bound graph topology through the same authoring primitives as the canvas: add, remove, insert, duplicate, or move nodes, and connect, disconnect, or retarget edges while preserving edge ids. Use configure-blueprint-node for interface-event and settlement routes. Delivered projects remain editable from explicit author requests without reopening workflow. New performance nodes carry data.media.prompt for later Kino generation and omit media.ref until a real video exists. Any failed operation or document validation prevents all writes. Inline sub-processes use attach-sub-process; reusable blueprints require make-empty-sub-flow-pack followed by set-sub-flow-pack."
+        }
+      },
+      {
+        "id": "game-video:compile-blueprint-outline",
+        "args": "./schemas/compile-blueprint-outline.args.json",
+        "returns": "./schemas/compile-blueprint-outline.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "仅在 blueprint.outline 中把 chapters/routes 紧凑领域意图编译为完整蓝图：不超过 20KB 时直接编译；超限时用 planId/batchIndex/batchCount 暂存 2～4 个完整章节批次，最后一批 commit=true。中间批次不写蓝图、不增加 revision；最终把意图转换为与前端画布相同的 add-node/connect 标准命令，在同一文件锁、幂等回执和校验事务中原子执行。工具不接受完整 nodes/edges；局部维护使用 patch-graph。",
+          "en": "During blueprint.outline, compile compact chapters/routes intents directly when the request is at most 20KB, or stage 2-4 coherent chapter batches with planId/batchIndex/batchCount and commit on the final call. Intermediate batches do not mutate the blueprint or revision. The final transaction materializes and atomically executes the same add-node/connect commands used by the canvas. Full nodes/edges are not accepted; use patch-graph for local maintenance."
+        }
+      },
+      {
+        "id": "game-video:create-blueprint-outline-skeleton",
+        "args": "./schemas/create-blueprint-outline-skeleton.args.json",
+        "returns": "./schemas/create-blueprint-outline-skeleton.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "仅在 blueprint.outline 中先创建完整节点骨架：一次提交稳定节点 ID、名称、支柱节拍、类型、角色/场景 ID 和画布位置，不创建边、不要求未完成蓝图通过全图门。成功后画布立即展示全部节点，后续必须逐节点调用 configure-blueprint-outline-node。每个 stateMutationOwner=settlement 的支柱动作都需要一个 pillarBeatId 与该动作同节拍、beat=narrative 的结果章节；结果章节属于它所结算动作的节拍，而不是剧情推进到的下一个节拍。",
+          "en": "During blueprint.outline, create the complete node skeleton first: stable ids, names, pillar beats, beat types, cast/scene ids and positions. It creates no edges and intentionally allows the incomplete graph to fail final checks. Every stateMutationOwner=settlement action needs its own beat=narrative result chapter whose pillarBeatId equals the action's beat — a result chapter belongs to the beat of the action it settles, not the beat the story moves on to. Configure each visible node next with configure-blueprint-outline-node."
+        }
+      },
+      {
+        "id": "game-video:configure-blueprint-outline-node",
+        "args": "./schemas/configure-blueprint-outline-node.args.json",
+        "returns": "./schemas/configure-blueprint-outline-node.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "仅在 blueprint.outline 中逐个配置已存在节点的玩法契约与出边。一次调用完整替换一个节点的 actions、settlements、resolvesActions、loop/terminals 和 outgoingRoutes；失败只回滚当前节点事务，并返回 configured/pending 节点清单与当前全图硬校验。发现结果节点绑错节拍时用 pillarBeatId 就地改绑到它所结算动作的节拍，节点 ID、入边和章节名都会保留，不要重建骨架。",
+          "en": "During blueprint.outline, configure one existing skeleton node and its outgoing routes per call. The node transaction replaces actions, settlements, action resolutions, loop/terminals and outgoing routes. Pass pillarBeatId to re-bind a result node to the beat of the action it settles; the node keeps its id, incoming edges and chapter name, so never rebuild the skeleton for this. Failure rolls back only this node transaction and returns configured/pending node ids plus current graph checks."
+        }
+      },
+      {
+        "id": "game-video:configure-blueprint-node",
+        "args": "./schemas/configure-blueprint-node.args.json",
+        "returns": "./schemas/configure-blueprint-node.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "按节点配置面板语义原子增删改一个蓝图节点：一次提交界面、组件属性、事件响应、事件连线和时间轴/条件结算，也可结构化卸载界面、删除事件动作/连线、删除结算或解除结算界面绑定；删除会同步清理 reaction、advance 与孤儿边。已交付项目可按作者明确对话指令继续配置且不重开 workflow。任一步失败则整批不写盘；多节点应并行规划、按最新 revision 串行提交。",
+          "en": "Atomically create, update, or remove one blueprint node's interfaces, component properties, event responses, routes, and timeline or conditional settlements using the same cascading authoring semantics as the node inspector. A delivered project remains configurable from an explicit author request without reopening its workflow. Structured removals clean reactions, advance references, and orphaned edges. Any failed step prevents the entire write; serialize multi-node commits using the latest revision."
         }
       },
       {
@@ -164,8 +208,8 @@
         "returns": "./schemas/patch-rules.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "原子批量维护宿主绑定游戏的作者态规则目录：实体、实体属性、变量和公式。公式用 expressionText 提交，服务端以共享 parser 生成规范 AST 并校验全部引用；任一 op、引用或修订号检查失败则整批不写盘。改的是试玩的初值模板，不是正在运行的会话状态。节点/边上的 condition、effect、reaction 仍用 patch-graph 挂。",
-          "en": "Atomically maintain the host-bound game's author-time rule catalog: entities, entity attributes, variables, and formulas. Submit formulas as expressionText; the server parses them into the canonical AST with the shared parser and validates every reference. Any failed op, reference, or revision check prevents all writes. This edits the initial-state template a playthrough starts from, not a running session. Bind conditions, effects, and reactions onto nodes and edges with patch-graph."
+          "zh": "原子批量维护宿主绑定游戏的作者态规则目录：实体、实体属性、变量和公式；已交付项目可按作者明确对话指令继续修改且不重开 workflow。公式用 expressionText 提交，服务端以共享 parser 生成规范 AST 并校验全部引用；任一 op、引用或修订号检查失败则整批不写盘。改的是试玩的初值模板，不是正在运行的会话状态。节点/边上的 condition、effect、reaction 仍用 patch-graph 挂。",
+          "en": "Atomically maintain the host-bound game's author-time rule catalog: entities, entity attributes, variables, and formulas. A delivered project remains editable from an explicit author request without reopening its workflow. Submit formulas as expressionText; the server parses them into the canonical AST with the shared parser and validates every reference. Any failed op, reference, or revision check prevents all writes. This edits the initial-state template a playthrough starts from, not a running session. Bind conditions, effects, and reactions onto nodes and edges with patch-graph."
         }
       },
       {
@@ -294,8 +338,8 @@
         "returns": "./schemas/list-ui-components.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "只读列出平台内置界面元件的契约：每个元件抛什么事件、接受哪些输入键。配界面与结算前先查，别猜输入键。",
-          "en": "Read-only catalog of built-in UI components: the events each emits and the input keys it accepts."
+          "zh": "只读列出内置及当前游戏 authored 界面元件的契约：每个元件抛什么事件及 payload outputs、接受哪些输入键。配界面与结算前先查，别猜输入键或 eventPayload 字段。",
+          "en": "Read-only catalog of built-in and game-authored UI components: each component's events, payload outputs, and accepted input keys. Consult it before configuring interfaces and settlements instead of guessing input keys or eventPayload fields."
         }
       },
       {
@@ -334,8 +378,8 @@
         "returns": "./schemas/list-videos.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "列出内置演出视频库可用的 media.ref（basename）。编排节点绑视频前先调它看有哪些片段。",
-          "en": "List available built-in performance-video media.ref values (basenames). Call before binding videos to nodes."
+          "zh": "列出扩展内置演出视频的 media.ref。当前没有内置视频库，返回空列表；节点视频请用游戏资产或生成结果。",
+          "en": "List built-in performance-video media.ref values. There is no bundled library; the result is empty. Bind node video from game assets or generation."
         }
       },
       {
@@ -472,8 +516,8 @@
         "returns": "./schemas/upsert-component.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "在宿主绑定的真实游戏项目中新增或更新界面。单组件界面：不带 compose，输入 manifest 的 inputs/events 与无 import 的 React 实现，工具维护 structured definitions 并生成 components/index.js，控件以 base:<id> 出现在控件目录。多组件界面：带 compose，若所需控件当前游戏不具备则先在本调用里带 id/events/implementation 造一个新控件，再把 children 组装成一张可复用模板写入 ui.overlays（归模板目录，返回 overlayId 供后续挂载）；compose.children[].component 必须引用已知控件（内置、已 authored、或本调用新造）。",
-          "en": "Create or update UI in the host-bound real game project. Single-control interface: omit compose and provide manifest inputs/events plus an import-free React implementation; the tool maintains structured definitions and generates components/index.js, with the control appearing as base:<id> in the control catalog. Multi-control interface: provide compose; if a needed control does not exist yet, create it in the same call via id/events/implementation, then assemble children into a reusable template under ui.overlays (template catalog, returning overlayId for later mounting). compose.children[].component must reference a known control (built-in, previously authored, or created in this same call)."
+          "zh": "在宿主绑定的真实游戏项目中新增或更新界面。单组件界面：不带 compose，输入 manifest 的 inputs/events 与无 import 的 React 实现；事件可通过 outputs 声明 payload 字段，供 reaction 以 eventPayload.<key> 使用。工具维护 structured definitions 并生成 components/index.js，控件以 base:<id> 出现在控件目录。多组件界面：带 compose，若所需控件当前游戏不具备则先在本调用里带 id/events/implementation 造一个新控件，再把 children 组装成一张可复用模板写入 ui.overlays（归模板目录，返回 overlayId 供后续挂载）；compose.children[].component 必须引用已知控件（内置、已 authored、或本调用新造）。",
+          "en": "Create or update UI in the host-bound real game project. Single-control interface: omit compose and provide manifest inputs/events plus an import-free React implementation; events may declare payload fields through outputs for reactions to consume as eventPayload.<key>. The tool maintains structured definitions and generates components/index.js, with the control appearing as base:<id> in the control catalog. Multi-control interface: provide compose; if a needed control does not exist yet, create it in the same call via id/events/implementation, then assemble children into a reusable template under ui.overlays (template catalog, returning overlayId for later mounting). compose.children[].component must reference a known control (built-in, previously authored, or created in this same call)."
         }
       }
     ]

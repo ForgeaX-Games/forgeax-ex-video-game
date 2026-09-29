@@ -439,7 +439,7 @@
     },
     "graphNode": {
       "type": "object",
-      "description": "Graph node shape shared by add-node and insert-node-after. Canvas position { x, y } is mandatory when a full node is supplied — omitting it crashes the editor on position.x.",
+      "description": "add-node、insert-node-after 和 insert-node-before 共用的节点结构。传入完整节点时 position { x, y } 必填。",
       "required": [
         "id",
         "type",
@@ -559,6 +559,20 @@
             "$ref": "#/$defs/reaction"
           }
         },
+        "outcomeEvidence": {
+          "type": "array",
+          "description": "目标节点对上游互动结果的结构化呈现证明；由 blueprint.outline 设计并冻结。",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "sourceEdgeId", "presentation"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "sourceEdgeId": { "type": "string", "minLength": 1 },
+              "presentation": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
         "interaction": {
           "type": "object",
           "description": "本节拍的玩法契约（总脉络必填，三条线共享的唯一玩法设计）。数值线读 effect.formulaId 决定造哪些公式，汇总整装照它挂元件、接结算、连出口。完成门：outline.interaction-plan / rules.plan-formulas / finalization.plan-wired。",
@@ -576,6 +590,21 @@
               ],
               "description": "narrative = 有意的纯叙事段（观众只看，无需 actions）；其余四类必须给出 actions，否则判为漏配。"
             },
+            "sourcePillarBeatId": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{1,31}$",
+              "description": "支柱文档互动节拍中的稳定 ID，例如 B01。所有非纯叙事玩法必须能追溯到作者确认的支柱设计。"
+            },
+            "narrativeIntent": {
+              "type": "string",
+              "minLength": 1,
+              "description": "必须逐字复制支柱 beat.narrativeIntent；Host 用它防止总脉络只借 beat ID 重新发明玩法。"
+            },
+            "playerInformation": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "description": "玩家在做决定前能够看到或推断的信息；没有信息的选择通常只是猜按钮。"
+            },
             "actions": {
               "type": "array",
               "description": "观众在这个节拍能做的事，每条对应一个界面元件事件。",
@@ -587,6 +616,15 @@
                   "intent"
                 ],
                 "properties": {
+                  "sourcePillarActionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "必须命中 sourcePillarBeatId 下的 pillar action.id。"
+                  },
+                  "stateMutationOwner": {
+                    "enum": ["none", "settlement"],
+                    "description": "none 表示纯剧情分流；settlement 表示持久状态由目标结果节点的 at 结算修改。Host 会从 v2 支柱动作物化。"
+                  },
                   "component": {
                     "type": "string",
                     "description": "界面元件 id，必须来自 list_ui_components。"
@@ -599,6 +637,50 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "一句话说明观众为什么会点它，用作者语言写；整装靠它判断该怎么配。"
+                  },
+                  "stateChangeIntent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "逐字复制 pillar action.stateChange；effect 是它的具体规则 ID 编译结果。"
+                  },
+                  "feedback": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "当前节点中的即时反馈，例如血条下降、飘字、资源满值提示或按钮锁定。"
+                  },
+                  "feedbackSpec": {
+                    "description": "把反馈文案编译成可机械核验的实际界面动作。",
+                    "oneOf": [
+                      {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["kind", "component"],
+                        "properties": { "kind": { "const": "transient-component" }, "component": { "type": "string", "minLength": 1 } }
+                      },
+                      {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["kind", "component", "target"],
+                        "properties": {
+                          "kind": { "const": "state-binding" },
+                          "component": { "type": "string", "minLength": 1 },
+                          "target": { "type": "string", "minLength": 1 }
+                        }
+                      },
+                      {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["kind"],
+                        "properties": { "kind": { "const": "hide-interface" } }
+                      }
+                    ]
+                  },
+                  "downstreamPayoff": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "目标视频节点必须呈现的剧情或动作结果。"
+                  },
+                  "exitIntent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "逐字复制 pillar action.exitIntent。"
                   },
                   "effect": {
                     "type": "object",
@@ -632,7 +714,87 @@
                   "exit": {
                     "type": "string",
                     "description": "这个动作要走的出边 sourceHandle；缺省即与 event 同名，填 'none' 表示只结算不离开节点（例如连击）。"
+                  },
+                  "targetNodeId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "exit 对应边的目标节点；用于校验界面事件与故事分支一致。"
                   }
+                }
+              }
+            },
+            "settlements": {
+              "type": "array",
+              "description": "系统触发而不是玩家直接点击的结算计划；每项都必须说明触发、反馈和分支。",
+              "items": {
+                "type": "object",
+                "required": ["id", "pattern", "trigger", "intent", "source", "feedback"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "sourcePillarSettlementId": { "type": "string", "minLength": 1 },
+                  "sourcePillarActionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "可选：该结算承接的支柱动作 ID。数值动作必须先由组件事件进入结果节点，再由结果节点的 at 结算应用效果。"
+                  },
+                  "pattern": { "type": "string", "minLength": 1 },
+                  "trigger": { "enum": ["at", "watch", "state"] },
+                  "intent": { "type": "string", "minLength": 1 },
+                  "source": { "type": "string", "minLength": 1 },
+                  "triggerSpec": {
+                    "description": "从支柱触发语义编译出的精确 runtime reaction.when。",
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["type", "ms"],
+                        "properties": { "type": { "const": "at" }, "ms": { "type": "number", "minimum": 0 } }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["type", "of"],
+                        "properties": {
+                          "type": { "const": "watch" },
+                          "of": { "type": "string", "minLength": 1 },
+                          "on": { "enum": ["change", "inc", "dec"] }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["type", "condition"],
+                        "properties": { "type": { "const": "state" }, "condition": { "$ref": "#/$defs/graphCondition" } }
+                      }
+                    ]
+                  },
+                  "feedback": { "type": "string", "minLength": 1 },
+                  "feedbackSpec": {
+                    "oneOf": [
+                      {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["kind", "component"],
+                        "properties": { "kind": { "const": "transient-component" }, "component": { "type": "string", "minLength": 1 } }
+                      },
+                      {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["kind", "component", "target"],
+                        "properties": {
+                          "kind": { "const": "state-binding" },
+                          "component": { "type": "string", "minLength": 1 },
+                          "target": { "type": "string", "minLength": 1 }
+                        }
+                      },
+                      {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["kind"],
+                        "properties": { "kind": { "const": "hide-interface" } }
+                      }
+                    ]
+                  },
+                  "exitIntent": { "type": "string", "minLength": 1 },
+                  "exit": { "type": "string", "minLength": 1 },
+                  "targetNodeId": { "type": "string", "minLength": 1 }
                 }
               }
             },
@@ -789,6 +951,103 @@
             "additionalProperties": false,
             "required": [
               "op",
+              "beforeId"
+            ],
+            "properties": {
+              "op": {
+                "const": "insert-node-before"
+              },
+              "beforeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "gapX": {
+                "type": "number"
+              },
+              "gapY": {
+                "type": "number"
+              },
+              "position": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                }
+              },
+              "node": {
+                "$ref": "#/$defs/graphNode"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "copies"
+            ],
+            "properties": {
+              "op": {
+                "const": "duplicate-nodes"
+              },
+              "copies": {
+                "type": "array",
+                "minItems": 1,
+                "description": "显式给出源节点和副本节点 ID，使后续操作可以稳定引用副本。",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "sourceId",
+                    "targetId"
+                  ],
+                  "properties": {
+                    "sourceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "targetId": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              "offset": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
               "node"
             ],
             "properties": {
@@ -824,8 +1083,67 @@
               "gapX": {
                 "type": "number"
               },
+              "gapY": {
+                "type": "number"
+              },
+              "sourceHandle": {
+                "type": "string"
+              },
+              "position": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                }
+              },
               "node": {
                 "$ref": "#/$defs/graphNode"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "edgeId"
+            ],
+            "anyOf": [
+              { "type": "object", "required": ["source"], "properties": { "source": {} } },
+              { "type": "object", "required": ["target"], "properties": { "target": {} } },
+              { "type": "object", "required": ["sourceHandle"], "properties": { "sourceHandle": {} } },
+              { "type": "object", "required": ["targetHandle"], "properties": { "targetHandle": {} } }
+            ],
+            "properties": {
+              "op": {
+                "const": "reconnect"
+              },
+              "edgeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceHandle": {
+                "type": "string"
+              },
+              "targetHandle": {
+                "type": "string"
               }
             }
           },
@@ -843,7 +1161,8 @@
               },
               "id": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "建议显式提供稳定且当前图中唯一的 edgeId，便于同一批后续 op 直接引用。"
               },
               "source": {
                 "type": "string",
@@ -1084,6 +1403,91 @@
           {
             "type": "object",
             "additionalProperties": false,
+            "description": "创建一个与前端‘新建蓝图’完全相同的独立蓝图：标题全局唯一，默认包含一个入口演出节点。",
+            "required": [
+              "op",
+              "title"
+            ],
+            "properties": {
+              "op": {
+                "const": "create-blueprint"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "建议由 Agent 显式提供稳定且当前蓝图库中唯一的 ID，便于同一批后续 op 直接引用。"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "按前端相同的标题唯一性规则重命名蓝图。",
+            "required": [
+              "op",
+              "id",
+              "title"
+            ],
+            "properties": {
+              "op": {
+                "const": "rename-blueprint"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "删除非主且未被其它蓝图引用的蓝图。删除当前 mutation context 时应改用另一个 blueprintId 发起调用。",
+            "required": [
+              "op",
+              "id"
+            ],
+            "properties": {
+              "op": {
+                "const": "delete-blueprint"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "把现有蓝图设为运行入口，并同步根 graph 镜像。",
+            "required": [
+              "op",
+              "id"
+            ],
+            "properties": {
+              "op": {
+                "const": "set-main-blueprint"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
             "description": "Nesting A — inline sub-process: turns the node into a container holding its own private child graph. Takes no packId and never references a blueprint; to reuse a standalone blueprint use make-empty-sub-flow-pack + set-sub-flow-pack instead.",
             "required": [
               "op",
@@ -1102,7 +1506,7 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "description": "Nesting B step 1 — create a standalone blueprint in manifest.packs. This alone leaves the blueprint orphaned: bind it to a node with set-sub-flow-pack, otherwise it is unreachable at runtime.",
+            "description": "兼容别名：等价于 create-blueprint。新调用使用 create-blueprint；创建后可用 set-sub-flow-pack 绑定到节点。",
             "required": [
               "op"
             ],

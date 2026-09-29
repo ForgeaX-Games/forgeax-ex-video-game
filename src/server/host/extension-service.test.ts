@@ -24,15 +24,144 @@ import {
   characterPreviewAssetId,
   characterPreviewSourceHash,
 } from '../generation/character-previews'
-import blueprint from './fixtures/nodia.blueprint.json'
+import { EMPTY_LIBRARY_DOCUMENT } from '@/authoring/blueprint/empty-library'
 import {
   createGameVideoService,
   getAssetIdFromArgs,
 } from './extension-service'
 import { createInitialWorkflowState } from './workflow-state'
+import { VIDEO_GAME_ACTIVITIES } from '../../workflow/contracts'
+import { normalizeDocument } from '../../authoring/blueprint/blueprint-project'
+import { readDocumentRevision } from './document-revision'
+import { captureOutlineDesignSnapshot } from './outline-design-snapshot'
 
+const createWbGameVideoService = createGameVideoService
+const seedProject = EMPTY_LIBRARY_DOCUMENT
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
+const VALID_PILLAR_CONTENT = [
+  '# 支柱',
+  '## 角色\n主角与对手。',
+  '## 场景\n江面与水寨。',
+  '## 主循环\n玩家观察敌情、选择行动并进入结果演出。',
+  '## 互动节拍\nB01：玩家选择推进或撤退。',
+  '## 界面反馈\n显示当前状态和结果反馈。',
+  '## 结算与分支\n结果节点结算状态并进入不同出口。',
+  '## 战斗回合\n每回合都有信息、决策、反馈、进展和退出条件。',
+  '```pillar-interaction-contract',
+  JSON.stringify({
+    schemaVersion: 4,
+    endings: [
+      { id: 'ending-win', title: '突围成功', summary: '主角突破水寨' },
+      { id: 'ending-retreat', title: '安全撤退', summary: '主角保存实力后撤' },
+    ],
+    beats: [
+      {
+        id: 'B01',
+        narrativeIntent: '玩家根据敌情选择推进或撤退',
+        staging: '主角伏在江岸芦苇后观察水寨守卫，镜头贴近肩后，夜色紧张。',
+        playerInformation: ['敌情', '当前状态'],
+        uiCapabilities: ['选择反馈'],
+        actions: [
+          {
+            id: 'advance',
+            intent: '推进',
+            stateMutationOwner: 'none',
+            requiredRole: 'player-choice',
+            exit: { kind: 'beat', toBeatId: 'B02' },
+            stateChange: '不修改持久状态',
+            immediateFeedback: '显示推进结果',
+            downstreamPayoff: '下游呈现突入水寨',
+            exitIntent: '进入突围结果',
+          },
+          {
+            id: 'retreat',
+            intent: '撤退',
+            stateMutationOwner: 'none',
+            requiredRole: 'player-choice',
+            exit: { kind: 'ending', endingId: 'ending-retreat' },
+            stateChange: '不修改持久状态',
+            immediateFeedback: '显示撤退结果',
+            downstreamPayoff: '下游呈现安全撤离',
+            exitIntent: '进入撤退结局',
+          },
+        ],
+        settlements: [],
+      },
+      {
+        id: 'B02',
+        narrativeIntent: '玩家完成最后突围',
+        staging: '主角冲上水寨木桥逼近出口，镜头向前推进，火光照亮追兵。',
+        playerInformation: ['出口位置'],
+        uiCapabilities: ['推进反馈'],
+        actions: [{
+          id: 'finish',
+          intent: '冲出水寨',
+          stateMutationOwner: 'none',
+          requiredRole: 'player-choice',
+          exit: { kind: 'ending', endingId: 'ending-win' },
+          stateChange: '不修改持久状态',
+          immediateFeedback: '显示突围结果',
+          downstreamPayoff: '下游呈现成功突围',
+          exitIntent: '进入胜利结局',
+        }],
+        settlements: [],
+      },
+    ],
+  }),
+  '```',
+].join('\n')
+const VALID_PILLAR_FIRST_BATCH_CONTENT = [
+  '# 支柱',
+  '## 角色\n主角与对手。',
+  '## 场景\n江面与水寨。',
+  '## 主循环\n玩家观察敌情、选择行动并进入结果演出。',
+  '## 互动节拍\nB01：玩家选择推进。',
+  '## 界面反馈\n显示当前状态和结果反馈。',
+  '## 结算与分支\n结果节点进入出口。',
+  '## 战斗回合\n每回合都有信息、决策、反馈、进展和退出条件。',
+  '```pillar-interaction-contract',
+  JSON.stringify({
+    schemaVersion: 4,
+    endings: [
+      { id: 'ending-win', title: '突围成功', summary: '主角突破水寨' },
+      { id: 'ending-retreat', title: '安全撤退', summary: '主角保存实力后撤' },
+    ],
+    beats: [{
+      id: 'B01',
+      narrativeIntent: '玩家根据敌情推进',
+      staging: '主角伏在江岸芦苇后观察水寨守卫，镜头贴近肩后，夜色紧张。',
+      playerInformation: ['敌情', '当前状态'],
+      uiCapabilities: ['选择反馈'],
+      actions: [
+        {
+          id: 'advance',
+          intent: '推进',
+          stateMutationOwner: 'none',
+          requiredRole: 'player-choice',
+          exit: { kind: 'ending', endingId: 'ending-win' },
+          stateChange: '不修改持久状态',
+          immediateFeedback: '显示推进结果',
+          downstreamPayoff: '下游呈现突入水寨',
+          exitIntent: '进入突围结果',
+        },
+        {
+          id: 'retreat',
+          intent: '撤退',
+          stateMutationOwner: 'none',
+          requiredRole: 'player-choice',
+          exit: { kind: 'ending', endingId: 'ending-retreat' },
+          stateChange: '不修改持久状态',
+          immediateFeedback: '显示撤退结果',
+          downstreamPayoff: '下游呈现安全撤离',
+          exitIntent: '进入撤退结局',
+        },
+      ],
+      settlements: [],
+    }],
+  }),
+  '```',
+].join('\n')
 const originalForgeaxServerPort = process.env.FORGEAX_SERVER_PORT
 
 const unavailableVideoGeneration: VideoGenerationGateway = {
@@ -345,7 +474,7 @@ class MemoryCapabilities {
 
 function createContext() {
   const files = new MemoryFiles({
-    'blueprint.json': json(blueprint),
+    'blueprint.json': json(EMPTY_LIBRARY_DOCUMENT),
     'project.json': json({
       id: '游戏一',
       platform: 'game-video',
@@ -381,6 +510,40 @@ function createContext() {
     capabilities,
   }
   return { context, files, media, models, capabilities }
+}
+
+function useOutlineTransactionFixture(files: MemoryFiles): void {
+  const project = structuredClone(EMPTY_LIBRARY_DOCUMENT)
+  const nodeSpecs = [
+      ['n_open', '序章'],
+      ['n_door', '门前'],
+      ['n_soul', '灵魂'],
+      ['n_nolotus', '无莲结局'],
+      ['n_options', '抉择'],
+  ] as const
+  const graph: typeof project.graph = {
+    nodes: nodeSpecs.map(([id, name], index) => ({
+      id,
+      type: 'perf' as const,
+      position: { x: index * 240, y: 0 },
+      inputs: [],
+      outputs: [],
+      data: { name, chapterSummary: name, storyText: name },
+    })),
+    edges: [
+      { id: 'e-open', source: 'n_open', sourceHandle: 'default', target: 'n_door', targetHandle: 'in' },
+      { id: 'e-door', source: 'n_door', sourceHandle: 'default', target: 'n_soul', targetHandle: 'in' },
+      { id: 'e-nolotus', source: 'n_soul', sourceHandle: 'default', target: 'n_nolotus', targetHandle: 'in' },
+    ],
+  }
+  const mainId = project.manifest.mainPackId
+  project.manifest.packs[mainId] = {
+    ...project.manifest.packs[mainId]!,
+    entry: 'n_open',
+    graph,
+  }
+  project.graph = graph
+  files.entries.set('blueprint.json', json(project))
 }
 
 function prepareCharacterPreviewWorkflow(
@@ -453,7 +616,7 @@ function prepareCharacterPreviewWorkflow(
 
 function prepareIntegrationWorkflow(
   files: MemoryFiles,
-  activity: 'ui.authoring' | 'game.finalizing',
+  activity: 'ui.authoring' | 'rules.binding' | 'game.finalizing',
 ): { activityRevision: number } {
   const state = createInitialWorkflowState('游戏一')
   state.productPhase = 'feature-development'
@@ -461,6 +624,43 @@ function prepareIntegrationWorkflow(
   state.activity = activity
   state.activityRevision = 1
   state.activityStatus = 'working'
+  const settledBefore = activity === 'ui.authoring'
+    ? [
+        'brief.collecting',
+        'document.inquiry',
+        'document.core',
+        'document.pillar',
+        'blueprint.outline',
+        'rules.catalog',
+      ] as const
+    : activity === 'rules.binding'
+      ? [
+          'brief.collecting',
+          'document.inquiry',
+          'document.core',
+          'document.pillar',
+          'blueprint.outline',
+          'rules.catalog',
+          'ui.authoring',
+        ] as const
+      : [
+        'brief.collecting',
+        'document.inquiry',
+        'document.core',
+        'document.pillar',
+        'blueprint.outline',
+        'rules.catalog',
+        'ui.authoring',
+        'rules.binding',
+      ] as const
+  for (const settled of settledBefore) {
+    state.activities[settled] = {
+      revision: 1,
+      status: 'complete',
+      artifactRefs: [],
+      evidence: [],
+    }
+  }
   state.activities[activity] = {
     revision: 1,
     status: 'working',
@@ -473,8 +673,49 @@ function prepareIntegrationWorkflow(
     status: 'working',
     revision: 1,
   }
+  const blueprintBytes = files.entries.get('blueprint.json')!
+  state.outlineDesignSnapshot = captureOutlineDesignSnapshot(
+    normalizeDocument(JSON.parse(decoder.decode(blueprintBytes))),
+    readDocumentRevision(blueprintBytes),
+    '2026-01-01T00:00:00.000Z',
+  )
   files.entries.set('.forgeax/extensions/game-video/workflow.json', json(state))
   return { activityRevision: 1 }
+}
+
+function prepareDeliveredWorkflow(files: MemoryFiles): string {
+  const state = createInitialWorkflowState('游戏一')
+  const completeRecord = {
+    revision: 1,
+    status: 'complete' as const,
+    completedAt: new Date().toISOString(),
+    artifactRefs: [],
+    evidence: [],
+  }
+  state.productPhase = 'asset-generation'
+  state.phaseRevision = 3
+  state.phaseStatus = 'complete'
+  state.activity = 'playtest.validating'
+  state.activityRevision = 1
+  state.activityStatus = 'complete'
+  state.activeGroup = {
+    id: 'delivery',
+    activities: ['playtest.validating'],
+    status: 'complete',
+    revision: 1,
+  }
+  for (const activity of VIDEO_GAME_ACTIVITIES) state.activities[activity] = completeRecord
+  state.assetPipeline = { ...state.assetPipeline, activeActivities: [] }
+  state.focus = {
+    location: { kind: 'blueprint', blueprintId: 'bp-main', nodeId: 'n_open' },
+    reason: 'artifact-created',
+    revision: 1,
+  }
+  const serialized = JSON.stringify(state)
+  const bytes = encoder.encode(serialized)
+  files.entries.set('.forgeax/extensions/game-video/workflow.json', bytes)
+  files.entries.set('.workbench/video-game-workflow.json', bytes)
+  return serialized
 }
 
 afterEach(() => {
@@ -490,7 +731,7 @@ describe('createGameVideoService', () => {
   test('getGraph returns a bounded node-field shard with a revision snapshot', async () => {
     const { context } = createContext()
     const service = createGameVideoService(context)
-    const blueprintRecord = blueprint as unknown as {
+    const blueprintRecord = seedProject as unknown as {
       manifest: {
         mainPackId: string
         packs: Record<string, { graph: { nodes: Array<{ id: string }> } }>
@@ -722,7 +963,7 @@ describe('createGameVideoService', () => {
     const result = await service.upsertDocument({
       documentType: 'pillar',
       slug: 'wusong',
-      content: '# 支柱\n\n本文缺少角色预览图数量声明。',
+      content: VALID_PILLAR_FIRST_BATCH_CONTENT,
     }) as { document: { documentType?: string } | null; error?: string }
 
     expect(result.error).toBeUndefined()
@@ -737,11 +978,7 @@ describe('createGameVideoService', () => {
     const result = await service.upsertDocument({
       documentType: 'pillar',
       slug: 'wusong',
-      content: [
-        '# 支柱',
-        'character_preview_estimate:',
-        '  image_count: 5',
-      ].join('\n'),
+      content: `${VALID_PILLAR_FIRST_BATCH_CONTENT}\ncharacter_preview_estimate:\n  image_count: 5`,
     }) as { document: { documentType?: string } | null; error?: string }
 
     expect(result.error).toBeUndefined()
@@ -757,7 +994,7 @@ describe('createGameVideoService', () => {
       slug: 'wusong',
       artifacts: {
         core: '# 核心文档\n\n既有核心循环。',
-        pillar: '# 支柱文档\n\n既有叙事、互动、规则与界面契约。',
+        pillar: VALID_PILLAR_CONTENT,
       },
     }) as {
       accepted: boolean
@@ -806,7 +1043,7 @@ describe('createGameVideoService', () => {
       project: { version: 'game-video.graph.v1' },
       gameSlug: '游戏一',
     })
-    expect(await service.saveGraph({ project: blueprint, title: 'ignored' })).toMatchObject({
+    expect(await service.saveGraph({ project: seedProject, title: 'ignored' })).toMatchObject({
       schemaVersion: 1,
       ok: true,
       revision: 1,
@@ -889,6 +1126,20 @@ describe('createGameVideoService', () => {
   test('patchGraph reads inside the lock so concurrent batches both land', async () => {
     const { context, files } = createContext()
     const service = createGameVideoService(context)
+    const added = await service.patchGraph({
+      ops: [{
+        op: 'add-node',
+        node: {
+          id: 'second',
+          type: 'perf',
+          position: { x: 240, y: 80 },
+          inputs: [],
+          outputs: [],
+          data: { name: '第二节点' },
+        },
+      }],
+    }) as { ok: boolean }
+    expect(added.ok).toBe(true)
     const before = await service.getGraph({}) as {
       project: { graph: { nodes: Array<{ id: string }> } }
     }
@@ -904,6 +1155,302 @@ describe('createGameVideoService', () => {
     const nameOf = (id: string) => after.graph.nodes.find((n: { id: string }) => n.id === id).data.name
     expect(nameOf(first!.id)).toBe('甲')
     expect(nameOf(second!.id)).toBe('乙')
+  })
+
+  test('configureBlueprintNode atomically commits interface content and settlements and replays idempotently', async () => {
+    const { context, files } = createContext()
+    useOutlineTransactionFixture(files)
+    const stored = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    stored.variables = { ...(stored.variables ?? {}), score: { id: 'score', initial: 0 } }
+    stored.ui = {
+      overlays: {
+        'base:choice': {
+          id: 'base:choice',
+          children: [{
+            id: 'choice',
+            component: 'TextOption',
+            inputs: { text: 'Old', triggerKey: 'F' },
+          }],
+        },
+      },
+    }
+    stored.graph.edges.push({
+      id: 'e-open-activate',
+      source: 'n_open',
+      sourceHandle: 'activate',
+      target: 'n_door',
+      targetHandle: 'in',
+    })
+    stored.manifest.packs[stored.manifest.mainPackId].graph = stored.graph
+    files.entries.set('blueprint.json', json(stored))
+    const workflow = prepareIntegrationWorkflow(files, 'game.finalizing')
+    const service = createWbGameVideoService(context)
+    const input = {
+      activityRevision: workflow.activityRevision,
+      expectedRevision: 0,
+      idempotencyKey: 'node-config:n_open:v1',
+      nodeId: 'n_open',
+      interfaces: [{
+        overlayId: 'base:choice',
+        components: [{ childId: 'choice', inputs: { text: 'Continue' } }],
+        eventResponses: [{
+          childId: 'choice',
+          eventId: 'activate',
+          effects: [{ kind: 'var', varId: 'score', op: 'add', value: 1 }],
+          targetNodeId: 'n_door',
+        }],
+      }],
+      settlements: [{
+        trigger: { type: 'at', ms: 2400 },
+        effects: [{ kind: 'var', varId: 'score', op: 'add', value: 2 }],
+        targetNodeId: 'n_door',
+      }],
+    }
+
+    const first = await service.configureBlueprintNode(input) as {
+      ok: boolean
+      revision: number
+      replayed: boolean
+      metrics: Record<string, number>
+      reusedPrimitives: string[]
+      mounts: Array<{ mountId: string }>
+    }
+    const replay = await service.configureBlueprintNode(input) as typeof first
+
+    expect(first).toMatchObject({
+      ok: true,
+      revision: 1,
+      replayed: false,
+      metrics: {
+        interfacesConfigured: 1,
+        mountsCreated: 1,
+        componentOverrides: 1,
+        eventResponsesConfigured: 1,
+        settlementsCreated: 1,
+        edgesCreatedOrReused: 2,
+      },
+      mounts: [{ overlayId: 'base:choice', mountId: 'base:choice', created: true }],
+    })
+    expect(first.reusedPrimitives).toEqual(expect.arrayContaining([
+      'mountOverlay',
+      'patchOverlayChildInMount',
+      'routeMountEventToNode',
+      'setSettlementAdvanceTarget',
+    ]))
+    expect(replay).toMatchObject({ ok: true, revision: 1, replayed: true })
+
+    const persisted = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    const node = persisted.graph.nodes.find((candidate: { id: string }) => candidate.id === 'n_open')
+    expect(node.data.overlayNodes).toHaveLength(1)
+    expect(node.data.overlayNodes[0].overrides.choice.inputs.text).toBe('Continue')
+    expect(node.data.overlayNodes[0].reactions[0].do.map((action: { kind: string }) => action.kind))
+      .toEqual(['effect', 'advance'])
+    expect(node.data.reactions[0].when).toEqual({ type: 'at', ms: 2400 })
+  })
+
+  test('rules.binding can repair a missing event effect without rebuilding the interface', async () => {
+    const { context, files } = createContext()
+    useOutlineTransactionFixture(files)
+    const workflow = prepareIntegrationWorkflow(files, 'rules.binding')
+    const stored = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    stored.variables = { ...(stored.variables ?? {}), score: { id: 'score', initial: 0 } }
+    stored.ui = {
+      overlays: {
+        'base:choice': {
+          id: 'base:choice',
+          children: [{ id: 'choice', component: 'TextOption', inputs: { text: 'Continue' } }],
+        },
+      },
+    }
+    const node = stored.manifest.packs[stored.manifest.mainPackId].graph.nodes
+      .find((candidate: { id: string }) => candidate.id === 'n_open')
+    node.data.overlayNodes = [{ overlay: 'base:choice' }]
+    stored.graph = stored.manifest.packs[stored.manifest.mainPackId].graph
+    files.entries.set('blueprint.json', json(stored))
+
+    const result = await createWbGameVideoService(context).configureBlueprintNode({
+      activityRevision: workflow.activityRevision,
+      expectedRevision: 0,
+      idempotencyKey: 'rules.binding:n_open:event-repair:v1',
+      nodeId: 'n_open',
+      interfaces: [{
+        overlayId: 'base:choice',
+        mountId: 'base:choice',
+        eventResponses: [{
+          childId: 'choice',
+          eventId: 'activate',
+          effects: [{ kind: 'var', varId: 'score', op: 'add', value: 1 }],
+        }],
+      }],
+    }) as { ok: boolean; metrics?: { mountsCreated: number; eventResponsesConfigured: number } }
+
+    expect(result).toMatchObject({
+      ok: true,
+      metrics: { mountsCreated: 0, eventResponsesConfigured: 1 },
+    })
+  })
+
+  test('configureBlueprintNode persists cascading interface and settlement removals idempotently', async () => {
+    const { context, files } = createContext()
+    useOutlineTransactionFixture(files)
+    prepareDeliveredWorkflow(files)
+    const stored = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    stored.ui = {
+      overlays: {
+        'base:choice': {
+          id: 'base:choice',
+          children: [{ id: 'choice', component: 'TextOption', inputs: { text: 'Continue' } }],
+        },
+      },
+    }
+    files.entries.set('blueprint.json', json(stored))
+    const service = createWbGameVideoService(context)
+    const configured = await service.configureBlueprintNode({
+      expectedRevision: 0,
+      idempotencyKey: 'node-config:n_open:seed-removal:v1',
+      nodeId: 'n_open',
+      interfaces: [{
+        overlayId: 'base:choice',
+        eventResponses: [{ childId: 'choice', eventId: 'activate', targetNodeId: 'n_door' }],
+      }],
+      settlements: [{ trigger: { type: 'at', ms: 1200 }, targetNodeId: 'n_door' }],
+    }) as { ok: boolean, revision: number }
+    expect(configured).toMatchObject({ ok: true, revision: 1 })
+
+    const removalInput = {
+      expectedRevision: 1,
+      idempotencyKey: 'node-config:n_open:remove-ui-and-settlement:v1',
+      nodeId: 'n_open',
+      removals: {
+        interfaces: [{ mountId: 'base:choice' }],
+        settlements: [{ settlementIndex: 0 }],
+      },
+    }
+    const removed = await service.configureBlueprintNode(removalInput) as {
+      ok: boolean
+      revision: number
+      replayed: boolean
+      metrics: Record<string, number>
+      reusedPrimitives: string[]
+    }
+    const replay = await service.configureBlueprintNode(removalInput) as typeof removed
+
+    expect(removed).toMatchObject({
+      ok: true,
+      revision: 2,
+      replayed: false,
+      metrics: { interfacesRemoved: 1, settlementsRemoved: 1, edgesRemoved: 1 },
+    })
+    expect(removed.reusedPrimitives).toEqual(expect.arrayContaining([
+      'unmountOverlay',
+      'removeSettlementReaction',
+      'disconnect',
+    ]))
+    expect(replay).toMatchObject({ ok: true, revision: 2, replayed: true })
+
+    const persisted = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    const node = persisted.graph.nodes.find((candidate: { id: string }) => candidate.id === 'n_open')
+    expect(node.data.overlayNodes).toBeUndefined()
+    expect(node.data.reactions).toBeUndefined()
+    expect(persisted.graph.edges.filter(
+      (edge: { source: string, sourceHandle?: string }) => edge.source === 'n_open' && edge.sourceHandle === 'activate',
+    )).toEqual([])
+    expect(persisted.graph.edges.some(
+      (edge: { id: string, sourceHandle?: string }) => edge.id === 'e-open' && edge.sourceHandle === 'default',
+    )).toBe(true)
+  })
+
+  test('configureBlueprintNode rolls back the complete node transaction when a later intent fails', async () => {
+    const { context, files } = createContext()
+    useOutlineTransactionFixture(files)
+    const stored = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    stored.ui = {
+      overlays: {
+        'base:choice': {
+          id: 'base:choice',
+          children: [{ id: 'choice', component: 'TextOption', inputs: { text: 'Old' } }],
+        },
+      },
+    }
+    files.entries.set('blueprint.json', json(stored))
+    const snapshot = decoder.decode(files.entries.get('blueprint.json')!)
+
+    const result = await createWbGameVideoService(context).configureBlueprintNode({
+      nodeId: 'n_open',
+      interfaces: [{ overlayId: 'base:choice' }],
+      settlements: [{ trigger: { type: 'at', ms: 1000 }, targetNodeId: 'missing-node' }],
+    }) as { ok: boolean; failedPath?: string }
+
+    expect(result).toMatchObject({
+      ok: false,
+      failedPath: 'settlements[0].targetNodeId',
+    })
+    expect(decoder.decode(files.entries.get('blueprint.json')!)).toBe(snapshot)
+  })
+
+  test('post-delivery conversation can maintain graph, node configuration, and rules without reopening workflow', async () => {
+    const { context, files } = createContext()
+    useOutlineTransactionFixture(files)
+    const workflowBefore = prepareDeliveredWorkflow(files)
+    const stored = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    stored.ui = {
+      overlays: {
+        'base:choice': {
+          id: 'base:choice',
+          children: [{ id: 'choice', component: 'TextOption', inputs: { text: 'Continue' } }],
+        },
+      },
+    }
+    files.entries.set('blueprint.json', json(stored))
+    const service = createWbGameVideoService(context)
+
+    const configured = await service.configureBlueprintNode({
+      expectedRevision: 0,
+      idempotencyKey: 'maintenance:n_open:move-choice:v1',
+      nodeId: 'n_open',
+      interfaces: [{
+        overlayId: 'base:choice',
+        components: [{ childId: 'choice', window: { startMs: 3000, endMs: 5000 } }],
+      }],
+    }) as { ok: boolean, revision: number, mounts: Array<{ mountId: string }> }
+    const renamed = await service.patchGraph({
+      expectedRevision: configured.revision,
+      idempotencyKey: 'maintenance:n_open:rename:v1',
+      ops: [
+        { op: 'set-node-field', nodeId: 'n_open', field: 'name', value: '序章（调整后）' },
+        { op: 'remove-node', nodeId: 'n_nolotus' },
+      ],
+    }) as { ok: boolean, revision: number }
+    const rules = await service.patchRules({
+      expectedRevision: renamed.revision,
+      idempotencyKey: 'maintenance:review-count:v1',
+      ops: [{ op: 'upsert-variable', variableId: 'review_count', name: '评审次数', initial: 0 }],
+    }) as { ok: boolean, revision: number }
+    const validation = await service.validateProject({
+      activity: 'game.finalizing',
+      checkIds: ['runtime.shape.valid'],
+    }) as { ok: boolean, alreadyComplete?: boolean, summary: { projectRevision: number } }
+
+    expect(configured).toMatchObject({ ok: true, revision: 1 })
+    expect(renamed).toMatchObject({ ok: true, revision: 2 })
+    expect(rules).toMatchObject({ ok: true, revision: 3 })
+    expect(validation).toMatchObject({ ok: true, summary: { projectRevision: 3 } })
+    expect(validation.alreadyComplete).toBeUndefined()
+    const persisted = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    const node = persisted.graph.nodes.find((candidate: { id: string }) => candidate.id === 'n_open')
+    expect(node.data.name).toBe('序章（调整后）')
+    expect(persisted.graph.nodes.some((candidate: { id: string }) => candidate.id === 'n_nolotus'))
+      .toBe(false)
+    expect(persisted.graph.edges.some((edge: { source: string, target: string }) => (
+      edge.source === 'n_nolotus' || edge.target === 'n_nolotus'
+    ))).toBe(false)
+    expect(node.data.overlayNodes[0].overrides.choice.window).toEqual({
+      startMs: 3000,
+      endMs: 5000,
+    })
+    expect(persisted.variables.review_count).toMatchObject({ initial: 0 })
+    expect(decoder.decode(files.entries.get('.workbench/video-game-workflow.json')!))
+      .toBe(workflowBefore)
   })
 
   test('back-fills all package files when saving into an empty workspace', async () => {
@@ -922,7 +1469,7 @@ describe('createGameVideoService', () => {
     }
     const service = createGameVideoService(context)
 
-    expect(await service.saveGraph({ project: blueprint })).toMatchObject({
+    expect(await service.saveGraph({ project: seedProject })).toMatchObject({
       schemaVersion: 1,
       ok: true,
       revision: 1,
@@ -943,7 +1490,7 @@ describe('createGameVideoService', () => {
       'assets/manifest.json',
       encoder.encode(JSON.stringify({ version: 2, assets: [], marker: true })),
     )
-    expect(await service.saveGraph({ project: blueprint })).toMatchObject({
+    expect(await service.saveGraph({ project: seedProject })).toMatchObject({
       schemaVersion: 1,
       ok: true,
       revision: 2,
@@ -955,6 +1502,50 @@ describe('createGameVideoService', () => {
       assets: [],
       marker: true,
     })
+  })
+
+  test('repairs every missing package file when workflow seeding sees a partial package', async () => {
+    const { context, files } = createContext()
+    files.entries.delete('blueprint.json')
+    files.entries.delete('assets/manifest.json')
+    const service = createGameVideoService(context)
+
+    await service.getWorkflowState({})
+
+    expect(files.entries.has('project.json')).toBe(true)
+    expect(files.entries.has('blueprint.json')).toBe(true)
+    expect(files.entries.has('assets/manifest.json')).toBe(true)
+    expect(JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))).toMatchObject({
+      version: 'game-video.graph.v1',
+    })
+    expect(JSON.parse(decoder.decode(files.entries.get('assets/manifest.json')!))).toMatchObject({
+      version: 2,
+      assets: [],
+    })
+  })
+
+  test('repairs a package after workflow seeding is interrupted between file writes', async () => {
+    const { context, files } = createContext()
+    files.entries.delete('blueprint.json')
+    files.entries.delete('project.json')
+    files.entries.delete('assets/manifest.json')
+    const write = files.write.bind(files)
+    let failOnce = true
+    vi.spyOn(files, 'write').mockImplementation(async (path, contents) => {
+      if (failOnce && path === 'blueprint.json') {
+        failOnce = false
+        throw new Error('injected package seed write failure')
+      }
+      await write(path, contents)
+    })
+    const service = createGameVideoService(context)
+
+    await expect(service.getWorkflowState({})).rejects.toThrow('injected package seed write failure')
+    await service.getWorkflowState({})
+
+    expect(files.entries.has('project.json')).toBe(true)
+    expect(files.entries.has('blueprint.json')).toBe(true)
+    expect(files.entries.has('assets/manifest.json')).toBe(true)
   })
 
   test('keeps an authoritative blueprint readable when project metadata is corrupt', async () => {
@@ -2777,7 +3368,7 @@ describe('createGameVideoService', () => {
       cwd: '/private/secret',
     })).rejects.toThrow('additional properties')
     await expect(service.saveGraph({
-      project: blueprint,
+      project: seedProject,
       extra: true,
     })).rejects.toThrow('additional properties')
     await expect(service.listAssets({ kind: 'audio' })).rejects.toThrow(
@@ -2960,10 +3551,48 @@ describe('patchRules', () => {
     const { context, files } = createContext()
     const service = createGameVideoService(context)
 
+    expect((await service.patchRules({
+      ops: [
+        { op: 'upsert-variable', variableId: 'var_combo', name: '连击', initial: 0 },
+        {
+          op: 'upsert-formula',
+          formulaId: 'formula_dmg',
+          name: '伤害',
+          expressionText: '1',
+        },
+      ],
+    }) as { ok: boolean }).ok).toBe(true)
+
+    const applied = await service.patchGraph({
+      ops: [{
+        op: 'set-node-data',
+        nodeId: 'entry',
+        patch: {
+          reactions: [{
+            when: { type: 'enter' },
+            do: [{
+              kind: 'effect',
+              effects: [{
+                id: 'use-fx',
+                kind: 'var',
+                varId: 'var_combo',
+                op: 'set',
+                value: {
+                  expr: '1',
+                  pick: { mode: 'formula', formulaId: 'formula_dmg', holeBindings: {} },
+                },
+              }],
+            }],
+          }],
+        },
+      }],
+    }) as { ok: boolean }
+    expect(applied.ok).toBe(true)
+
     const result = await service.patchRules({
       ops: [{
         op: 'upsert-formula',
-        formulaId: 'fx-dmg',
+        formulaId: 'formula_dmg',
         expressionText: 'score + 1',
       }],
     }) as { ok: boolean }
@@ -3004,9 +3633,35 @@ describe('patchRules', () => {
     const { context, files } = createContext()
     const service = createGameVideoService(context)
 
+    expect((await service.patchRules({
+      ops: [
+        { op: 'upsert-variable', variableId: 'var_combo', name: '连击', initial: 0 },
+        { op: 'upsert-formula', formulaId: 'formula_dmg', name: '伤害', expressionText: '1' },
+      ],
+    }) as { ok: boolean }).ok).toBe(true)
+
+    expect((await service.patchGraph({
+      ops: [{
+        op: 'set-node-data',
+        nodeId: 'entry',
+        patch: {
+          reactions: [{
+            when: { type: 'enter' },
+            do: [{
+              kind: 'effect',
+              effects: [
+                { id: 'use-combo', kind: 'var', varId: 'var_combo', op: 'add', value: 1 },
+                { id: 'use-fx', kind: 'var', varId: 'var_combo', op: 'set', value: { expr: 'formula.formula_dmg' } },
+              ],
+            }],
+          }],
+        },
+      }],
+    }) as { ok: boolean }).ok).toBe(true)
+
     for (const [op, errorCode] of [
-      [{ op: 'remove-variable', variableId: 'combo' }, 'rules.variable.in-use'],
-      [{ op: 'remove-formula', formulaId: 'fx-dmg' }, 'rules.formula.in-use'],
+      [{ op: 'remove-variable', variableId: 'var_combo' }, 'rules.variable.in-use'],
+      [{ op: 'remove-formula', formulaId: 'formula_dmg' }, 'rules.formula.in-use'],
     ] as const) {
       const snapshot = decoder.decode(files.entries.get('blueprint.json')!)
       const result = await service.patchRules({ ops: [op] }) as {
@@ -3171,14 +3826,14 @@ describe('node production authoring fields', () => {
     const result = await service.patchGraph({
       ops: [{
         op: 'set-node-data',
-        nodeId: 'n_open',
+        nodeId: 'entry',
         patch: { cast: [{ characterId: 'character-missing' }] },
       }],
     }) as { ok: boolean; errors?: string[] }
 
     expect(result.ok, JSON.stringify(result.errors)).toBe(true)
     const persisted = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
-    expect(persisted.graph.nodes.find((node: { id: string }) => node.id === 'n_open').data.cast)
+    expect(persisted.graph.nodes.find((node: { id: string }) => node.id === 'entry').data.cast)
       .toEqual([{ characterId: 'character-missing' }])
   })
 
@@ -3190,7 +3845,7 @@ describe('node production authoring fields', () => {
 
     const result = await service.patchGraph({
       activityRevision: workflow.activityRevision,
-      ops: [{ op: 'ensure-node-overlay', nodeId: 'n_open' }],
+      ops: [{ op: 'ensure-node-overlay', nodeId: 'entry' }],
     }) as { ok: boolean; errorCode?: string; errors?: string[] }
 
     expect(result.ok).toBe(false)
@@ -3206,14 +3861,60 @@ describe('node production authoring fields', () => {
 
     const result = await service.patchGraph({
       activityRevision: workflow.activityRevision,
-      ops: [{ op: 'set-node-data', nodeId: 'n_open', patch: { overlayNodes: [] } }],
+      ops: [{ op: 'set-node-data', nodeId: 'entry', patch: { overlayNodes: [] } }],
     }) as { ok: boolean; errorCode?: string; errors?: string[] }
 
     expect(result).toMatchObject({ ok: true })
     expect(result.errorCode).toBeUndefined()
     expect(result.errors).toBeUndefined()
     const persisted = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
-    expect(persisted.graph.nodes.find((node: { id: string }) => node.id === 'n_open').data.overlayNodes).toEqual([])
+    expect(persisted.graph.nodes.find((node: { id: string }) => node.id === 'entry').data.overlayNodes).toEqual([])
+  })
+
+  test('game.finalizing cannot invent or rewrite outline interaction design', async () => {
+    const { context, files } = createContext()
+    useOutlineTransactionFixture(files)
+    const workflow = prepareIntegrationWorkflow(files, 'game.finalizing')
+    const service = createGameVideoService(context)
+
+    const result = await service.patchGraph({
+      activityRevision: workflow.activityRevision,
+      ops: [{
+        op: 'set-node-data', nodeId: 'n_open',
+        patch: { interaction: { beat: 'combat', sourcePillarBeatId: 'invented' } },
+      }],
+    }) as { ok: boolean; errorCode?: string; errors?: string[] }
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'workflow.interaction-design.outline-owned',
+    })
+    expect(result.errors?.join('\n')).toContain('返工支柱或总脉络')
+  })
+
+  test.each([
+    ['新增节点', { op: 'add-node', node: { id: 'invented', type: 'perf', position: { x: 1, y: 1 }, inputs: [], outputs: [], data: { name: '临时节点' } } }],
+    ['删除节点', { op: 'remove-node', nodeId: 'n_door' }],
+    ['新增连线', { op: 'connect', id: 'invented-edge', source: 'n_open', target: 'n_soul', sourceHandle: 'invented' }],
+    ['删除连线', { op: 'disconnect', edgeId: 'e-open' }],
+    ['修改连线目标', { op: 'reconnect', edgeId: 'e-open', target: 'n_soul' }],
+  ])('game.finalizing rejects outline topology drift: %s', async (_label, op) => {
+    const { context, files } = createContext()
+    useOutlineTransactionFixture(files)
+    const workflow = prepareIntegrationWorkflow(files, 'game.finalizing')
+    const before = decoder.decode(files.entries.get('blueprint.json')!)
+
+    const result = await createGameVideoService(context).patchGraph({
+      activityRevision: workflow.activityRevision,
+      ops: [op],
+    }) as { ok: boolean; errorCode?: string; errors?: string[] }
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'workflow.outline-design.frozen',
+    })
+    expect(result.errors?.join('\n')).toContain('blueprint.outline 设计已经冻结')
+    expect(decoder.decode(files.entries.get('blueprint.json')!)).toBe(before)
   })
 
   test('game.finalizing can patch the rules catalog', async () => {
@@ -3242,6 +3943,16 @@ describe('node production authoring fields', () => {
       label: '连击血条',
       events: [],
       implementation: "function ComboHpBar() { return React.createElement('span') }",
+      gameplaySemantics: {
+        roles: ['state-feedback'],
+        purpose: '显示当前战斗状态。',
+        stateBindings: [],
+        eventSemantics: [],
+        requiredCompanions: [],
+        recommendedSettlements: ['watch-state-feedback'],
+        requiredFeedback: ['显示值与实际状态一致'],
+        antiPatterns: ['只显示静态数值'],
+      },
       compose: {
         id: 'scheme-combo-hud',
         title: '连击战斗 HUD',
@@ -3291,11 +4002,30 @@ describe('node production authoring fields', () => {
     await service.upsertComponent({
       id: 'ComboHpBar',
       label: '连击血条',
-      events: [],
-      implementation: "function ComboHpBar() { return React.createElement('span') }",
+      events: [{
+        id: 'inspect',
+        outputs: [{ key: 'combo', label: '连击数', valueType: 'number' }],
+      }],
+      implementation: "function ComboHpBar(props) { return React.createElement('button', { onClick: function () { props.emit?.('inspect', { combo: 1 }) } }) }",
+      gameplaySemantics: {
+        roles: ['state-feedback'],
+        purpose: '显示当前战斗状态。',
+        stateBindings: [],
+        eventSemantics: [],
+        requiredCompanions: [],
+        recommendedSettlements: ['watch-state-feedback'],
+        requiredFeedback: ['显示值与实际状态一致'],
+        antiPatterns: ['只显示静态数值'],
+      },
     })
 
-    const result = await service.listUiComponents() as { components: Array<{ id: string; prompt?: string }> }
+    const result = await service.listUiComponents() as {
+      components: Array<{
+        id: string
+        prompt?: string
+        events: Array<{ id: string; outputs?: Array<{ key: string; valueType: string }> }>
+      }>
+    }
     const ids = result.components.map((c) => c.id)
 
     // 内置组件仍在
@@ -3303,6 +4033,10 @@ describe('node production authoring fields', () => {
     expect(ids).toContain('BattleSkill')
     // 新造控件也在
     expect(ids).toContain('ComboHpBar')
+    expect(result.components.find((component) => component.id === 'ComboHpBar')?.events).toEqual([{
+      id: 'inspect',
+      outputs: [{ key: 'combo', label: '连击数', valueType: 'number' }],
+    }])
   })
 })
 
@@ -3725,7 +4459,7 @@ describe('graph document revision', () => {
     const service = createGameVideoService(context)
 
     const result = await service.saveGraph({
-      project: { ...blueprint, revision: 999 },
+      project: { ...seedProject, revision: 999 },
     }) as { ok: boolean; revision: number }
 
     expect(result.ok).toBe(true)
@@ -3736,11 +4470,11 @@ describe('graph document revision', () => {
   test('rejects a whole-document save built on a stale revision', async () => {
     const { context, files } = createContext()
     const service = createGameVideoService(context)
-    await service.saveGraph({ project: blueprint })
+    await service.saveGraph({ project: seedProject })
     const snapshot = decoder.decode(files.entries.get('blueprint.json')!)
 
     const result = await service.saveGraph({
-      project: blueprint,
+      project: seedProject,
       expectedRevision: 0,
     }) as { ok: boolean; errorCode?: string; revision?: number }
 
@@ -3748,5 +4482,177 @@ describe('graph document revision', () => {
     expect(result.errorCode).toBe('revision.conflict')
     expect(result.revision).toBe(1)
     expect(decoder.decode(files.entries.get('blueprint.json')!)).toBe(snapshot)
+  })
+})
+
+describe('progressive blueprint outline authoring', () => {
+  test('creates a node-only skeleton, then configures nodes independently', async () => {
+    const { context, files } = createContext()
+    const workflow = createInitialWorkflowState('游戏一')
+    workflow.productPhase = 'feature-development'
+    workflow.phaseStatus = 'working'
+    workflow.activity = 'blueprint.outline'
+    workflow.activityStatus = 'working'
+    workflow.activities['blueprint.outline'] = {
+      revision: 1,
+      status: 'working',
+      artifactRefs: [],
+      evidence: [],
+    }
+    workflow.activeGroup = {
+      id: 'outline',
+      activities: ['blueprint.outline'],
+      status: 'working',
+      revision: 1,
+    }
+    files.entries.set(
+      '.forgeax/extensions/game-video/workflow.json',
+      json(workflow),
+    )
+    files.entries.set('docs/progressive-pillar.md', encoder.encode(`
+\`\`\`pillar-interaction-contract
+${JSON.stringify({
+  schemaVersion: 3,
+  beats: [
+    {
+      id: 'B01',
+      narrativeIntent: '玩家决定进攻或撤退',
+      playerInformation: ['敌人逼近'],
+      uiCapabilities: ['二元选择'],
+      actions: [
+        {
+          id: 'advance',
+          intent: '进攻',
+          stateMutationOwner: 'none',
+          requiredRole: 'player-choice',
+          stateChange: '无持久变化',
+          immediateFeedback: '锁定进攻',
+          downstreamPayoff: '进入进攻结果',
+          exitIntent: '进入胜利节点',
+        },
+        {
+          id: 'retreat',
+          intent: '撤退',
+          stateMutationOwner: 'none',
+          requiredRole: 'player-choice',
+          stateChange: '无持久变化',
+          immediateFeedback: '锁定撤退',
+          downstreamPayoff: '进入撤退结果',
+          exitIntent: '进入撤退节点',
+        },
+      ],
+      settlements: [],
+    },
+    {
+      id: 'B02',
+      narrativeIntent: '进攻结果',
+      playerInformation: ['战斗结束'],
+      uiCapabilities: [],
+      actions: [],
+      settlements: [{ id: 'B02-end', trigger: 'at', source: '演出结束', intent: '停在结果', feedback: '展示结果', exitIntent: '终局' }],
+    },
+    {
+      id: 'B03',
+      narrativeIntent: '撤退结果',
+      playerInformation: ['队伍脱离'],
+      uiCapabilities: [],
+      actions: [],
+      settlements: [{ id: 'B03-end', trigger: 'at', source: '演出结束', intent: '停在结果', feedback: '展示结果', exitIntent: '终局' }],
+    },
+  ],
+})}
+\`\`\`
+`))
+    files.entries.set('assets/manifest.json', json({
+      version: 2,
+      assets: [{
+        id: 'doc-pillar',
+        kind: 'document',
+        name: 'pillar',
+        status: 'ready',
+        mimeType: 'text/markdown',
+        provider: { kind: 'local', ref: 'docs/progressive-pillar.md' },
+        createdAt: 1,
+        updatedAt: 1,
+        meta: { documentType: 'pillar' },
+      }],
+    }))
+
+    const service = createGameVideoService(context)
+    const chapters = [
+      { id: 'choice', name: '临阵抉择', pillarBeatId: 'B01', beat: 'choice' as const },
+      { id: 'advance-result', name: '进攻结果', pillarBeatId: 'B02', beat: 'narrative' as const },
+      { id: 'retreat-result', name: '撤退结果', pillarBeatId: 'B03', beat: 'narrative' as const },
+    ]
+    const skeleton = await service.createBlueprintOutlineSkeleton({
+      entry: 'choice',
+      expectedRevision: 0,
+      idempotencyKey: 'outline-skeleton:e2e',
+      chapters,
+    }) as { ok: boolean; revision: number; progress: { pendingNodeIds: string[] } }
+
+    expect(skeleton, JSON.stringify(skeleton)).toMatchObject({
+      ok: true,
+      revision: 1,
+      progress: { pendingNodeIds: ['choice', 'advance-result', 'retreat-result'] },
+    })
+    const skeletonBytes = new Uint8Array(files.entries.get('blueprint.json')!)
+    const storedSkeleton = JSON.parse(decoder.decode(skeletonBytes))
+    expect(storedSkeleton.graph.nodes).toHaveLength(3)
+    expect(storedSkeleton.graph.edges).toEqual([])
+
+    const repeated = await service.createBlueprintOutlineSkeleton({
+      entry: 'choice',
+      expectedRevision: 1,
+      idempotencyKey: 'outline-skeleton:e2e:retry',
+      chapters,
+    }) as { ok: boolean; errorCode?: string }
+    expect(repeated).toMatchObject({ ok: false, errorCode: 'outline.skeleton-already-created' })
+    expect(files.entries.get('blueprint.json')).toEqual(skeletonBytes)
+
+    const configured = await service.configureBlueprintOutlineNode({
+      nodeId: 'choice',
+      expectedRevision: 1,
+      idempotencyKey: 'outline-node:e2e:choice',
+      actions: [
+        { pillarActionId: 'advance', component: 'InkYingMo', event: 'ying', feedbackSpec: { kind: 'hide-interface' } },
+        { pillarActionId: 'retreat', component: 'InkYingMo', event: 'mo', feedbackSpec: { kind: 'hide-interface' } },
+      ],
+      settlements: [],
+      outgoingRoutes: [
+        { target: 'advance-result', producer: { kind: 'action', ref: 'advance' } },
+        { target: 'retreat-result', producer: { kind: 'action', ref: 'retreat' } },
+      ],
+    }) as { ok: boolean; revision: number; progress: { pendingNodeIds: string[] } }
+    expect(configured).toMatchObject({
+      ok: true,
+      revision: 2,
+      progress: { pendingNodeIds: ['advance-result', 'retreat-result'] },
+    })
+
+    const advance = await service.configureBlueprintOutlineNode({
+      nodeId: 'advance-result',
+      expectedRevision: 2,
+      idempotencyKey: 'outline-node:e2e:advance',
+      actions: [],
+      settlements: [],
+      outgoingRoutes: [],
+    }) as { ok: boolean; revision: number }
+    expect(advance).toMatchObject({ ok: true, revision: 3 })
+    const retreat = await service.configureBlueprintOutlineNode({
+      nodeId: 'retreat-result',
+      expectedRevision: 3,
+      idempotencyKey: 'outline-node:e2e:retreat',
+      actions: [],
+      settlements: [],
+      outgoingRoutes: [],
+    }) as { ok: boolean; revision: number; progress: { pendingNodeIds: string[] } }
+    expect(retreat).toMatchObject({ ok: true, revision: 4, progress: { pendingNodeIds: [] } })
+
+    const stored = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    expect(stored.graph.edges.map((edge: { id: string }) => edge.id)).toEqual([
+      'edge-choice-ying-advance-result',
+      'edge-choice-mo-retreat-result',
+    ])
   })
 })

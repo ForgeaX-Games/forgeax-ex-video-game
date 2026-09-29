@@ -90,7 +90,7 @@ function activateChild(selectedNodeId: string | null): void {
   })
 }
 
-describe('GraphStudio 试玩当前蓝图', () => {
+describe('GraphStudio 从此试玩', () => {
   beforeEach(() => {
     window.localStorage.clear()
     vi.stubGlobal('fetch', vi.fn(async () =>
@@ -111,53 +111,30 @@ describe('GraphStudio 试玩当前蓝图', () => {
     vi.unstubAllGlobals()
   })
 
-  it('主蓝图不显示「试玩当前蓝图」（整页试玩已覆盖主入口）', () => {
-    useGraphScenario.setState({
-      game: 'game-nodia-fighting',
-      demo: { version: 'game-video.graph.v1', graph: MAIN_GRAPH },
-      blueprints: { [MAIN_ID]: MAIN_DOC, [CHILD_ID]: CHILD_DOC },
-      mainBlueprintId: MAIN_ID,
-      activeBlueprintId: MAIN_ID,
-      graph: MAIN_GRAPH,
-      meta: {},
-      selectedNodeId: null,
-      booted: true,
-    })
-    render(<GraphStudio scenario={{ version: 'game-video.graph.v1', graph: MAIN_GRAPH }} />)
+  it('不提供「试玩当前蓝图」入口；从此试玩仍可用', () => {
+    activateChild('child-stray')
+    render(<GraphStudio scenario={CHILD_SCENARIO} />)
     expect(screen.queryByRole('button', { name: '试玩当前蓝图' })).toBeNull()
     expect(screen.queryByTestId('play-current-blueprint')).toBeNull()
+    expect(screen.getByRole('button', { name: '▶ 从此试玩' })).toBeTruthy()
   })
 
-  it('从当前子蓝图声明的入口开跑，而不是节点数组首位', async () => {
-    activateChild(null)
-    render(<GraphStudio scenario={CHILD_SCENARIO} />)
-
-    fireEvent.click(screen.getByTestId('play-current-blueprint'))
-
-    const overlay = await waitFor(() => screen.getByTestId('play-overlay'))
-    expect(overlay).toHaveTextContent('子蓝图入口')
-    expect(overlay).not.toHaveTextContent('旁支节点')
-  })
-
-  it('从节点试玩之后再点它，回到入口且「重开」不再钉在那个节点', async () => {
+  it('从此试玩从该节点开跑，而不是蓝图入口', async () => {
     activateChild('child-stray')
     render(<GraphStudio scenario={CHILD_SCENARIO} />)
 
     fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
-    await waitFor(() => expect(screen.getByTestId('play-overlay')).toHaveTextContent('旁支节点'))
 
-    fireEvent.click(screen.getByTestId('play-current-blueprint'))
-    await waitFor(() => expect(screen.getByTestId('play-overlay')).toHaveTextContent('子蓝图入口'))
-
-    fireEvent.click(screen.getByTitle('重开'))
-    await waitFor(() => expect(screen.getByTestId('play-overlay')).toHaveTextContent('子蓝图入口'))
+    const overlay = await waitFor(() => screen.getByTestId('play-overlay'))
+    expect(overlay).toHaveTextContent('旁支节点')
+    expect(overlay).not.toHaveTextContent('子蓝图入口')
   })
 
   it('右下角把手可拖拽改变浮层宽高，且不小于下限', async () => {
-    activateChild(null)
+    activateChild('child-stray')
     render(<GraphStudio scenario={CHILD_SCENARIO} />)
 
-    fireEvent.click(screen.getByTestId('play-current-blueprint'))
+    fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
     const overlay = await waitFor(() => screen.getByTestId('play-overlay'))
     const stage = screen.getByTestId('play-overlay-stage')
     expect(overlay.style.width).toBe('320px')
@@ -180,24 +157,11 @@ describe('GraphStudio 试玩当前蓝图', () => {
     expect(stage.style.height).toBe('120px')
   })
 
-  it('取消节点选中不关闭蓝图试玩浮层（它不属于节点配置面板）', async () => {
+  it('倍速下拉的四档文案是可区分的倍数，且选中即生效', async () => {
     activateChild('child-stray')
     render(<GraphStudio scenario={CHILD_SCENARIO} />)
 
-    fireEvent.click(screen.getByTestId('play-current-blueprint'))
-    await waitFor(() => expect(screen.getByTestId('play-overlay')).toBeTruthy())
-
-    act(() => { useGraphScenario.getState().setSelectedNode(null) })
-
-    await waitFor(() => expect(screen.queryByTestId('node-inspector-root')).toBeNull())
-    expect(screen.getByTestId('play-overlay')).toBeTruthy()
-  })
-
-  it('倍速下拉的四档文案是可区分的倍数，且选中即生效', async () => {
-    activateChild(null)
-    render(<GraphStudio scenario={CHILD_SCENARIO} />)
-
-    fireEvent.click(screen.getByTestId('play-current-blueprint'))
+    fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
     const select = await waitFor(() => screen.getByRole('combobox', { name: '试玩倍速' }) as HTMLSelectElement)
 
     expect([...select.options].map((option) => option.textContent))
@@ -225,13 +189,13 @@ describe('GraphStudio 试玩当前蓝图', () => {
         edges: [],
       },
     }
-    activateChild(null)
+    activateChild('child-stray')
     useGraphScenario.setState((st) => ({
       blueprints: { ...st.blueprints, [other.id]: other },
     }))
     render(<GraphStudio scenario={CHILD_SCENARIO} />)
 
-    fireEvent.click(screen.getByTestId('play-current-blueprint'))
+    fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
     await waitFor(() => expect(screen.getByTestId('play-overlay')).toBeTruthy())
 
     act(() => { useGraphScenario.getState().selectBlueprint(other.id) })

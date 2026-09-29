@@ -113,6 +113,15 @@ export const GENERATION_COMPONENTS_CSS = `
   gap: 12px;
   color: #f6f1e9;
 }
+.generation-page-head {
+  display:flex; flex:none; min-height:48px; align-items:center; padding:0 24px;
+  border-bottom:1px solid rgba(255,255,255,.1); background:#333;
+}
+.generation-page-breadcrumb {
+  display:inline-flex; align-items:center; gap:8px; color:rgba(255,255,255,.45); font-size:13px;
+}
+.generation-page-breadcrumb button { border:0; padding:0; color:#fff; background:transparent; font:inherit; cursor:pointer; }
+.generation-page-breadcrumb strong { color:#ff9c2a; }
 .generation-prompt-top { min-width: 0; }
 .generation-prompt-body {
   box-sizing: border-box;
@@ -194,6 +203,17 @@ export const GENERATION_COMPONENTS_CSS = `
   box-shadow: 0 0 0 2px rgba(255,156,42,.24);
 }
 .generation-prompt-composer button:disabled { cursor: not-allowed; opacity: .45; }
+.generation-prompt-composer .vgen-mention-chip > button {
+  display: grid;
+  width: 12px;
+  min-width: 12px;
+  height: 12px;
+  min-height: 12px;
+  flex: 0 0 12px;
+  place-items: center;
+  padding: 0;
+}
+.generation-prompt-composer .vgen-mention-chip > button > img { display: block; width: 12px; height: 12px; }
 .generation-prompt-submit-actions button:last-child {
   border-color: #ff9c2a;
   background: linear-gradient(90deg, #ff7001, #ff9c2a);
@@ -217,21 +237,32 @@ export const GENERATION_COMPONENTS_CSS = `
 .generation-parameter-control { min-width: 0; }
 .generation-parameter-control[data-disabled="true"] { cursor: not-allowed; opacity: .62; }
 .generation-select-field { display: block; min-width: 0; }
-.generation-select-field select {
+.generation-select-trigger {
   box-sizing: border-box;
+  display: flex;
   width: 100%;
   min-height: 34px;
-  padding: 0 9px;
+  align-items: center;
+  padding: 0 30px 0 9px;
   border: 1px solid rgba(255,255,255,.12);
   border-radius: 6px;
   outline: 0;
-  background: #1a1a1a;
+  background: #1a1a1a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 5 3 3 3-3' fill='none' stroke='%23ffffff' stroke-opacity='.6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") right 9px center / 12px no-repeat;
   color: #fff;
+  cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.generation-select-field select:focus-visible { border-color: #ff9c2a; box-shadow: 0 0 0 2px rgba(255,156,42,.2); }
-.generation-select-field select:disabled { cursor: not-allowed; opacity: .7; }
+.generation-select-trigger:focus-visible { border-color: #ff9c2a; box-shadow: 0 0 0 2px rgba(255,156,42,.2); }
+.generation-select-trigger:disabled { cursor: not-allowed; opacity: .7; }
+.generation-select-menu { position: fixed; z-index: 1000; box-sizing: border-box; display: flex; max-height: min(260px, calc(100dvh - 16px)); flex-direction: column; gap: 6px; overflow-y: auto; padding: 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: #1a1a1a; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
+.generation-select-menu button { box-sizing: border-box; display: flex; width: 100%; min-height: 40px; align-items: center; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; font: inherit; font-size: 14px; text-align: left; }
+.generation-select-menu button:hover,
+.generation-select-menu button:focus-visible { background: rgba(255,255,255,.05); outline: 0; }
 .generation-option-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .generation-option-group button {
   min-width: 0;
@@ -274,13 +305,18 @@ export const GENERATION_COMPONENTS_CSS = `
 .generation-preview-image-like__actions button:disabled { cursor: not-allowed; opacity: .45; }
 .generation-preview-video__close { position: absolute; z-index: 4; top: 5px; right: 5px; display: grid; box-sizing: border-box; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 6px; background: rgba(0,0,0,.18); color: #fff; cursor: pointer; font: inherit; font-size: 20px; line-height: 1; }
 .generation-preview-video__close:hover, .generation-preview-video__close:focus-visible { background: rgba(0,0,0,.6); outline: 0; }
+.generation-preview-video__fullscreen-close { position: absolute; z-index: 4; top: 12px; right: 12px; }
 .generation-preview-video__controls { position: absolute; z-index: 3; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; padding: 54px 16px 15px; background: linear-gradient(to top,rgba(0,0,0,.9),rgba(0,0,0,.5) 50%,transparent); }
-.generation-preview-video__control-row { display: flex; height: 16px; align-items: center; gap: 4px; color: rgba(255,255,255,.4); font-size: 10px; font-variant-numeric: tabular-nums; }
-.generation-preview-video__control-row button { display: grid; box-sizing: border-box; min-width: 16px; height: 16px; place-items: center; padding: 0; border: 0; background: transparent; color: rgba(255,255,255,.82); cursor: pointer; font: inherit; }
-.generation-preview-video__control-row button:disabled { cursor: not-allowed; opacity: .45; }
-.generation-preview-video__control-row button svg { display: block; width: 13px; height: 13px; }
+.generation-preview-video__control-row { display: flex; height: 16px; align-items: center; color: rgba(255,255,255,.4); font-size: 10px; font-variant-numeric: tabular-nums; }
+.generation-preview-video__control-row > button { display: grid; box-sizing: border-box; min-width: 16px; height: 16px; place-items: center; padding: 0; border: 0; background: transparent; color: rgba(255,255,255,.82); cursor: pointer; font: inherit; }
+.generation-preview-video__control-row > button:disabled { cursor: not-allowed; opacity: .45; }
+.generation-preview-video__control-row > button svg { display: block; width: 13px; height: 13px; }
+.generation-preview-video__control-row > button:first-child { margin-right:10.2px; }
 .generation-preview-video__time.is-current { color: rgba(255,255,255,.8); }
-.generation-preview-video__control-row .generation-preview-video__rate { margin-left: auto; color: #ff9c2a; }
+.generation-preview-video__control-row .vfd-rate-picker { position:relative; margin-left:auto; }
+.generation-preview-video__control-row .generation-preview-video__rate { color:#fff; font-size:10px; line-height:16px; }
+.generation-preview-video__control-row .generation-preview-video__rate[aria-expanded="true"] { color:#ff9c2a; }
+.generation-preview-video__control-row > .generation-preview-video__fullscreen { margin-left:15.3px; }
 .generation-preview-video__fullscreen img { display: block; width: 13px; height: 13px; }
 .generation-preview-video__progress { --generation-preview-progress: 0%; box-sizing: border-box; width: 100%; height: 4px; margin: 0; padding: 0; appearance: none; border: 0; border-radius: 999px; outline: 0; background: linear-gradient(to right,#ff9c2a 0 var(--generation-preview-progress),rgba(255,255,255,.2) var(--generation-preview-progress) 100%); cursor: pointer; }
 .generation-preview-video__progress::-webkit-slider-thumb { width: 0; height: 0; appearance: none; }
@@ -372,21 +408,27 @@ export const GENERATION_COMPONENTS_CSS = `
 .igen-workspace .igen-history-list .generation-history-list__items { gap: 7px; padding: 7px 0 0; }
 .igen-panel.is-page .igen-empty-frame.is-idle .generation-preview-frame__footer { display: none; }
 .igen-settings .generation-parameters-title { display: none; }
-.igen-settings .generation-parameters-fields { gap: 22px; }
+.igen-settings .generation-parameters-fields { gap: 20px; }
 .igen-settings .generation-parameter-field { gap: 12px; }
 .igen-settings .generation-parameter-label { position: relative; padding-left: 11px; color: #fff; font-size: 14px; line-height: 20px; }
 .igen-settings .generation-parameter-label::before { position: absolute; top: 4px; bottom: 4px; left: 0; width: 3px; border-radius: 3px; background: #e8864a; content: ''; }
-.igen-settings .generation-select-field select { height: 40px; padding: 0 12px; border-radius: 8px; font-size: 13px; }
+.igen-settings .generation-select-trigger { font-size: 14px; }
 .igen-settings .generation-option-group { gap: 8px; }
 .igen-settings .generation-option-group button { min-height: 52px; padding: 7px 9px; border-radius: 7px; color: #fff; }
+.igen-settings .generation-option-group.generation-resolution-options button,
+.vgen-generation-layout.is-page .vgen-settings .generation-option-group.generation-resolution-options button { min-height: 28px; padding: 5px 12px; border-color: rgba(255,255,255,.08); border-radius: 6px; background: #1a1a1a; color: #fff; font-size: 12px; line-height: 18px; }
+.igen-settings .generation-option-group.generation-resolution-options button.is-selected,
+.vgen-generation-layout.is-page .vgen-settings .generation-option-group.generation-resolution-options button.is-selected { border-color: #e8864a; background: #e8864a; color: #000; }
 .igen-composer .generation-prompt-composer { height: 100%; gap: 0; }
 .igen-composer .generation-prompt-top { flex: 0 0 auto; margin-bottom: 15px; }
 .igen-composer .generation-prompt-body { min-height: 126px; padding: 15px 19px; }
 .igen-composer .generation-prompt-body > .vgen-mention-editor-wrap { min-height: 74px; }
-.igen-composer .vgen-mention-editor { min-height: 63px; color: rgba(255,255,255,.6); font-size: 14px; line-height: 21px; }
+.igen-composer .vgen-mention-editor-wrap { min-height: 0; overflow: hidden; }
+.igen-composer .vgen-mention-editor { overflow-y: auto; }
 .igen-composer .generation-prompt-actions { min-height: 32px; }
 .igen-composer .generation-prompt-body button { border: 0; background: transparent; }
 .igen-composer .generation-prompt-mention { display: grid; width: 24px; min-height: 24px; place-items: center; padding: 0; font-size: 16px; }
+.igen-composer .generation-prompt-mention img { display: block; width: 14px; height: 14px; }
 .igen-composer .generation-prompt-style { display: inline-flex; max-width: 180px; min-height: 24px; align-items: center; gap: 8px; overflow: hidden; padding: 0 8px; white-space: nowrap; }
 .igen-composer .generation-prompt-style > span { overflow: hidden; text-overflow: ellipsis; }
 .igen-composer .generation-prompt-style img { width: 12px; height: 12px; }
@@ -400,15 +442,12 @@ export const GENERATION_COMPONENTS_CSS = `
 .igen-composer .generation-prompt-cancel,
 .igen-composer .generation-prompt-polish { border-radius: 4px; color: rgba(255,255,255,.8); }
 .igen-composer .generation-prompt-polish { display: inline-flex; min-height: 24px; align-items: center; gap: 8px; padding: 0 8px; }
-.igen-composer .generation-prompt-submit-actions { width: 289px; flex: 0 0 289px; gap: 15px; }
-.igen-composer .generation-prompt-composer .generation-prompt-submit { display: grid; width: 32px; min-height: 32px; place-items: center; padding: 0; border-radius: 50%; background: #ff9c2a; box-shadow: 0 2px 8px rgba(255,112,1,.18); }
-.igen-composer .generation-prompt-submit img { width: 20px; height: 18px; transform: rotate(45deg) scaleX(-1); }
 
 /* The original full-page video generator used a two-column upper stage and a
    full-width composer. Dialog surfaces keep the generic atom layout. */
 .vgen-generation-layout.is-page .vgen-design-workspace {
   grid-template-columns: 225px minmax(0, 1fr);
-  grid-template-rows: minmax(300px, 1fr) 330px;
+  grid-template-rows: minmax(300px, 1.9fr) minmax(320px, 1fr);
   grid-template-areas: none;
   gap: 5px;
   padding: 5px;
@@ -418,7 +457,7 @@ export const GENERATION_COMPONENTS_CSS = `
 .vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__parameters { grid-area: auto; grid-column: 1; grid-row: 1; border-radius: 0; }
 .vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__preview { grid-area: auto; grid-column: 2; grid-row: 1; border-radius: 10px; }
 .vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__history { grid-area: auto; grid-column: 3; grid-row: 1; width: 67px; overflow: hidden; border-radius: 0; background: transparent; }
-.vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__composer { grid-area: auto; grid-column: 1 / -1; grid-row: 2; border-radius: 0; }
+.vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__composer { grid-area: auto; grid-column: 1 / -1; grid-row: 2; min-height:0; overflow:hidden; padding:16px; border-radius:3px; }
 .vgen-generation-layout.is-page .vgen-page-history .vgen-generation-history-head { box-sizing: border-box; display: grid; width: 67px; min-height: 30px; place-items: center; padding: 6px; border: 0; border-radius: 8px; background: rgba(255,255,255,.05); color: rgba(255,255,255,.6); font-size: 11px; line-height: 16.5px; }
 .vgen-generation-layout.is-page .vgen-page-history .vgen-generation-history-head span { display: none; }
 .vgen-generation-layout.is-page .vgen-page-history .generation-history-list__items { gap: 7px; padding: 7px 0 0; }
@@ -438,8 +477,10 @@ export const GENERATION_COMPONENTS_CSS = `
 .vgen-generation-layout.is-page .vgen-settings .generation-parameter-field { gap: 12px; }
 .vgen-generation-layout.is-page .vgen-settings .generation-parameter-label { position: relative; padding-left: 11px; color: #fff; font-size: 14px; line-height: 21px; }
 .vgen-generation-layout.is-page .vgen-settings .generation-parameter-label::before { position: absolute; top: 5px; bottom: 5px; left: 0; width: 3px; border-radius: 3px; background: #e8864a; content: ''; }
-.vgen-generation-layout.is-page .vgen-settings .generation-select-field select { height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; }
-.vgen-generation-layout.is-page .vgen-settings .generation-select-field select { border-color: rgba(255,255,255,.08); }
+.igen-settings .generation-select-trigger,
+.vgen-generation-layout.is-page .vgen-settings .generation-select-trigger { height: 40px; padding: 0 36px 0 12px; border-radius: 8px; background-position: right 12px center; }
+.vgen-generation-layout.is-page .vgen-settings .generation-select-trigger { font-size: 14px; }
+.vgen-generation-layout.is-page .vgen-settings .generation-select-trigger { border-color: rgba(255,255,255,.08); }
 .vgen-generation-layout.is-page .vgen-settings .generation-option-group { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 .vgen-generation-layout.is-page .vgen-settings .generation-option-group button { min-height: 28px; padding: 5px 12px; border-color: rgba(255,255,255,.08); border-radius: 6px; background: #1a1a1a; color: #fff; font-size: 12px; line-height: 18px; }
 .vgen-generation-layout.is-page .vgen-settings .generation-option-group button.is-selected { border-color: #e8864a; background: #e8864a; color: #000; }
@@ -447,11 +488,12 @@ export const GENERATION_COMPONENTS_CSS = `
 .vgen-generation-layout.is-page .vgen-settings .generation-range-field input::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,.1); }
 .vgen-generation-layout.is-page .vgen-settings .generation-range-field input::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4px; appearance: none; border: 2px solid #e8864a; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.1), 0 4px 6px rgba(0,0,0,.1); }
 .vgen-generation-layout.is-page .vgen-settings .generation-range-field input:focus-visible { outline: 2px solid rgba(255,156,42,.48); outline-offset: 3px; border-radius: 4px; }
-.vgen-generation-layout.is-page .vgen-composer .generation-prompt-composer { gap: 0; }
-.vgen-generation-layout.is-page .vgen-composer .generation-prompt-top { display: flex; flex-direction: column; gap: 12px; margin-bottom: 15px; }
-.vgen-generation-layout.is-page .vgen-composer .generation-prompt-body { height: auto; min-height: 164px; flex: 1 1 0%; padding: 15px 19px; }
-.vgen-generation-layout.is-page .vgen-composer .generation-prompt-body > .vgen-mention-editor-wrap { min-height: 48px; }
-.vgen-generation-layout.is-page .vgen-composer .vgen-mention-editor { min-height: 48px; font-size: 14px; line-height: 32px; }
+.vgen-generation-layout.is-page .vgen-composer > .generation-prompt-composer { min-height:0; flex:1 1 auto; }
+.vgen-generation-layout.is-page .vgen-composer .generation-prompt-composer { gap: 15px; }
+.vgen-generation-layout.is-page .vgen-composer .generation-prompt-body { min-height:0; flex:1 1 auto; padding:15px 19px; }
+.vgen-generation-layout.is-page .vgen-composer .generation-prompt-body > .vgen-mention-editor-wrap { min-height:0; flex:1 1 auto; overflow:hidden; }
+.igen-composer .vgen-mention-editor,
+.vgen-generation-layout.is-page .vgen-composer .vgen-mention-editor { min-height:63px; overflow-y:auto; color:#fff; font-size:14px; line-height:21px; }
 .vgen-generation-layout.is-page .vgen-composer .generation-prompt-actions { min-height: 32px; }
 .vgen-generation-layout.is-page .vgen-composer .generation-prompt-body button { border: 0; background: transparent; }
 .vgen-generation-layout.is-page .vgen-composer .vgen-mode-tabs button { height: 30px; min-height: 30px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; color: rgba(255,255,255,.6); font-size: 13px; font-weight: 500; line-height: normal; }
@@ -471,15 +513,18 @@ export const GENERATION_COMPONENTS_CSS = `
 .vgen-generation-layout.is-page .vgen-composer .generation-prompt-cancel,
 .vgen-generation-layout.is-page .vgen-composer .generation-prompt-polish { border-radius: 4px; color: rgba(255,255,255,.8); }
 .vgen-generation-layout.is-page .vgen-composer .generation-prompt-polish { display: inline-flex; min-height: 24px; align-items: center; gap: 8px; padding: 0 8px; }
+.igen-composer .generation-prompt-submit-actions,
 .vgen-generation-layout.is-page .vgen-composer .generation-prompt-submit-actions { width: 289px; flex: 0 0 289px; gap: 15px; }
-.vgen-generation-layout.is-page .vgen-composer .generation-prompt-composer .generation-prompt-submit { display: grid; width: 32px; min-height: 32px; place-items: center; padding: 0; border-radius: 50%; background: #ff9c2a; box-shadow: 0 2px 8px rgba(255,112,1,.18); }
-.vgen-generation-layout.is-page .vgen-composer .generation-prompt-submit img { width: 20px; height: 18px; transform: rotate(45deg) scaleX(-1); }
+.igen-composer .generation-prompt-composer .generation-prompt-submit,
+.vgen-generation-layout.is-page .vgen-composer .generation-prompt-composer .generation-prompt-submit { display: grid; width: 32px; min-height: 32px; place-items: center; padding: 0; border-radius: 50%; background: transparent; box-shadow: 0 2px 8px rgba(255,112,1,.18); }
+.igen-composer .generation-prompt-submit img,
+.vgen-generation-layout.is-page .vgen-composer .generation-prompt-submit img { display: block; width: 32px; height: 32px; }
 
 @media (max-width: 860px) {
   .generation-surface { grid-template-columns: minmax(170px, 205px) minmax(0, 1fr); }
   .vgen-generation-layout.is-page .vgen-design-workspace {
     grid-template-columns: minmax(170px, 205px) minmax(0, 1fr);
-    grid-template-rows: minmax(300px, 1.65fr) minmax(255px, 1fr);
+    grid-template-rows: minmax(300px, 1.9fr) minmax(320px, 1fr);
   }
   .vgen-generation-layout.is-page .vgen-design-workspace.has-history { grid-template-columns: minmax(170px, 205px) minmax(0, 1fr) 67px; }
   .vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__history { grid-column: 3; grid-row: 1; max-height: none; }

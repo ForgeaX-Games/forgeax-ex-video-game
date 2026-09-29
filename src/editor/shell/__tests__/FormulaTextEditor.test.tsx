@@ -140,7 +140,7 @@ describe('FormulaTextEditor input state', () => {
     )
 
     expect(screen.queryByText(/参数 1/)).toBeNull()
-    expect(screen.getByText('试算')).toBeTruthy()
+    expect(screen.queryByText('试算')).toBeNull()
 
     const input = screen.getByRole('textbox', { name: '公式表达式' })
     fireEvent.change(input, { target: { value: 'max(' } })
@@ -345,7 +345,7 @@ describe('FormulaTextEditor authoring syntax', () => {
     fireEvent.change(input, {
       target: { value: 'ｍａｘ（　１０　－ ３，０　）' },
     })
-    expect(screen.getByText('≈ 7')).toBeTruthy()
+    expect(screen.queryByText('≈ 7')).toBeNull()
     fireEvent.blur(input)
 
     expect(previewFormula(onChange.mock.calls[0]![0])).toBe('max(10 - 3, 0)')

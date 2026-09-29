@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import fullscreenIcon from '@/editor/ui-assets/video-control-fullscreen.svg?url'
 import { PreviewPauseIcon, PreviewPlayIcon } from '@/editor/shell/nodePreviewControls'
+import { MediaPreviewControlRow, PlaybackRatePicker } from '@/editor/shell/VideoFullscreenDialog'
 import { tf, useT } from '../../../../../i18n'
+import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import {
   canPerformGenerationAction,
   type GeneratedVideoAsset,
@@ -10,6 +13,14 @@ import {
 } from '../types'
 import { GenerationPreviewFrame } from './GenerationPreviewFrame'
 import { revealFirstVideoFrame } from '@/editor/video/revealFirstVideoFrame'
+
+const VIDEO_PREVIEW_WORKSPACE_FULLSCREEN_CSS = `
+.generation-preview-workspace-fullscreen {
+  position:fixed; z-index:var(--z-top, 9999); inset:0; display:flex; min-width:0; min-height:0; background:#000;
+}
+.generation-preview-workspace-fullscreen > .generation-preview-video { width:100%; height:100%; min-width:0; min-height:0; }
+`
+injectStyleOnce('game-video-generation-preview-workspace-fullscreen', VIDEO_PREVIEW_WORKSPACE_FULLSCREEN_CSS)
 
 export interface VideoPreviewProps {
   asset: GeneratedVideoAsset
@@ -64,6 +75,7 @@ export function VideoPreview({
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(asset.durationSeconds ?? 0)
   const [playbackRate, setPlaybackRate] = useState(1)
+  const [workspaceFullscreen, setWorkspaceFullscreen] = useState(false)
   const resolvedSrc = src ?? asset.url
   const name = asset.label?.trim() || t('assetComponents.kind.video')
   const canRead = !interaction.disabled
@@ -78,6 +90,16 @@ export function VideoPreview({
     setDuration(asset.durationSeconds ?? 0)
     setPlaybackRate(1)
   }, [asset.durationSeconds, resolvedSrc])
+  useEffect(() => {
+    if (!workspaceFullscreen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setWorkspaceFullscreen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [workspaceFullscreen])
 
   const togglePlayback = (): void => {
     if (!canRead) return
@@ -94,29 +116,31 @@ export function VideoPreview({
     }
   }
 
-  const cyclePlaybackRate = (): void => {
+  const updatePlaybackRate = (rate: number): void => {
     if (!canRead) return
     const video = videoRef.current
-    const next = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1
-    if (video) video.playbackRate = next
-    setPlaybackRate(next)
+    if (video) video.playbackRate = rate
+    setPlaybackRate(rate)
+  }
+
+  const restartPlayback = (): void => {
+    if (!canRead) return
+    const video = videoRef.current
+    if (!video) return
+    video.currentTime = 0
+    setCurrentTime(0)
+    setPlaying(true)
+    play?.(asset)
+    void video.play().catch(() => setPlaying(false))
   }
 
   const openFullscreen = (): void => {
     if (!canRead) return
-    const video = videoRef.current
-    if (video?.requestFullscreen) void video.requestFullscreen()
+    setWorkspaceFullscreen((current) => !current)
   }
 
-  return (
-    <GenerationPreviewFrame
-      phase={phase}
-      interaction={interaction}
-      ariaLabel={ariaLabel ?? t('videoAssets.generate.output')}
-      className={className}
-      showFooter={showFooter}
-    >
-      <div className="generation-preview-video">
+  const videoContent = (
+    <div className="generation-preview-video">
         {resolvedSrc ? (
           <video
             ref={videoRef}
@@ -142,6 +166,16 @@ export function VideoPreview({
             ◇
           </span>
         )}
+        {workspaceFullscreen ? (
+          <button
+            type="button"
+            className="generation-preview-video__fullscreen-close vfd-close"
+            aria-label={tf('generation.preview.close', { name })}
+            onClick={openFullscreen}
+          >
+            ×
+          </button>
+        ) : null}
         {onClose ? (
           <button
             type="button"
@@ -155,7 +189,17 @@ export function VideoPreview({
           </button>
         ) : null}
         <div className="generation-preview-video__controls">
-          <div className="generation-preview-video__control-row">
+          {workspaceFullscreen ? <MediaPreviewControlRow
+            currentTime={currentTime}
+            duration={duration}
+            playing={playing}
+            playbackRate={playbackRate}
+            onTogglePlayback={togglePlayback}
+            onRestartPlayback={restartPlayback}
+            onUpdatePlaybackRate={updatePlaybackRate}
+            onFullscreen={openFullscreen}
+            fullscreenDisabled={!canRead || !resolvedSrc}
+          /> : <div className="generation-preview-video__control-row">
             <button
               type="button"
               data-action={playing ? 'pause' : 'play'}
@@ -168,16 +212,14 @@ export function VideoPreview({
             <span className="generation-preview-video__time is-current" aria-live="off">{formatVideoTime(currentTime)}</span>
             <span className="generation-preview-video__time-separator" aria-hidden>/</span>
             <span className="generation-preview-video__time">{formatVideoTime(duration)}</span>
-            <button
-              type="button"
+            <PlaybackRatePicker
               className="generation-preview-video__rate"
-              data-action="rate"
+              playbackRate={playbackRate}
+              onChange={updatePlaybackRate}
+              ariaLabel={t('videoAssets.generate.player.rate')}
               disabled={!canRead || !resolvedSrc}
-              aria-label={t('videoAssets.generate.player.rate')}
-              onClick={cyclePlaybackRate}
-            >
-              {tf('videoAssets.generate.player.rateValue', { rate: playbackRate.toFixed(1) })}
-            </button>
+              dataAction="rate"
+            />
             <button
               type="button"
               className="generation-preview-video__fullscreen"
@@ -188,7 +230,7 @@ export function VideoPreview({
             >
               <img src={fullscreenIcon} alt="" />
             </button>
-          </div>
+          </div>}
           {resolvedSrc ? (
             <input
               type="range"
@@ -238,7 +280,24 @@ export function VideoPreview({
           </div> : null}
           {applyError ? <p className="generation-preview-video__apply-error" role="alert">{applyError}</p> : null}
         </div>
-      </div>
+    </div>
+  )
+  return (
+    <GenerationPreviewFrame
+      phase={phase}
+      interaction={interaction}
+      ariaLabel={ariaLabel ?? t('videoAssets.generate.output')}
+      className={className}
+      showFooter={showFooter}
+    >
+      {workspaceFullscreen ? createPortal(
+        <div className="generation-preview-workspace-fullscreen" role="dialog" aria-modal="true" aria-label={ariaLabel ?? t('videoAssets.generate.output')} onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setWorkspaceFullscreen(false)
+        }}>
+          {videoContent}
+        </div>,
+        document.body,
+      ) : videoContent}
     </GenerationPreviewFrame>
   )
 }

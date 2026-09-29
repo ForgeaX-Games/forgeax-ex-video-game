@@ -28,7 +28,7 @@ export interface GameStageProps {
   /** 皮肤注册表(session.skins);缺省不渲染叠层。 */
   skins: SkinRegistry | undefined
   skinCtx: SkinCtx | undefined
-  onEmit: (elementId: string, key: string) => void
+  onEmit: (elementId: string, key: string, payload?: Record<string, unknown>) => void
   onTick: (nowMs: number) => void
   /** 演出提前收尾(时长上限到点 / 非 loop 视频自然结束)。 */
   onPerformanceEnd: () => void

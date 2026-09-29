@@ -1,0 +1,362 @@
+{
+  "version": "game-video.graph.v1",
+  "variables": {},
+  "entities": {},
+  "ui": {
+    "overlays": {
+      "base:BattleEnemyHpBar": {
+        "id": "base:BattleEnemyHpBar",
+        "title": "敌方水墨血条",
+        "children": [
+          {
+            "id": "BattleEnemyHpBar-0",
+            "component": "BattleEnemyHpBar",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "敌方（敌人 / BOSS）血条：目标进度条。没有它，回合制就失去节奏感——观众不知道还要打几回合，也看不出这一击到底有没有效。战斗节拍里它应当和我方血条成对出现；只挂技能条不挂血条，观众感知不到自己的操作改变了什么。无 events，纯显示。使用：inputs.current 绑敌方实体的血量属性（numberExpr，例如 entity.tiger.attr.hp），inputs.max 绑该属性的 attrMeta.max，inputs.label 是显示名。max 必须真的有值：attrRatio 条件的分母就是它，缺了会让「血量比例 ≤ 0」在满血时就成立，一进战斗立刻判负。挂载用 trigger.when=enter，不配 window。摆放：页面顶部水平居中；一个场景只放一个，多个敌人时只展示当前主要敌人（BOSS）。"
+      },
+      "base:BattlePlayerHpBar": {
+        "id": "base:BattlePlayerHpBar",
+        "title": "我方水墨血条",
+        "children": [
+          {
+            "id": "BattlePlayerHpBar-0",
+            "component": "BattlePlayerHpBar",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "我方（玩家）血条：危机感与资源可视化。它同时承担两件事——血量让观众感到危险，气力让观众明白「攒气开大」是一件可以规划的事。无 events，纯显示。使用：inputs.current/max 绑玩家血量属性与其 attrMeta.max，inputs.qi/qiMax 绑气力（可省）。qi 应当与 BattleSkill 的 *Resource 绑同一个变量，否则观众不知道大招为什么是灰的、还差多少。max 必须真的有值：attrRatio 条件的分母就是它，缺了会让「血量比例 ≤ 0」在满血时就成立。挂载用 trigger.when=enter，不配 window。摆放：页面右下角；一个场景只放一个我方血条。"
+      },
+      "base:BattleSkill": {
+        "id": "base:BattleSkill",
+        "title": "战斗技能条",
+        "children": [
+          {
+            "id": "BattleSkill-0",
+            "component": "BattleSkill",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "战斗技能条：唯一的多选决策器，四个出口对应四种后果，是回合制战斗里「这一回合怎么打」的抓手。事件：light（轻攻击）/ heavy（重攻击）/ medit（冥想）/ ult（灭世）。四个事件都必须有去处（reaction 或出边），并且各自通向不同的后果，再由下游节拍的视频演出来——轻击是试探、重击是拼命、冥想是回气、灭世是爆发；四招走同一段演出等于四个等价按钮，观众按哪个都一样。这一段剧情用不上某一招时，要让那个按钮真的按不下去，而不是留个空事件。置灰规则是「资源 < 消耗」：把 <事件>Cost 配到 <事件>Resource 的上界之上（资源绑常量就比常量大，绑 var.x 就比 variables.x.max 大，绑 entity.e.attr.a 就比 attrMeta.a.max 大）。注意不配不等于关闭：缺省是 lightCost=0 / heavyCost=2 / meditCost=0 / ultCost=5，四个 *Resource 缺省 0，所以不写 medit 的输入时「0 < 0」为假，冥想按钮是亮的、点得动、发得出事件，而没人接。要禁用就显式写 Cost。使用：inputs.*Resource 绑技能资源（numberExpr），inputs.*Cost 配每招消耗，inputs.*Key 配按键。资源变量最好同时绑到 BattlePlayerHpBar.qi，否则观众不知道大招为什么是灰的、还差多少。一次挂载只能发一次事件（点完即锁），多回合必须靠图上的环回到待命节拍，不要指望在同一节点连点。挂载用 trigger.when=enter，不配 window。摆放：页面底部居中（玩家血条上方）；同一场景只放一个技能条。"
+      },
+      "base:BattleParry": {
+        "id": "base:BattleParry",
+        "title": "防反 QTE",
+        "children": [
+          {
+            "id": "BattleParry-0",
+            "component": "BattleParry",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "防反 QTE：唯一的实时操作压力源，三档判定天然对应三条边。用在敌方杀招袭来的那一刻。事件：greatSuccess（两键全中）/ success（中一键）/ fail（未中）。三档由元件自己在约 1500ms 内结算，玩家回避不了任何一档，也没有办法把某一档关掉——三个事件必须全部接线，且必须通向真正不同的后果：大成功反打重创、成功减免伤害、失败吃满伤，各自在下游节拍有对应的演出。三档合流到同一个节点，这个 QTE 就只是装饰。使用：inputs.firstKey/secondKey 配两个按键。调度：用 window 表达时机，不要靠 trigger——必须对齐视频里出刀 / 扑击的那一帧，0ms 开场弹出会与画面脱节。它自带 1500ms 内部判定，外层窗口要么不设 endMs（让它自己结算），要么 endMs - startMs ≥ 1600，短于这个会打断判定环动画。被 window 卸载时它仍会 emit，所以不需要超时兜底。摆放：页面中央；不要与血条、技能条重叠，同一时刻只出现一个 QTE。"
+      },
+      "base:Dialogue": {
+        "id": "base:Dialogue",
+        "title": "字幕/对白",
+        "children": [
+          {
+            "id": "Dialogue-0",
+            "component": "Dialogue",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "字幕 / 对白：叙事底座，零互动价值。它能让一段戏被听懂，但挂了它不等于配了玩法——beat 不是 narrative 的节点只挂字幕，等于观众只能干看。互动只来自决策器（战斗技能条、防反 QTE、應默抉择、叩击、文字交互），字幕是陪衬不是主角。无 events，纯表现。使用：inputs.text 绑台词（numberExpr 可读变量 / 公式），inputs.speaker 是说话人名，inputs.color/fontSize 配样式。挂载用 trigger.when=enter；需要与语音对齐时用 window 表达出现区间。摆放：页面底部居中（尽量靠近下缘）；同一时刻只显示一条字幕，不要与血条、技能条重叠。"
+      },
+      "base:DamageFloatText": {
+        "id": "base:DamageFloatText",
+        "title": "伤害飘字",
+        "children": [
+          {
+            "id": "DamageFloatText-0",
+            "component": "DamageFloatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "伤害飘字：打击反馈。扣了血却没有飘字，观众只能盯着血条猜这一下有没有打中，手感会塌掉；凡是造成伤害的 event reaction，都应当配一条飘字。飘字实例只能由 reaction 的 spawn 动态产生，不能写进静态 children；但这不限制时间轴卡点：如果要在视频 3000ms 出现，应写 reaction.when={ type: \"at\", ms: 3000 }，再在 do 里执行 { kind: \"spawn\", from: \"base:DamageFloatText/DamageFloatText-0\", inputs: { parameter: { expr: \"formula.<伤害公式 id>\" } }, ttlMs: 1100 }。静态挂载会被 ui.floattext.static-mount 拦下；at(ms) 的 reaction 是合法用法。使用：inputs.parameter 绑伤害值（numberExpr），inputs.fixedText 是固定前缀文字，inputs.color/fontSize/durationMs 配样式；无 events。出现位置由 spawn 时的受击目标决定；同一节拍不要连续 spawn 多条完全重叠的飘字。"
+      },
+      "base:GainFloatText": {
+        "id": "base:GainFloatText",
+        "title": "增益飘字",
+        "children": [
+          {
+            "id": "GainFloatText-0",
+            "component": "GainFloatText",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "增益飘字：正反馈。回气、回血、拾取、士气上涨——凡是往好的方向改了数值的 reaction，都应当让观众当场看见。与伤害飘字对称，只是默认金色。飘字实例只能由 reaction 的 spawn 动态产生，不能写进静态 children；但这不限制时间轴卡点：如果要在视频 3000ms 出现，应写 reaction.when={ type: \"at\", ms: 3000 }，再在 do 里执行 { kind: \"spawn\", from: \"base:GainFloatText/GainFloatText-0\", inputs: { parameter: { expr: \"formula.<增益公式 id>\" } }, ttlMs: 1100 }。静态挂载会被 ui.floattext.static-mount 拦下；at(ms) 的 reaction 是合法用法。使用：inputs.parameter 绑增益值（numberExpr），inputs.fixedText 是固定前缀文字，inputs.color/fontSize/durationMs 配样式；无 events。出现位置由 spawn 时的目标角色决定；同一节拍不要连续 spawn 多条完全重叠的飘字。"
+      },
+      "base:InkYingMo": {
+        "id": "base:InkYingMo",
+        "title": "應/默 抉择",
+        "children": [
+          {
+            "id": "InkYingMo-0",
+            "component": "InkYingMo",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "應/默 抉择：二元剧情分歧器。用在故事真的要分岔的节点——观众替主角做一个有后果的取舍（应下 / 沉默、再饮 / 停杯、出手 / 旁观）；不要拿它当「点击继续」。事件：ying（應）与 mo（默）是故事的两条岔路，不是同一段剧情的两种点法。两个事件都必须接线，并且应当通向不同的下游节点：观众选「應」进入「應」的支线，在那个节点上结算「應」的后果，并让该节点的视频演出这一后果（例如醉度上升、脚步虚浮）；「默」同理。两条边指向同一个节点时观众的选择就是假的——一段视频演不出两种相反的后果。无 inputs（两个选项文案固定）。挂载用 trigger.when=enter；台词还没说完就弹选项会让观众来不及听，需要延后用 window.startMs。摆放：页面中央或底部居中；同一时刻只出现一个抉择组件，不要与 QTE、血条重叠。"
+      },
+      "base:InkKou": {
+        "id": "base:InkKou",
+        "title": "叩击",
+        "children": [
+          {
+            "id": "InkKou-0",
+            "component": "InkKou",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "叩击 QTE：单点卡点，价值在仪式感而不在分支——破门、斩杀、挣脱、最后一击。事件：只有 kou 一个，必须接线；它代表「这一下成了」，下游节点的视频要演出这一下的结果。它没有内部超时，被 window 卸载时不会发任何事件，所以必须同时配 window.endMs 和一条玩家没按时的兜底走向（default 出边或 routingSettlement），否则观众不点就永久卡死。使用：inputs.triggerKey 配触发按键。调度：用 window 表达时机，对齐视频里该出手的那一帧；0ms 开场弹出会与画面脱节。摆放：页面中央；不要与血条、技能条重叠，同一时刻只出现一个 QTE。"
+      },
+      "base:StatusNotice": {
+        "id": "base:StatusNotice",
+        "title": "状态提示",
+        "children": [
+          {
+            "id": "StatusNotice-0",
+            "component": "StatusNotice",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "状态提示：把不可见的变量变化显性化。醉度、疑窦、线索这类跨章节状态被改动时，如果不弹一条提示，观众根本不知道自己刚才的选择留下了什么——后面用这个变量门控结局时，分支会显得莫名其妙。提示实例只能由 reaction 的 spawn 动态产生，不能写进静态 children；但这不限制时间轴卡点：如果要在视频 3000ms 出现，应写 reaction.when={ type: \"at\", ms: 3000 }，再在 do 里执行 { kind: \"spawn\", from: \"base:StatusNotice/StatusNotice-0\", inputs: { fixedText: \"醉度 +1\" }, ttlMs: 1600 }。静态挂载会被 ui.floattext.static-mount 拦下；at(ms) 的 reaction 是合法用法。使用：inputs.fixedText 是固定提示文字，inputs.parameter 可绑变量/公式插值，inputs.color/fontSize/durationMs 配样式；无 events。同一时刻只弹一条状态提示，不要与血条、技能条抢位置。"
+      },
+      "base:TextOption": {
+        "id": "base:TextOption",
+        "title": "文字交互",
+        "children": [
+          {
+            "id": "TextOption-0",
+            "component": "TextOption",
+            "layout": {
+              "left": 0,
+              "top": 0,
+              "width": 1,
+              "height": 1
+            },
+            "trigger": {
+              "when": "enter"
+            },
+            "window": {
+              "startMs": 0
+            },
+            "inputs": {}
+          }
+        ],
+        "prompt": "文字交互提示：探索与搜证入口，也是最低成本提升互动密度的手段（「查看血迹」「推开柴门」「向掌柜搭话」）。事件：只有 activate 一个，所以单个 TextOption 本身不构成分歧。要做「查 A 还是查 B」就挂两个实例、inputs.text 各写各的，并在各自挂载的 reactions 里用 { kind: \"advance\", edgeId } 指名不同的出边——节点出口 handle 按 id 去重，两个实例共用同一个 activate 出口，靠 sourceHandle 分不开。两条支线要落在不同节点，各自的视频演各自查到了什么。同一节点已经挂了 InkYingMo 做抉择时，不要再挂一个后果相同的 TextOption：两个控件做同一件事是冗余，观众也不知道该点哪个。使用：inputs.text 是提示文字，inputs.triggerKey 是触发按键，inputs.color 配样式。挂载用 trigger.when=enter。摆放：可交互对象附近或页面底部居中；不要与字幕、血条重叠。"
+      }
+    }
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "entry",
+        "type": "perf",
+        "position": {
+          "x": 80,
+          "y": 80
+        },
+        "inputs": [],
+        "outputs": [],
+        "data": {
+          "name": "起点"
+        }
+      },
+      {
+        "id": "template-tavern",
+        "type": "perf",
+        "position": {
+          "x": 300,
+          "y": 80
+        },
+        "inputs": [],
+        "outputs": [],
+        "data": {
+          "name": "酒馆"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-mtmdj00v-1",
+        "source": "entry",
+        "target": "template-tavern",
+        "sourceHandle": "default",
+        "targetHandle": "in"
+      }
+    ]
+  },
+  "manifest": {
+    "version": "game-video.blueprint-manifest.v1",
+    "mainPackId": "bp-main",
+    "packs": {
+      "bp-main": {
+        "id": "bp-main",
+        "title": "主蓝图",
+        "entry": "entry",
+        "graph": {
+          "nodes": [
+            {
+              "id": "entry",
+              "type": "perf",
+              "position": {
+                "x": 80,
+                "y": 80
+              },
+              "inputs": [],
+              "outputs": [],
+              "data": {
+                "name": "起点"
+              }
+            },
+            {
+              "id": "template-tavern",
+              "type": "perf",
+              "position": {
+                "x": 300,
+                "y": 80
+              },
+              "inputs": [],
+              "outputs": [],
+              "data": {
+                "name": "酒馆"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "edge-mtmdj00v-1",
+              "source": "entry",
+              "target": "template-tavern",
+              "sourceHandle": "default",
+              "targetHandle": "in"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

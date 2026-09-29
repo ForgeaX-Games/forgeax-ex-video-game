@@ -1,9 +1,9 @@
 import type { ExtensionContext } from '@forgeax/extension-host/node'
 import { createHostAssetRegistry, listHostDocuments, readHostDocument, readHostManifest } from '../asset-registry'
 import { languageConsistencyIssues, nodeLanguageIssues } from '@/authoring/blueprint/language-consistency'
-import { eventsFromParams } from '@/runtime/core/schema/graph-schema'
+import { eventsFromParams, overlayMountId } from '@/runtime/core/schema/graph-schema'
 import { expandNodeOverlays } from '@/runtime/core/schema/expand-overlay'
-import { resolveOverlayReaction } from '@/runtime/core/schema/overlay-events'
+import { resolveEventReactions, resolveOverlayReaction } from '@/runtime/core/schema/overlay-events'
 import { collectRefs } from '@/runtime/core/engine/expr'
 import { ownerForIssueCode } from './issue-owner'
 import { componentContractMap, type ComponentContract } from './component-catalog'
@@ -18,10 +18,19 @@ import type {
   VideoDefinition,
 } from '@/authoring/assets/registry-types'
 import { normalizeDocument, validateDocument } from '@/authoring/blueprint/blueprint-project'
-import type { GraphLibraryDocument, GameNode } from '@/runtime/core/schema/graph-schema'
+import type { GraphEffect, GraphLibraryDocument, GameNode } from '@/runtime/core/schema/graph-schema'
+import type { NodeAction, Reaction, ReactionTrigger } from '@/runtime/core/schema/node-config-schema'
 import { isPosition } from '@/runtime/core/schema/react-flow-schema'
 import { validateNodeVideoGenerationPreset } from '@/runtime/core/schema/node-video-preset'
 import { parseDesignOptions } from '@/authoring/documents/core-design-options'
+import { collectPillarInteractionContractIssues, parsePillarInteractionContract } from '@/authoring/documents/pillar-interaction-contract'
+import { missingBeatIds } from '@/authoring/documents/pillar-merge'
+import { derivePillarSkeleton } from './pillar-skeleton'
+import {
+  COMPONENT_GAMEPLAY_SEMANTICS,
+  INTERACTION_GAMEPLAY_PATTERNS,
+  SETTLEMENT_GAMEPLAY_PATTERNS,
+} from '@/workflow/gameplay-semantics'
 import {
   readDocumentRevision,
   readMutationReceipts,
@@ -40,8 +49,14 @@ import type {
 } from '../../workflow/contracts'
 import { assetEntityDefinitions } from './asset-entity-catalog'
 import { componentLayoutIssue } from './component-layout'
-import { workScaleBudgetFromContract } from '../../workflow/work-scale-budget'
+import { compilePillar } from './pillar-compiler'
+import {
+  minimumOutlineNodeCount,
+  outlineScaleBudgetMessage,
+  workScaleBudgetFromContract,
+} from '../../workflow/work-scale-budget'
 import { expandCheckIds } from '../../workflow/validation-check-groups'
+import { isValidNewRuleId, RULE_ID_RULE_TEXT } from '@/runtime/core/engine/formula-registry'
 
 const decoder = new TextDecoder()
 const BLUEPRINT_FILE = 'blueprint.json'
@@ -64,10 +79,129 @@ export interface BlueprintQualityMetrics {
   interactionDensity: number
   maxBattlepackLoopDepth: number | null
   decisionConsequenceRate: number
+  edgeProducerCoverageRate: number
+  pillarTraceCoverageRate: number
+  downstreamPayoffCoverageRate: number
+  combatLoopClosureRate: number
   stateActivityRate: number
   formulaConsumptionRate: number
+  /** 规划的数值动作由目标节点结算承接的比例。 */
+  settlementEffectCoverageRate: number
+  /** 规划的数值动作中，源界面事件没有越权直接改数值的比例。 */
+  eventRoutePurityRate: number
   feedbackCoverageRate: number
+  stateLifecycleCoverageRate: number
   differentiatedEndingCount: number
+  /** 未达标的具体对象：覆盖率本身改不动，能改的是这些节点和状态。 */
+  offenders: {
+    combatLoop: string[]
+    decision: string[]
+    stateLifecycle: string[]
+  }
+}
+
+interface StateLifecycleEntry {
+  writers: number
+  readers: number
+  feedback: number
+  consumersOrResets: number
+}
+
+function importantStateTargets(project: GraphLibraryDocument): Set<string> {
+  const targets = new Set<string>()
+  for (const { node } of allNodes(project)) {
+    const plan = node.data.interaction
+    for (const action of plan?.actions ?? []) {
+      if (action.effect?.target) targets.add(action.effect.target)
+    }
+    for (const settlement of plan?.settlements ?? []) {
+      stateReferenceKeys(settlement.triggerSpec).forEach((target) => targets.add(target))
+    }
+    for (const terminal of plan?.terminals ?? []) {
+      const target = terminal.when.split(/[<>=!]/u)[0]?.trim()
+      if (target) targets.add(target)
+    }
+  }
+  return targets
+}
+
+function stateLifecycle(project: GraphLibraryDocument): Map<string, StateLifecycleEntry> {
+  const lifecycle = new Map<string, StateLifecycleEntry>()
+  const entry = (target: string): StateLifecycleEntry => {
+    const current = lifecycle.get(target) ?? { writers: 0, readers: 0, feedback: 0, consumersOrResets: 0 }
+    lifecycle.set(target, current)
+    return current
+  }
+  const read = (value: unknown, consumes = false): void => {
+    for (const target of stateReferenceKeys(value)) {
+      entry(target).readers += 1
+      if (consumes) entry(target).consumersOrResets += 1
+    }
+  }
+  const writeEffects = (effects: readonly GraphEffect[]): void => {
+    for (const effect of effects) {
+      const target = effectTarget(effect)
+      const current = entry(target)
+      current.writers += 1
+      if (effect.kind === 'attr' || effect.kind === 'var') read(effect.value)
+      if (effect.kind === 'flag' || effect.op === 'set') current.consumersOrResets += 1
+    }
+  }
+  const inspectActions = (actions: readonly NodeAction[]): void => {
+    for (const action of actions) {
+      if (action.kind === 'effect') writeEffects(action.effects)
+      if (action.kind !== 'spawn') continue
+      read(action.inputs)
+      // 飘字与状态提示只能由 spawn 产生，永远不在 `overlayNodes` 里；只认静态挂载
+      // 的话，「结算已经把数值弹给玩家看」会被算成没有可见反馈。
+      const roles = gameplayRoles(spawnedComponent(action, project) ?? '')
+      if (!roles.includes('state-feedback') && !roles.includes('transient-feedback')) continue
+      for (const target of stateReferenceKeys(action.inputs)) entry(target).feedback += 1
+    }
+  }
+  for (const { blueprintId, node } of allNodes(project)) {
+    const pack = project.manifest.packs[blueprintId]!
+    for (const edge of pack.graph.edges.filter((edge) => edge.source === node.id)) read(edge.data?.condition, true)
+    for (const reaction of node.data.reactions ?? []) {
+      read(reaction.when, reaction.when.type === 'state' || reaction.when.type === 'watch')
+      inspectActions(reaction.do)
+    }
+    for (const instance of expandNodeOverlays(project.ui?.overlays ?? {}, node)) {
+      for (const child of instance.children) {
+        const refs = stateReferenceKeys(child.inputs)
+        refs.forEach((target) => entry(target).readers += 1)
+        const roles = gameplayRoles(child.component)
+        if (roles.includes('state-feedback') || roles.includes('transient-feedback')) {
+          refs.forEach((target) => entry(target).feedback += 1)
+        }
+      }
+      for (const reaction of instance.reactions ?? []) inspectActions(reaction.do)
+    }
+  }
+  for (const overlay of Object.values(project.ui?.overlays ?? {})) {
+    for (const reaction of overlay.reactions ?? []) inspectActions(reaction.do)
+  }
+  return lifecycle
+}
+
+function stateLifecycleIssues(project: GraphLibraryDocument): ValidationIssue[] {
+  const lifecycle = stateLifecycle(project)
+  const issues: ValidationIssue[] = []
+  for (const target of importantStateTargets(project)) {
+    const current = lifecycle.get(target) ?? { writers: 0, readers: 0, feedback: 0, consumersOrResets: 0 }
+    const missing = [
+      current.writers === 0 ? '写入方' : '',
+      current.readers === 0 ? '读取方' : '',
+      current.feedback === 0 ? '可见反馈' : '',
+      current.consumersOrResets === 0 ? '条件消费或复位' : '',
+    ].filter(Boolean)
+    if (missing.length > 0) issues.push(issue(
+      'finalization.state-lifecycle-incomplete',
+      `重要状态 ${target} 的生命周期不完整，缺少：${missing.join('、')}`,
+      { kind: 'rule', section: target.startsWith('entity.') ? 'entities' : 'variables' },
+    ))
+  }
+  return issues
 }
 
 function parseProject(bytes: Uint8Array | null): GraphLibraryDocument | null {
@@ -87,6 +221,12 @@ function issue(code: string, message: string, location?: PageLocation): Validati
 
 function warningIssue(code: string, message: string, location?: PageLocation): ValidationIssue {
   return { ...issue(code, message, location), level: 'warning' }
+}
+
+function gameplayRoles(componentId: string): readonly string[] {
+  return componentContractMap().get(componentId)?.gameplaySemantics?.roles
+    ?? COMPONENT_GAMEPLAY_SEMANTICS[componentId]?.roles
+    ?? []
 }
 
 export function countAuthoredUi(overlays: Record<string, unknown> | undefined): number {
@@ -160,34 +300,92 @@ export function calculateBlueprintQualityMetrics(project: GraphLibraryDocument):
   const nodes = allNodes(project)
   const interactive = nodes.filter(({ node }) => node.data.interaction?.beat !== undefined && node.data.interaction.beat !== 'narrative').length
   const decisionCounts = { total: 0, valid: 0 }
+  const interactiveEdges = { total: 0, produced: 0 }
+  const pillarTraces = { total: 0, valid: 0 }
+  const payoffs = { total: 0, valid: 0 }
+  const combatLoops = { total: 0, valid: 0 }
+  const offenders = { combatLoop: [] as string[], decision: [] as string[], stateLifecycle: [] as string[] }
   const stateVars = new Set<string>()
   const formulaRefs = new Set<string>()
-  let numericEventReactions = 0
-  let feedbackReactions = 0
-  for (const { node } of nodes) {
-    for (const action of node.data.interaction?.actions ?? []) {
+  let plannedNumericActions = 0
+  for (const { blueprintId, node } of nodes) {
+    const plan = node.data.interaction
+    const actions = plan?.actions ?? []
+    plannedNumericActions += actions.filter((action) => Boolean(action.effect)).length
+    const outcomeSignatures = actions.map((action) => {
       const exit = action.exit ?? action.event
-      if (exit === 'none') continue
-      decisionCounts.total += 1
-      const edgeTargets = Object.values(project.manifest.packs)
+      const targets = Object.values(project.manifest.packs)
         .flatMap((pack) => pack.graph.edges)
         .filter((edge) => edge.source === node.id && (edge.sourceHandle ?? 'default') === exit)
         .map((edge) => edge.target)
-      if (edgeTargets.length > 0 && new Set(edgeTargets).size > 1) decisionCounts.valid += 1
+        .sort()
+      return JSON.stringify({ targets, effect: action.effect ?? null })
+    })
+    const isDecisionNode = actions.filter((action) => (action.exit ?? action.event) !== 'none').length > 1
+    const differentiated = new Set(outcomeSignatures).size > 1
+    if (isDecisionNode && !differentiated) offenders.decision.push(node.id)
+    for (const [actionIndex, action] of actions.entries()) {
+      const exit = action.exit ?? action.event
+      if (exit === 'none') continue
+      // 只有一个动作的过场不是决策：它永远只有一种后果，差异化在结构上不可能成立。
+      // 把它算进分母会让一份正常的短篇永远停在半数覆盖率，而这条差距没人能补。
+      if (isDecisionNode) {
+        decisionCounts.total += 1
+        if (differentiated && outcomeSignatures[actionIndex] !== undefined) decisionCounts.valid += 1
+      }
+      payoffs.total += 1
+      const pack = project.manifest.packs[blueprintId]
+      const edge = pack?.graph.edges.find((candidate) => (
+        candidate.source === node.id
+        && (candidate.sourceHandle ?? 'default') === exit
+        && (!action.targetNodeId || candidate.target === action.targetNodeId)
+        && candidate.data?.design?.narrativePayoff === action.downstreamPayoff?.trim()
+      ))
+      const target = edge ? pack?.graph.nodes.find((candidate) => candidate.id === edge.target) : undefined
+      if (edge?.data?.design?.outcomeEvidenceId && target?.data.outcomeEvidence?.some((evidence) => (
+        evidence.id === edge.data!.design!.outcomeEvidenceId
+        && evidence.sourceEdgeId === edge.id
+        && evidence.presentation === action.downstreamPayoff?.trim()
+      ))) payoffs.valid += 1
     }
-    collectQualityReferences(node.data, stateVars, formulaRefs)
-    for (const mount of node.data.overlayNodes ?? []) {
-      for (const reaction of mount.reactions ?? []) {
-        if (reaction.when.type !== 'event') continue
-        const hasNumericEffect = reaction.do.some((action) => (
-          action.kind === 'effect'
-          && action.effects.some((effect) => effect.kind === 'attr' || effect.kind === 'var')
-        ))
-        if (!hasNumericEffect) continue
-        numericEventReactions += 1
-        if (reaction.do.some((action) => action.kind === 'spawn')) feedbackReactions += 1
+    if (plan && plan.beat !== 'narrative') {
+      pillarTraces.total += 1
+      if (plan.sourcePillarBeatId?.trim()) pillarTraces.valid += 1
+      for (const action of plan.actions ?? []) {
+        pillarTraces.total += 1
+        if (action.sourcePillarActionId?.trim()) pillarTraces.valid += 1
+      }
+      for (const settlement of plan.settlements ?? []) {
+        pillarTraces.total += 1
+        if (settlement.sourcePillarSettlementId?.trim()) pillarTraces.valid += 1
       }
     }
+    if (plan?.beat === 'combat') {
+      combatLoops.total += 1
+      const hasProgress = actions.some((action) => Boolean(action.effect))
+      const hasExit = (plan.terminals ?? []).length > 0
+        || (plan.settlements ?? []).some((settlement) => Boolean(settlement.exit))
+      if (plan.loop?.backTo && hasProgress && hasExit && (plan.playerInformation ?? []).length > 0) {
+        combatLoops.valid += 1
+      } else {
+        // 覆盖率只是个百分比，改不动它。缺什么、在哪个节点缺，才是能照着改的东西。
+        offenders.combatLoop.push(`${node.id}（缺${[
+          plan.loop?.backTo ? '' : '回边',
+          hasProgress ? '' : '数值进展',
+          hasExit ? '' : '退出条件',
+          (plan.playerInformation ?? []).length > 0 ? '' : '玩家信息',
+        ].filter(Boolean).join('、')}）`)
+      }
+    }
+    if (plan && plan.beat !== 'narrative') {
+      for (const pack of Object.values(project.manifest.packs)) {
+        for (const edge of pack.graph.edges.filter((edge) => edge.source === node.id)) {
+          interactiveEdges.total += 1
+          if (edge.data?.design?.producer) interactiveEdges.produced += 1
+        }
+      }
+    }
+    collectQualityReferences(node.data, stateVars, formulaRefs)
   }
   collectQualityReferences(project.ui?.overlays ?? {}, stateVars, formulaRefs)
   collectQualityReferences(project.formulas ?? {}, stateVars, formulaRefs)
@@ -200,15 +398,76 @@ export function calculateBlueprintQualityMetrics(project: GraphLibraryDocument):
   }).length
   const variableCount = Object.keys(project.variables ?? {}).length
   const formulaCount = Object.keys(project.formulas ?? {}).length
+  const importantStates = importantStateTargets(project)
+  const lifecycles = stateLifecycle(project)
+  const completeStateLifecycles = [...importantStates].filter((target) => {
+    const current = lifecycles.get(target)
+    const complete = Boolean(current) && current!.writers > 0 && current!.readers > 0
+      && current!.feedback > 0 && current!.consumersOrResets > 0
+    if (!complete) offenders.stateLifecycle.push(target)
+    return complete
+  }).length
+  const planWiringIssues = finalizationPlanWiringIssues(project)
+  const missingSettlementEffects = planWiringIssues.filter((item) => item.code === 'finalization.plan.effect-unwired').length
+  const missingSettlementFeedback = planWiringIssues.filter((item) => item.code === 'finalization.plan.effect-feedback-missing').length
+  const eventOwnedState = planWiringIssues.filter((item) => item.code === 'finalization.plan.effect-owned-by-event').length
   return {
     interactionDensity: nodes.length === 0 ? 0 : interactive / nodes.length,
     maxBattlepackLoopDepth: cycleDepths.length > 0 ? Math.max(...cycleDepths) : null,
     decisionConsequenceRate: decisionCounts.total === 0 ? 0 : decisionCounts.valid / decisionCounts.total,
+    edgeProducerCoverageRate: interactiveEdges.total === 0 ? 0 : interactiveEdges.produced / interactiveEdges.total,
+    pillarTraceCoverageRate: pillarTraces.total === 0 ? 0 : pillarTraces.valid / pillarTraces.total,
+    downstreamPayoffCoverageRate: payoffs.total === 0 ? 0 : payoffs.valid / payoffs.total,
+    combatLoopClosureRate: combatLoops.total === 0 ? 0 : combatLoops.valid / combatLoops.total,
     stateActivityRate: variableCount === 0 ? 0 : [...stateVars].filter((id) => id in (project.variables ?? {})).length / variableCount,
     formulaConsumptionRate: formulaCount === 0 ? 0 : [...formulaRefs].filter((id) => id in (project.formulas ?? {})).length / formulaCount,
-    feedbackCoverageRate: numericEventReactions === 0 ? 0 : feedbackReactions / numericEventReactions,
+    settlementEffectCoverageRate: plannedNumericActions === 0
+      ? 1
+      : Math.max(0, plannedNumericActions - missingSettlementEffects) / plannedNumericActions,
+    eventRoutePurityRate: plannedNumericActions === 0
+      ? 1
+      : Math.max(0, plannedNumericActions - eventOwnedState) / plannedNumericActions,
+    feedbackCoverageRate: plannedNumericActions === 0
+      ? 1
+      : Math.max(0, plannedNumericActions - Math.max(missingSettlementEffects, missingSettlementFeedback))
+        / plannedNumericActions,
+    stateLifecycleCoverageRate: importantStates.size === 0 ? 1 : completeStateLifecycles / importantStates.size,
     differentiatedEndingCount: endingCount,
+    offenders,
   }
+}
+
+function semanticQualityMetricIssues(project: GraphLibraryDocument): ValidationIssue[] {
+  const metrics = calculateBlueprintQualityMetrics(project)
+  const issues: ValidationIssue[] = []
+  const plans = allNodes(project)
+    .map(({ node }) => node.data.interaction)
+    .filter((plan): plan is NonNullable<typeof plan> => Boolean(plan))
+  const hasInteractivePlan = plans.some((plan) => plan.beat !== 'narrative')
+  // 差异化后果只能在真的有两个以上选项的节点上要求；与 `decisionConsequenceRate`
+  // 的口径必须一致，否则一份全是过场的短篇会被要求一个恒为空的覆盖率。
+  const hasDecision = plans.some((plan) => (
+    (plan.actions ?? []).filter((action) => (action.exit ?? action.event) !== 'none').length > 1
+  ))
+  const hasCombat = plans.some((plan) => plan.beat === 'combat')
+  const hasStateEffects = plans.some((plan) => (plan.actions ?? []).some((action) => Boolean(action.effect)))
+  const requireFullCoverage = (value: number, code: string, label: string, subjects: readonly string[] = []): void => {
+    if (value >= 1) return
+    const named = subjects.length > 0 ? `：${subjects.join('、')}` : ''
+    issues.push(issue(code, `${label}只有 ${(value * 100).toFixed(0)}%，高质量蓝图要求 100%${named}`))
+  }
+  if (hasInteractivePlan) {
+    requireFullCoverage(metrics.edgeProducerCoverageRate, 'quality.edge-producer-coverage', '互动边 producer 覆盖率')
+    requireFullCoverage(metrics.pillarTraceCoverageRate, 'quality.pillar-trace-coverage', '支柱节拍追踪覆盖率')
+    requireFullCoverage(metrics.downstreamPayoffCoverageRate, 'quality.downstream-payoff-coverage', '下游视频后果说明覆盖率')
+  }
+  if (hasCombat) requireFullCoverage(metrics.combatLoopClosureRate, 'quality.combat-loop-closure', '战斗循环闭合率', metrics.offenders.combatLoop)
+  if (hasDecision) requireFullCoverage(metrics.decisionConsequenceRate, 'quality.decision-consequence', '差异化选择后果覆盖率', metrics.offenders.decision)
+  if (hasStateEffects) requireFullCoverage(metrics.feedbackCoverageRate, 'quality.feedback-coverage', '数值变化可见反馈覆盖率')
+  if (hasStateEffects) requireFullCoverage(metrics.settlementEffectCoverageRate, 'quality.settlement-effect-coverage', '数值动作结算承接覆盖率')
+  if (hasStateEffects) requireFullCoverage(metrics.eventRoutePurityRate, 'quality.event-route-purity', '界面事件纯路由覆盖率')
+  if (hasStateEffects) requireFullCoverage(metrics.stateLifecycleCoverageRate, 'quality.state-lifecycle-coverage', '重要状态生命周期覆盖率', metrics.offenders.stateLifecycle)
+  return issues
 }
 
 export async function inspectProject(context: ExtensionContext): Promise<ProjectInspection> {
@@ -261,10 +520,18 @@ export async function inspectProject(context: ExtensionContext): Promise<Project
       interactionDensity: 0,
       maxBattlepackLoopDepth: null,
       decisionConsequenceRate: 0,
+      edgeProducerCoverageRate: 0,
+      pillarTraceCoverageRate: 0,
+      downstreamPayoffCoverageRate: 0,
+      combatLoopClosureRate: 0,
       stateActivityRate: 0,
       formulaConsumptionRate: 0,
+      settlementEffectCoverageRate: 0,
+      eventRoutePurityRate: 0,
       feedbackCoverageRate: 0,
+      stateLifecycleCoverageRate: 0,
       differentiatedEndingCount: 0,
+      offenders: { combatLoop: [], decision: [], stateLifecycle: [] },
     },
     assetEntities: { characters, scenes, videos },
   }
@@ -293,9 +560,10 @@ function designOptionIssues(content: string | undefined): ValidationIssue[] {
  * 一份只有标题的支柱文档能通过存在性检查，却无法驱动总脉络——
  * 下游拿着空壳文档继续跑，问题会在几步之后才以别的形式爆出来。
  */
-function documentSubstanceIssues(
+export function documentSubstanceIssues(
   documentType: 'core' | 'inquiry' | 'pillar',
   content: string | undefined,
+  workflowState?: VideoGameWorkflowState | null,
 ): ValidationIssue[] {
   const location: PageLocation = { kind: 'document', documentType }
   const text = content?.trim() ?? ''
@@ -325,6 +593,84 @@ function documentSubstanceIssues(
       location,
     ))
   }
+  if (documentType === 'pillar' && text) {
+    // 契约问题一次性全量反馈：历史实现只在 parse 抛出的第一条错上停住，
+    // peer 只能「报一条 → 整篇重传 → 再报下一条」，一个支柱往返 17 次。
+    // 这里把同一次校验能发现的所有契约问题都摆出来，让 peer 一轮改齐。
+      const contractIssues = collectPillarInteractionContractIssues(text, { authoring: true })
+      if (contractIssues.length > 0) {
+        for (const message of contractIssues) {
+          issues.push(issue('document.pillar.interaction-contract-invalid', message, location))
+        }
+      } else {
+        const authoring = parsePillarInteractionContract(text, { authoring: true })
+        const budgetForCoverage = workScaleBudgetFromContract(workflowState?.requirementContract)
+        if (budgetForCoverage) {
+          const skeleton = derivePillarSkeleton(workflowState?.requirementContract)
+          const missing = missingBeatIds(authoring, skeleton.beats.map((beat) => beat.id))
+          if (missing.length > 0) {
+            issues.push(issue(
+              'document.pillar.incomplete',
+              `支柱 IR 尚未写完骨架节拍：${missing.join('、')}。继续 upsert 同 id 合并，写齐后再编译。`,
+              location,
+            ))
+            return issues
+          }
+        }
+      const closedIssues = collectPillarInteractionContractIssues(text)
+      if (closedIssues.length > 0) {
+        for (const message of closedIssues) {
+          issues.push(issue('document.pillar.interaction-contract-invalid', message, location))
+        }
+        return issues
+      }
+      // 未解决的缺口会让总脉络/整装无法执行。支柱 ready 必须失败，不能让作者确认一份不可执行的策划。
+      const contract = parsePillarInteractionContract(text)
+      for (const beat of contract.beats) {
+        for (const action of beat.actions) {
+          if (!action.capabilityGap) continue
+          issues.push(issue(
+            'document.pillar.capability-gap',
+            `支柱节拍 ${beat.id} 的动作 ${action.id} 声明了目录承载不了的能力：`
+            + `${action.capabilityGap.need}（${action.capabilityGap.why}）。`
+            + '改设计或补控件后再提交；未解决的缺口不能进入作者确认',
+            location,
+          ))
+        }
+      }
+      // 支柱验收就是编译：能编译出蓝图才放行，而放行后交付的正是这次编译的产物。
+      // 前身只做「存在性证明」，证完把图丢掉让下游重画一张不同的——证明覆盖不到
+      // 新画的那张，于是「支柱过门 → 下游无解重试」反复复发（最后一次空转 76 分钟）。
+      const compiled = compilePillar(contract)
+      if (!compiled.ok) {
+        for (const compileIssue of compiled.issues) {
+          issues.push(issue(compileIssue.code, compileIssue.message, location))
+        }
+      } else if ((contract.schemaVersion ?? 0) >= 4) {
+        // 编译成功只说明图纸能画出来，不说明画出来的楼能住。v4 起支柱就是唯一
+        // 创作面：路径 / 规则 / 数值 / 假选择必须在作者确认前拦住。
+        issues.push(...pillarPlayabilityIssues(compiled.document, text, location))
+      }
+      const budget = workScaleBudgetFromContract(workflowState?.requirementContract)
+      if (budget) {
+        const outline = minimumOutlineNodeCount(contract)
+        if (outline.minNodeCount > budget.maxNodeCount) {
+          issues.push(issue(
+            'document.pillar.outline-budget-exceeded',
+            outlineScaleBudgetMessage(budget, outline),
+            location,
+          ))
+        }
+        if ((budget.minCombatCount ?? 0) > 0 && outline.combatActions === 0) {
+          issues.push(issue(
+            'document.pillar.combat-missing',
+            `${budget.label}至少需要 ${budget.minCombatCount} 个战斗回合，但支柱没有任何 requiredRole=combat-command 的动作。`,
+            location,
+          ))
+        }
+      }
+    }
+  }
   return issues
 }
 
@@ -347,7 +693,7 @@ const DOCUMENT_MIN_BODY = { core: 60, inquiry: 20, pillar: 90 } as const
 const DOCUMENT_REQUIRED_SECTIONS = {
   core: ['主循环'],
   inquiry: [],
-  pillar: ['角色', '场景'],
+  pillar: ['角色', '场景', '主循环', '互动节拍'],
 } as const
 
 /** 本作是否缺必要界面。支柱明确写了不需要就算合法（`not-required` 的依据）。 */
@@ -672,6 +1018,11 @@ function componentWiringIssues(project: GraphLibraryDocument): ValidationIssue[]
       if (!hasCustomComponent) {
         for (const edge of blueprint.graph.edges) {
           if (edge.source !== node.id) continue
+          // Settlement routes are driven by state/watch/timeline reactions, not
+          // by a component event. Their typed outline producer is the source
+          // contract; requiring a mounted component to emit the settlement id
+          // sends ui.authoring into an impossible repair loop.
+          if (edge.data?.design?.producer.kind === 'settlement') continue
           const handle = edge.sourceHandle ?? 'default'
           if (availableExits.has(handle)) continue
           issues.push(issue(
@@ -1064,9 +1415,25 @@ function resolvePlanTarget(project: GraphLibraryDocument, target: string): boole
 function outlineInteractionPlanIssues(
   project: GraphLibraryDocument,
   workflowState?: VideoGameWorkflowState | null,
+  pillarContent?: string,
 ): ValidationIssue[] {
   const contracts = componentContractMap()
   const issues: ValidationIssue[] = []
+  let pillarBeatIds = new Set<string>()
+  let pillarBeats = new Map<string, ReturnType<typeof parsePillarInteractionContract>['beats'][number]>()
+  // 承载校验只对 v3 生效：v1/v2 支柱没有 requiredRole 可比，行为保持不变。
+  let pillarSchemaVersion = 0
+  if (pillarContent?.trim()) {
+    try {
+      const parsed = parsePillarInteractionContract(pillarContent)
+      pillarBeatIds = new Set(parsed.beats.map((beat) => beat.id))
+      pillarBeats = new Map(parsed.beats.map((beat) => [beat.id, beat]))
+      pillarSchemaVersion = parsed.schemaVersion
+    } catch {
+      // document.pillar.ready owns the parse diagnostic; outline reports trace gaps below.
+    }
+  }
+  const settlementPatterns = new Set(SETTLEMENT_GAMEPLAY_PATTERNS.map((pattern) => pattern.id))
   const budget = workScaleBudgetFromContract(workflowState?.requirementContract)
   if (budget && (budget.minCombatCount !== undefined || budget.maxCombatCount !== undefined)) {
     const combatNodes = allNodes(project).filter(({ node }) => node.data.interaction?.beat === 'combat')
@@ -1087,6 +1454,7 @@ function outlineInteractionPlanIssues(
   }
   for (const [blueprintId, blueprint] of Object.entries(project.manifest.packs)) {
     for (const node of blueprint.graph.nodes) {
+      if (node.id === 'entry' && blueprint.entry !== 'entry' && !node.data.interaction) continue
       const location: PageLocation = { kind: 'blueprint', blueprintId, nodeId: node.id }
       const plan = node.data.interaction
       if (!plan) {
@@ -1097,6 +1465,48 @@ function outlineInteractionPlanIssues(
           location,
         ))
         continue
+      }
+      if (plan.beat !== 'narrative') {
+        if (!plan.sourcePillarBeatId?.trim()) {
+          issues.push(issue(
+            'outline.interaction.pillar-trace-missing',
+            `节点 ${node.id} 是 ${plan.beat} 互动节拍，却没有 sourcePillarBeatId；`
+            + '总脉络不得创造支柱未确认的核心玩法',
+            location,
+          ))
+        } else if (pillarBeatIds.size > 0 && !pillarBeatIds.has(plan.sourcePillarBeatId)) {
+          issues.push(issue(
+            'outline.interaction.pillar-trace-unknown',
+            `节点 ${node.id} 引用了支柱中不存在的互动节拍 ${plan.sourcePillarBeatId}`,
+            location,
+          ))
+        }
+        if ((plan.playerInformation ?? []).length === 0) {
+          issues.push(issue(
+            'outline.interaction.player-information-missing',
+            `节点 ${node.id} 没有 playerInformation；玩家无法依据可见信息做出有意义决策`,
+            location,
+          ))
+        }
+        const pillarBeat = plan.sourcePillarBeatId ? pillarBeats.get(plan.sourcePillarBeatId) : undefined
+        if (pillarBeat) {
+          if (plan.narrativeIntent?.trim() !== pillarBeat.narrativeIntent) {
+            issues.push(issue(
+              'outline.interaction.narrative-intent-drift',
+              `节点 ${node.id} 的 narrativeIntent 与支柱节拍 ${pillarBeat.id} 不一致`,
+              location,
+            ))
+          }
+          const plannedInformation = new Set(plan.playerInformation ?? [])
+          const missingInformation = pillarBeat.playerInformation.filter((item) => !plannedInformation.has(item))
+          if (missingInformation.length > 0) {
+            issues.push(issue(
+              'outline.interaction.player-information-drift',
+              `节点 ${node.id} 遗漏支柱节拍 ${pillarBeat.id} 的玩家信息：${missingInformation.join('、')}`,
+              location,
+            ))
+          }
+        }
       }
       // 反向也要拦：标成纯叙事却挂了动作，说明节拍类型填错了。
       // 实测一局 12 个节点全填 narrative，连挂着 BattleParry 的打斗节点也是——
@@ -1156,6 +1566,92 @@ function outlineInteractionPlanIssues(
             location,
           ))
         }
+        const pillarBeat = plan.sourcePillarBeatId ? pillarBeats.get(plan.sourcePillarBeatId) : undefined
+        const pillarAction = pillarBeat?.actions.find((candidate) => candidate.id === action.sourcePillarActionId)
+        if (!action.sourcePillarActionId || !pillarAction) {
+          issues.push(issue(
+            'outline.interaction.pillar-action-trace-invalid',
+            `节点 ${node.id} 的 ${action.component}.${action.event} 没有命中支柱动作 sourcePillarActionId`,
+            location,
+          ))
+        } else {
+          const drift = [
+            ['stateMutationOwner', action.stateMutationOwner, pillarAction.stateMutationOwner],
+            ['intent', action.intent, pillarAction.intent],
+            ['stateChangeIntent', action.stateChangeIntent, pillarAction.stateChange],
+            ['feedback', action.feedback, pillarAction.immediateFeedback],
+            ['downstreamPayoff', action.downstreamPayoff, pillarAction.downstreamPayoff],
+            ['exitIntent', action.exitIntent, pillarAction.exitIntent],
+          ].filter(([, actual, expected]) => actual?.trim() !== expected)
+          if (drift.length > 0) {
+            issues.push(issue(
+              'outline.interaction.pillar-action-semantic-drift',
+              `节点 ${node.id} 的支柱动作 ${pillarAction.id} 被改写：${drift.map(([field]) => field).join('、')}`,
+              location,
+            ))
+          }
+          // 逐字漂移只保住文风：照抄支柱散文的同时挂一个做不到这件事的元件，
+          // 上面的检查全绿。承载校验才是拦住这种静默降级的那道门。
+          if (pillarSchemaVersion >= 3) {
+            const roles = gameplayRoles(action.component)
+            if (pillarAction.capabilityGap) {
+              issues.push(issue(
+                'outline.interaction.capability-gap-unresolved',
+                `节点 ${node.id} 的支柱动作 ${pillarAction.id} 仍带着未解决的能力缺口：`
+                + `${pillarAction.capabilityGap.need}（${pillarAction.capabilityGap.why}）。`
+                + '不要挑一个凑合的元件顶上；这类缺口必须在支柱确认前改设计或补控件',
+                location,
+              ))
+            } else if (pillarAction.requiredRole && !roles.includes(pillarAction.requiredRole)) {
+              issues.push(issue(
+                'outline.interaction.role-mismatch',
+                `节点 ${node.id} 的支柱动作 ${pillarAction.id} 要求 ${pillarAction.requiredRole} 承载，`
+                + `但 ${action.component} 只具备 ${roles.join(' / ') || '（无玩法角色）'}`,
+                location,
+              ))
+            }
+          }
+        }
+        if (!action.feedback?.trim()) {
+          issues.push(issue(
+            'outline.interaction.feedback-missing',
+            `节点 ${node.id} 的 ${action.component}.${action.event} 没有声明即时反馈`,
+            location,
+          ))
+        }
+        if (!action.feedbackSpec) {
+          issues.push(issue(
+            'outline.interaction.feedback-spec-missing',
+            `节点 ${node.id} 的 ${action.component}.${action.event} 没有 feedbackSpec；反馈文案无法机械编译`,
+            location,
+          ))
+        } else if ('component' in action.feedbackSpec) {
+          const feedbackContract = contracts.get(action.feedbackSpec.component)
+          const requiredRole = action.feedbackSpec.kind === 'state-binding' ? 'state-feedback' : 'transient-feedback'
+          if (!feedbackContract?.gameplaySemantics?.roles.includes(requiredRole)) {
+            issues.push(issue(
+              'outline.interaction.feedback-component-invalid',
+              `节点 ${node.id} 的 feedbackSpec 组件 ${action.feedbackSpec.component} 不具备 ${requiredRole} 语义`,
+              location,
+            ))
+          }
+          if (
+            action.feedbackSpec.kind === 'state-binding'
+            && action.effect
+            && action.feedbackSpec.target !== action.effect.target
+          ) issues.push(issue(
+            'outline.interaction.feedback-target-drift',
+            `节点 ${node.id} 的反馈绑定 ${action.feedbackSpec.target} 与动作状态 ${action.effect.target} 不一致`,
+            location,
+          ))
+        }
+        if (!action.downstreamPayoff?.trim()) {
+          issues.push(issue(
+            'outline.interaction.downstream-payoff-missing',
+            `节点 ${node.id} 的 ${action.component}.${action.event} 没有声明下游视频如何呈现结果`,
+            location,
+          ))
+        }
         const hasEffect = Boolean(action.effect)
         const hasExit = typeof action.exit === 'string'
           && action.exit.trim().length > 0
@@ -1168,6 +1664,350 @@ function outlineInteractionPlanIssues(
             location,
           ))
         }
+        if (action.stateMutationOwner === 'settlement' && !hasEffect) {
+          issues.push(issue(
+            'outline.interaction.effect-spec-missing',
+            `节点 ${node.id} 的 ${action.component}.${action.event} 在支柱中声明由 settlement 修改状态，`
+            + '但总脉络没有提供 effect 规则订单',
+            location,
+          ))
+        }
+        if (action.stateMutationOwner === 'none' && hasEffect) {
+          issues.push(issue(
+            'outline.interaction.effect-owner-drift',
+            `节点 ${node.id} 的 ${action.component}.${action.event} 是纯剧情分流，却额外声明了数值 effect`,
+            location,
+          ))
+        }
+        if (hasExit && !action.targetNodeId?.trim()) {
+          issues.push(issue(
+            'outline.interaction.target-missing',
+            `节点 ${node.id} 的 ${action.component}.${action.event} 声明了出口 ${action.exit ?? action.event}`
+            + '，但没有 targetNodeId',
+            location,
+          ))
+        }
+        if (hasEffect) {
+          if (!hasExit || !action.targetNodeId?.trim()) {
+            issues.push(issue(
+              'outline.interaction.effect-route-missing',
+              `节点 ${node.id} 的 ${action.component}.${action.event} 计划修改数值，`
+              + '但没有先路由到独立结果节点；界面事件只负责选路，数值效果必须由结果节点结算',
+              location,
+            ))
+          } else if (action.targetNodeId === node.id) {
+            issues.push(issue(
+              'outline.interaction.effect-payoff-self-target',
+              `节点 ${node.id} 的 ${action.component}.${action.event} 把数值结果又连回自身；`
+              + '请建立独立结果视频节点，并在该节点的时间轴结算应用数值与反馈',
+              location,
+            ))
+          } else {
+            const targetPlan = blueprint.graph.nodes.find(
+              (candidate) => candidate.id === action.targetNodeId,
+            )?.data.interaction
+            const resolution = targetPlan?.settlements?.find((settlement) => (
+              settlement.sourcePillarActionId === action.sourcePillarActionId
+              && targetPlan.sourcePillarBeatId === plan.sourcePillarBeatId
+            ))
+            if (!resolution || resolution.trigger !== 'at' || resolution.triggerSpec?.type !== 'at') {
+              issues.push(issue(
+                'outline.interaction.effect-settlement-missing',
+                `节点 ${node.id} 的 ${action.component}.${action.event} 数值结果没有在目标节点 `
+                + `${action.targetNodeId} 规划 sourcePillarActionId=${action.sourcePillarActionId ?? '（缺失）'} 的 at 结算`,
+                { kind: 'blueprint', blueprintId, nodeId: action.targetNodeId },
+              ))
+            }
+          }
+        }
+      }
+      for (const settlement of plan.settlements ?? []) {
+        const pillarBeat = plan.sourcePillarBeatId ? pillarBeats.get(plan.sourcePillarBeatId) : undefined
+        const pillarSettlement = pillarBeat?.settlements.find(
+          (candidate) => candidate.id === settlement.sourcePillarSettlementId,
+        )
+        if (!settlement.sourcePillarSettlementId || !pillarSettlement) {
+          issues.push(issue(
+            'outline.interaction.pillar-settlement-trace-invalid',
+            `节点 ${node.id} 的结算 ${settlement.id} 没有命中支柱 settlement ID`,
+            location,
+          ))
+        } else {
+          const drift = [
+            ['sourcePillarActionId', settlement.sourcePillarActionId, pillarSettlement.sourceActionId],
+            ['trigger', settlement.trigger, pillarSettlement.trigger],
+            ['source', settlement.source, pillarSettlement.source],
+            ['intent', settlement.intent, pillarSettlement.intent],
+            ['feedback', settlement.feedback, pillarSettlement.feedback],
+            ['exitIntent', settlement.exitIntent, pillarSettlement.exitIntent],
+          ].filter(([, actual, expected]) => actual?.trim() !== expected)
+          if (drift.length > 0) {
+            issues.push(issue(
+              'outline.interaction.pillar-settlement-semantic-drift',
+              `节点 ${node.id} 的支柱结算 ${pillarSettlement.id} 被改写：${drift.map(([field]) => field).join('、')}`,
+              location,
+            ))
+          }
+        }
+        if (!settlementPatterns.has(settlement.pattern)) {
+          issues.push(issue(
+            'outline.interaction.settlement-pattern-unknown',
+            `节点 ${node.id} 的结算 ${settlement.id} 使用未知模式 ${settlement.pattern}`,
+            location,
+          ))
+        }
+        if (!settlement.feedbackSpec) {
+          issues.push(issue(
+            'outline.interaction.settlement-feedback-spec-missing',
+            `节点 ${node.id} 的结算 ${settlement.id} 没有 feedbackSpec`,
+            location,
+          ))
+        }
+        if (!settlement.triggerSpec || settlement.triggerSpec.type !== settlement.trigger) {
+          issues.push(issue(
+            'outline.interaction.settlement-trigger-spec-missing',
+            `节点 ${node.id} 的结算 ${settlement.id} 没有与 ${settlement.trigger} 对齐的 triggerSpec；`
+            + '整装不能从自然语言 source 猜测毫秒、watch 表达式或 state condition',
+            location,
+          ))
+        }
+        if (settlement.exit && !settlement.targetNodeId?.trim()) {
+          issues.push(issue(
+            'outline.interaction.settlement-target-missing',
+            `节点 ${node.id} 的结算 ${settlement.id} 有出口 ${settlement.exit}，但没有 targetNodeId`,
+            location,
+          ))
+        }
+      }
+      if (plan.beat === 'combat') {
+        const hasProgress = (plan.actions ?? []).some((action) => Boolean(action.effect))
+          || (plan.settlements ?? []).some((settlement) => settlement.trigger !== 'watch')
+        const hasExit = (plan.terminals ?? []).length > 0
+          || (plan.settlements ?? []).some((settlement) => Boolean(settlement.exit))
+        if (!plan.loop?.backTo || !hasProgress || !hasExit) {
+          issues.push(issue(
+            'outline.interaction.combat-loop-incomplete',
+            `战斗节点 ${node.id} 必须同时规划玩家信息、决策、状态进展、反馈、loop.backTo 和退出条件`,
+            location,
+          ))
+        }
+      }
+    }
+  }
+  for (const pillarBeat of pillarBeats.values()) {
+    const plans = allNodes(project)
+      .map(({ node }) => node.data.interaction)
+      .filter((plan): plan is NonNullable<typeof plan> => plan?.sourcePillarBeatId === pillarBeat.id)
+    const actionIds = new Set(plans.flatMap((plan) => (
+      (plan.actions ?? []).flatMap((action) => action.sourcePillarActionId ? [action.sourcePillarActionId] : [])
+    )))
+    const settlementIds = new Set(plans.flatMap((plan) => (
+      (plan.settlements ?? []).flatMap((settlement) => (
+        settlement.sourcePillarSettlementId ? [settlement.sourcePillarSettlementId] : []
+      ))
+    )))
+    const missingActions = pillarBeat.actions.filter((action) => !actionIds.has(action.id)).map((action) => action.id)
+    const missingSettlements = pillarBeat.settlements
+      .filter((settlement) => !settlementIds.has(settlement.id))
+      .map((settlement) => settlement.id)
+    if (missingActions.length > 0 || missingSettlements.length > 0) {
+      issues.push(issue(
+        'outline.interaction.pillar-beat-incomplete',
+        `支柱节拍 ${pillarBeat.id} 没有完整编译：`
+        + `${missingActions.length ? `缺动作 ${missingActions.join('、')}` : ''}`
+        + `${missingActions.length && missingSettlements.length ? '；' : ''}`
+        + `${missingSettlements.length ? `缺结算 ${missingSettlements.join('、')}` : ''}`,
+        { kind: 'blueprint', blueprintId: project.manifest.mainPackId },
+      ))
+    }
+  }
+  return issues
+}
+
+/** 总脉络因果链：每条互动边都必须说明由哪个事件/结算产生，并追溯到支柱节拍。 */
+function outlineCausalChainIssues(
+  project: GraphLibraryDocument,
+  pillarContent?: string,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  let pillarBeatIds = new Set<string>()
+  try {
+    pillarBeatIds = new Set(parsePillarInteractionContract(pillarContent ?? '').beats.map((beat) => beat.id))
+  } catch {
+    return issues
+  }
+  for (const [blueprintId, blueprint] of Object.entries(project.manifest.packs)) {
+    for (const node of blueprint.graph.nodes) {
+      const plan = node.data.interaction
+      if (!plan || plan.beat === 'narrative') continue
+      const location: PageLocation = { kind: 'blueprint', blueprintId, nodeId: node.id }
+      const outgoing = blueprint.graph.edges.filter((edge) => edge.source === node.id)
+      for (const edge of outgoing) {
+        const design = edge.data?.design
+        if (!design) {
+          issues.push(issue(
+            'outline.edge.design-trace-missing',
+            `互动节点 ${node.id} 的出边 ${edge.id} 缺少 edge.data.design；无法知道它由哪个事件或结算产生`,
+            location,
+          ))
+          continue
+        }
+        if (!pillarBeatIds.has(design.pillarBeatId) || design.pillarBeatId !== plan.sourcePillarBeatId) {
+          issues.push(issue(
+            'outline.edge.pillar-trace-invalid',
+            `出边 ${edge.id} 的支柱追踪 ${design.pillarBeatId} 与节点契约 ${plan.sourcePillarBeatId ?? '（缺失）'} 不一致`,
+            location,
+          ))
+        }
+        if (!design.narrativePayoff?.trim()) {
+          issues.push(issue(
+            'outline.edge.payoff-missing',
+            `出边 ${edge.id} 没有 narrativePayoff；下游视频无法知道要呈现什么结果`,
+            location,
+          ))
+        }
+        if (!design.outcomeEvidenceId?.trim()) {
+          issues.push(issue(
+            'outline.edge.outcome-evidence-id-missing',
+            `出边 ${edge.id} 没有 outcomeEvidenceId；目标视频无法提供可机械核验的结果证明`,
+            location,
+          ))
+        } else {
+          const targetNode = blueprint.graph.nodes.find((candidate) => candidate.id === edge.target)
+          const evidence = targetNode?.data.outcomeEvidence?.find((candidate) => (
+            candidate.id === design.outcomeEvidenceId && candidate.sourceEdgeId === edge.id
+          ))
+          if (!evidence) {
+            issues.push(issue(
+              'outline.edge.outcome-evidence-missing',
+              `出边 ${edge.id} 要求结果证明 ${design.outcomeEvidenceId}，但目标节点 ${edge.target} 未声明`,
+              { kind: 'blueprint', blueprintId, nodeId: edge.target },
+            ))
+          } else if (evidence.presentation.trim() !== design.narrativePayoff.trim()) {
+            issues.push(issue(
+              'outline.edge.outcome-evidence-drift',
+              `目标节点 ${edge.target} 的结果证明 ${evidence.id} 与出边 narrativePayoff 不一致`,
+              { kind: 'blueprint', blueprintId, nodeId: edge.target },
+            ))
+          }
+        }
+        const handle = edge.sourceHandle ?? 'default'
+        if (design.producer.kind === 'component-event') {
+          const action = (plan.actions ?? []).find((candidate) => (
+            (candidate.exit ?? candidate.event) === handle
+            && `${candidate.component}.${candidate.event}` === design.producer.ref
+          ))
+          if (!action || (action.targetNodeId && action.targetNodeId !== edge.target)) {
+            issues.push(issue(
+              'outline.edge.event-producer-invalid',
+              `出边 ${edge.id} 声明由 ${design.producer.ref} 产生，但节点 action/targetNodeId 与它不一致`,
+              location,
+            ))
+          } else if (action.downstreamPayoff?.trim() !== design.narrativePayoff.trim()) {
+            issues.push(issue(
+              'outline.edge.event-payoff-drift',
+              `出边 ${edge.id} 的 narrativePayoff 与动作 ${design.producer.ref} 的 downstreamPayoff 不一致`,
+              location,
+            ))
+          }
+        } else if (design.producer.kind === 'settlement') {
+          const settlement = (plan.settlements ?? []).find((candidate) => (
+            candidate.id === design.producer.ref
+            && candidate.exit === handle
+          ))
+          if (!settlement || (settlement.targetNodeId && settlement.targetNodeId !== edge.target)) {
+            issues.push(issue(
+              'outline.edge.settlement-producer-invalid',
+              `出边 ${edge.id} 声明由结算 ${design.producer.ref} 产生，但 settlement/targetNodeId 与它不一致`,
+              location,
+            ))
+          }
+        } else if (handle !== 'default') {
+          issues.push(issue(
+            'outline.edge.lifecycle-producer-invalid',
+            `出边 ${edge.id} 使用 ${handle} 出口，却声明为 lifecycle producer`,
+            location,
+          ))
+        }
+      }
+      const incomingIds = new Set(blueprint.graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.id))
+      const seenEvidence = new Set<string>()
+      for (const evidence of node.data.outcomeEvidence ?? []) {
+        if (seenEvidence.has(evidence.id)) {
+          issues.push(issue(
+            'outline.node.outcome-evidence-duplicate',
+            `节点 ${node.id} 的 outcomeEvidence ID 重复：${evidence.id}`,
+            location,
+          ))
+        }
+        seenEvidence.add(evidence.id)
+        if (!incomingIds.has(evidence.sourceEdgeId)) {
+          issues.push(issue(
+            'outline.node.outcome-evidence-orphan',
+            `节点 ${node.id} 的结果证明 ${evidence.id} 引用了非入边 ${evidence.sourceEdgeId}`,
+            location,
+          ))
+        }
+      }
+    }
+  }
+  return issues
+}
+
+/**
+ * Compile-time boundary between outline producers and downstream authoring.
+ *
+ * UI, rules, and runtime routing all consume the same edge handle. Keeping the
+ * producer and handle aligned here prevents a later stage from having to guess
+ * whether an edge is a component event, a settlement, or lifecycle progress.
+ */
+function outlineDownstreamContractIssues(project: GraphLibraryDocument): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  for (const [blueprintId, blueprint] of Object.entries(project.manifest.packs)) {
+    for (const edge of blueprint.graph.edges) {
+      const design = edge.data?.design
+      if (!design) continue
+      const sourceNode = blueprint.graph.nodes.find((node) => node.id === edge.source)
+      if (!sourceNode) continue
+      const location: PageLocation = { kind: 'blueprint', blueprintId, nodeId: sourceNode.id }
+      const handle = edge.sourceHandle ?? 'default'
+      const plan = sourceNode.data.interaction
+
+      if (design.producer.kind === 'component-event') {
+        const action = plan?.actions?.find((candidate) => (
+          `${candidate.component}.${candidate.event}` === design.producer.ref
+        ))
+        if (!action || handle !== action.event || action.exit !== handle) {
+          issues.push(issue(
+            'outline.downstream.component-event-handle-mismatch',
+            `边 ${edge.id} 的组件事件 producer ${design.producer.ref} 必须使用事件 handle；`
+            + `当前 sourceHandle=${handle}，action.exit=${action?.exit ?? '（缺失）'}。`,
+            location,
+          ))
+        }
+        continue
+      }
+
+      if (design.producer.kind === 'settlement') {
+        const settlement = plan?.settlements?.find((candidate) => candidate.id === design.producer.ref)
+        if (!settlement || handle !== settlement.id || settlement.exit !== handle) {
+          issues.push(issue(
+            'outline.downstream.settlement-handle-mismatch',
+            `边 ${edge.id} 的 settlement producer ${design.producer.ref} 必须使用同名系统 handle；`
+            + `当前 sourceHandle=${handle}，settlement.exit=${settlement?.exit ?? '（缺失）'}。`,
+            location,
+          ))
+        }
+        continue
+      }
+
+      if (handle !== 'default') {
+        issues.push(issue(
+          'outline.downstream.lifecycle-handle-mismatch',
+          `边 ${edge.id} 的 lifecycle producer ${design.producer.ref} 必须使用 default handle；`
+          + `当前 sourceHandle=${handle}。`,
+          location,
+        ))
       }
     }
   }
@@ -1202,94 +2042,412 @@ function rulesPlanFormulaIssues(project: GraphLibraryDocument): ValidationIssue[
   return issues
 }
 
-/** 整装闸门：契约里的每条动作都要在蓝图上真的接上。 */
+function canonicalValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalValue).join(',')}]`
+  if (value === undefined) return 'undefined'
+  if (!value || typeof value !== 'object') return JSON.stringify(value)
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalValue(child)}`)
+    .join(',')}}`
+}
+
+const STATE_REF_PATTERN = /^(?:var\.[A-Za-z0-9_.-]+|entity\.[A-Za-z0-9_-]+\.attr\.[A-Za-z0-9_.-]+|flag\.[A-Za-z0-9_.-]+)$/u
+
+function stateReferenceKeys(value: unknown): Set<string> {
+  const refs = new Set<string>()
+  const visit = (child: unknown): void => {
+    if (!child || typeof child !== 'object') return
+    if (Array.isArray(child)) return child.forEach(visit)
+    const object = child as Record<string, unknown>
+    if (
+      (object.type === 'attr' || object.type === 'attrRatio')
+      && typeof object.entityId === 'string'
+      && typeof object.attr === 'string'
+    ) refs.add(`entity.${object.entityId}.attr.${object.attr}`)
+    if ((object.type === 'var' || object.type === 'flag') && typeof object.varId === 'string') {
+      refs.add(`var.${object.varId}`)
+    }
+    // 文本型 numberExpr 输入绑状态时写 `{ ref: 'var.trust' }`（作者态 TextValueEditor
+    // 产出的就是这个形状）；不认它等于把血条/状态提示的绑定当成没绑。
+    if (typeof object.ref === 'string' && STATE_REF_PATTERN.test(object.ref)) {
+      refs.add(object.ref.startsWith('flag.') ? `var.${object.ref.slice(5)}` : object.ref)
+    }
+    // Pillar state conditions are accepted in the compact authoring shape
+    // `{ field: 'var.foo', op: '>=', value: 1 }`. The compiler normally
+    // normalizes it, but inspection must recognize it too: otherwise a
+    // legitimate terminal is not counted as consuming its state and the
+    // quality gate asks the model to make an already-reachable value "read".
+    if (typeof object.field === 'string' && STATE_REF_PATTERN.test(object.field)) {
+      refs.add(object.field.startsWith('flag.') ? `var.${object.field.slice(5)}` : object.field)
+    }
+    if (typeof object.expr === 'string') {
+      for (const match of object.expr.matchAll(/(?:^|[^A-Za-z0-9_.-])((?:var\.[A-Za-z0-9_.-]+)|(?:entity\.[A-Za-z0-9_-]+\.attr\.[A-Za-z0-9_.-]+)|(?:flag\.[A-Za-z0-9_.-]+))/gu)) {
+        const ref = match[1]!
+        refs.add(ref.startsWith('flag.') ? `var.${ref.slice(5)}` : ref)
+      }
+    }
+    Object.values(object).forEach(visit)
+  }
+  visit(value)
+  return refs
+}
+
+function effectTarget(effect: GraphEffect): string {
+  if (effect.kind === 'attr') return `entity.${effect.entityId}.attr.${effect.attr}`
+  if (effect.kind === 'var' || effect.kind === 'flag') return `var.${effect.varId}`
+  return `item.${effect.itemId}`
+}
+
+function formulaReferences(value: unknown): Set<string> {
+  const refs = new Set<string>()
+  const visit = (child: unknown): void => {
+    if (!child || typeof child !== 'object') return
+    if (Array.isArray(child)) return child.forEach(visit)
+    const object = child as Record<string, unknown>
+    if (typeof object.expr === 'string') {
+      try {
+        collectRefs(object.expr).formulas.forEach((id) => refs.add(id))
+      } catch {
+        // expressionIssues owns syntax diagnostics.
+      }
+    }
+    Object.values(object).forEach(visit)
+  }
+  visit(value)
+  return refs
+}
+
+function numericValueMatches(actual: unknown, expected: number): boolean {
+  if (typeof actual === 'number') return actual === expected
+  if (!actual || typeof actual !== 'object' || !('expr' in actual)) return false
+  const expr = String((actual as { expr: unknown }).expr).trim()
+  if (expr === String(expected) || expr === `+${expected}`) return true
+  const parsed = Number(expr)
+  return Number.isFinite(parsed) && parsed === expected
+}
+
+function actionEffectMatches(
+  actual: GraphEffect,
+  planned: NonNullable<NonNullable<GameNode['data']['interaction']>['actions']>[number]['effect'],
+): boolean {
+  if (!planned || effectTarget(actual) !== planned.target) return false
+  if (actual.kind !== 'attr' && actual.kind !== 'var') return false
+  const opMatches = planned.op === 'set'
+    ? actual.op === 'set'
+    : actual.op === 'add'
+  if (!opMatches) return false
+  if (planned.formulaId && !formulaReferences(actual).has(planned.formulaId)) return false
+  if (planned.value !== undefined) {
+    const expected = planned.op === 'sub' ? -planned.value : planned.value
+    if (!numericValueMatches(actual.value, expected)) return false
+  }
+  return true
+}
+
+function settlementReactions(node: GameNode): Reaction[] {
+  return (node.data.reactions ?? []).filter((reaction) => reaction.when.type !== 'event')
+}
+
+/** 共享结果节点上多条结算常复用同一个 triggerSpec；按效果/出口挑对那一条，不能只取第一条。 */
+function matchingSettlementReaction(
+  node: GameNode,
+  triggerSpec: ReactionTrigger | undefined,
+  options: {
+    effect?: NonNullable<NonNullable<GameNode['data']['interaction']>['actions']>[number]['effect']
+    edges?: GraphLibraryDocument['graph']['edges']
+    targetNodeId?: string
+    sourceHandle?: string
+    producer?: { kind: 'component-event' | 'settlement'; ref: string }
+  } = {},
+): Reaction | undefined {
+  const candidates = settlementReactions(node).filter((candidate) => (
+    triggerMatches(candidate.when, triggerSpec)
+  ))
+  if (candidates.length === 0) return undefined
+  const byEffect = options.effect
+    ? candidates.filter((candidate) => (
+      actionEffects(candidate.do).some((effect) => actionEffectMatches(effect, options.effect))
+    ))
+    : []
+  const ranked = byEffect.length > 0 ? byEffect : candidates
+  const edges = options.edges
+  if ((options.targetNodeId || options.sourceHandle || options.producer) && edges) {
+    const byExit = ranked.filter((candidate) => reactionAdvanceMatches(
+      candidate.do,
+      edges,
+      options.targetNodeId,
+      options.sourceHandle,
+      options.producer,
+    ))
+    if (byExit.length > 0) return byExit[0]
+  }
+  return ranked[0]
+}
+
+function actionEffects(actions: readonly NodeAction[]): GraphEffect[] {
+  return actions.flatMap((action) => action.kind === 'effect' ? action.effects : [])
+}
+
+function spawnedComponent(action: NodeAction, project: GraphLibraryDocument): string | undefined {
+  if (action.kind !== 'spawn') return undefined
+  const [overlayId, childId] = action.from.split('/')
+  return project.ui?.overlays?.[overlayId!]?.children.find((child) => child.id === childId)?.component
+}
+
+function spawnedComponents(actions: readonly NodeAction[], project: GraphLibraryDocument): Set<string> {
+  return new Set(actions.flatMap((action) => {
+    const component = spawnedComponent(action, project)
+    return component ? [component] : []
+  }))
+}
+
+function feedbackSpecMatches(
+  spec: NonNullable<NonNullable<GameNode['data']['interaction']>['actions']>[number]['feedbackSpec'],
+  actions: readonly NodeAction[],
+  feedbackChildren: ReturnType<typeof expandNodeOverlays>[number]['children'],
+  project: GraphLibraryDocument,
+): boolean {
+  if (!spec) return false
+  if (spec.kind === 'hide-interface') return actions.some((action) => action.kind === 'hideOverlay')
+  if (spec.kind === 'transient-component') return spawnedComponents(actions, project).has(spec.component)
+  return feedbackChildren.some((child) => (
+    child.component === spec.component && inputReferencesTarget(child.inputs, spec.target)
+  ))
+}
+
+function inputReferencesTarget(value: unknown, target: string): boolean {
+  if (!value || typeof value !== 'object') return false
+  if (Array.isArray(value)) return value.some((child) => inputReferencesTarget(child, target))
+  const object = value as Record<string, unknown>
+  if (typeof object.expr === 'string') {
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+    if (new RegExp(`(^|[^A-Za-z0-9_.-])${escaped}([^A-Za-z0-9_.-]|$)`, 'u').test(object.expr)) return true
+  }
+  return Object.values(object).some((child) => inputReferencesTarget(child, target))
+}
+
+function reactionAdvanceMatches(
+  actions: readonly NodeAction[],
+  edges: GraphLibraryDocument['graph']['edges'],
+  targetNodeId: string | undefined,
+  sourceHandle?: string,
+  producer?: { kind: 'component-event' | 'settlement'; ref: string },
+): boolean {
+  return actions.some((action) => {
+    if (action.kind !== 'advance') return false
+    const edge = edges.find((candidate) => candidate.id === action.edgeId)
+    if (!edge || (targetNodeId && edge.target !== targetNodeId)) return false
+    if (sourceHandle && (edge.sourceHandle ?? 'default') !== sourceHandle) return false
+    if (producer) {
+      return edge.data?.design?.producer.kind === producer.kind
+        && edge.data.design.producer.ref === producer.ref
+    }
+    return true
+  })
+}
+
+function triggerMatches(actual: ReactionTrigger, expected: ReactionTrigger | undefined): boolean {
+  return Boolean(expected && canonicalValue(actual) === canonicalValue(expected))
+}
+
+/** 整装闸门：契约动作必须由对应组件事件的同一 reaction 精确编译，不能靠字符串碰撞过关。 */
 function finalizationPlanWiringIssues(project: GraphLibraryDocument): ValidationIssue[] {
   const overlays = project.ui?.overlays ?? {}
   const issues: ValidationIssue[] = []
   for (const entry of interactionPlans(project)) {
     const location: PageLocation = { kind: 'blueprint', blueprintId: entry.blueprintId, nodeId: entry.nodeId }
-    const mounted = new Set<string>()
-    for (const mount of entry.node.data.overlayNodes ?? []) {
-      for (const child of overlays[mount.overlay]?.children ?? []) mounted.add(child.component)
-    }
-    // effect 与出边条件都可能引用公式，一次序列化后搜比逐字段遍历更耐结构演进。
-    // 必须排除 `interaction` 自身：契约里就写着公式名，不排掉的话它永远「已被引用」。
-    const { interaction: _plan, ...wiringData } = entry.node.data
-    const wiringSurface = JSON.stringify([
-      wiringData,
-      Object.values(project.manifest.packs).flatMap((pack) => pack.graph.edges.filter(
-        (edge) => edge.source === entry.nodeId,
-      )),
-    ])
-    const wiringFormulaRefs = new Set<string>()
-    const collectWiringFormulaRefs = (value: unknown): void => {
-      if (value == null || typeof value !== 'object') return
-      if (Array.isArray(value)) {
-        value.forEach(collectWiringFormulaRefs)
-        return
-      }
-      const object = value as Record<string, unknown>
-      if (typeof object.expr === 'string') {
-        try {
-          collectRefs(object.expr).formulas.forEach((id) => wiringFormulaRefs.add(id))
-        } catch {
-          // expressionIssues owns parse diagnostics.
-        }
-      }
-      Object.values(object).forEach(collectWiringFormulaRefs)
-    }
-    collectWiringFormulaRefs(wiringData)
-    Object.values(project.manifest.packs).forEach((pack) => {
-      pack.graph.edges
-        .filter((edge) => edge.source === entry.nodeId)
-        .forEach((edge) => collectWiringFormulaRefs(edge.data))
+    const pack = project.manifest.packs[entry.blueprintId]!
+    const instances = expandNodeOverlays(overlays, entry.node)
+    const feedbackChildren = instances.flatMap((instance) => instance.children).filter((child) => {
+      const roles = gameplayRoles(child.component)
+      return roles.includes('state-feedback') || roles.includes('transient-feedback')
     })
-    for (const action of entry.plan.actions ?? []) {
-      if (!mounted.has(action.component)) {
+
+    for (const plannedAction of entry.plan.actions ?? []) {
+      const children = instances.flatMap((instance) => instance.children.map((child) => ({ instance, child })))
+        .filter(({ child }) => child.component === plannedAction.component)
+      if (children.length === 0) {
         issues.push(issue(
           'finalization.plan.component-unmounted',
-          `节点 ${entry.nodeId} 的契约要 ${action.component}（${action.intent}），但节点上没挂它`,
+          `节点 ${entry.nodeId} 的契约要 ${plannedAction.component}（${plannedAction.intent}），但节点上没挂它`,
           location,
         ))
         continue
       }
-      const formulaId = action.effect?.formulaId
-      if (formulaId && !wiringFormulaRefs.has(formulaId)) {
+      const candidateActions: NodeAction[][] = []
+      for (const { instance, child } of children) {
+        const mount = entry.node.data.overlayNodes?.find((candidate) => overlayMountId(candidate) === instance.mountId)
+        if (!mount) continue
+        resolveEventReactions(mount.reactions, plannedAction.event, child.source.childId, instance.mountId)
+          .forEach((reaction) => candidateActions.push(reaction.do))
+        const inherited = resolveOverlayReaction(
+          overlays[mount.overlay]?.reactions,
+          child.source.childId,
+          plannedAction.event,
+        )
+        if (inherited) candidateActions.push(inherited.do)
+      }
+      if (candidateActions.length === 0) {
         issues.push(issue(
-          'finalization.plan.effect-unwired',
-          `节点 ${entry.nodeId} 挂了 ${action.component}，但契约点名的公式 ${formulaId}`
-          + '没有被任何 reaction 或出边引用：观众点了不会有任何变化',
+          'finalization.plan.event-reaction-missing',
+          `节点 ${entry.nodeId} 的 ${plannedAction.component}.${plannedAction.event} 没有精确匹配的事件 reaction`,
           location,
         ))
+        continue
       }
-      const exit = action.exit ?? action.event
-      if (exit !== 'none') {
-        const hasExit = Object.values(project.manifest.packs).some((pack) => pack.graph.edges.some(
-          (edge) => edge.source === entry.nodeId && (edge.sourceHandle ?? 'default') === exit,
-        ))
-        if (!hasExit) {
+      const exit = plannedAction.exit ?? plannedAction.event
+      if (plannedAction.effect) {
+        const eventOwnsNumericState = candidateActions.some((actions) => actionEffects(actions).some((effect) => (
+          effect.kind === 'attr' || effect.kind === 'var'
+        )))
+        if (eventOwnsNumericState) {
           issues.push(issue(
-            'finalization.plan.exit-missing',
-            `节点 ${entry.nodeId} 的契约说 ${action.event} 要走出口 ${exit}，但没有这条出边；`
-            + '要么补这条边，要么把 exit 改成 none（只结算不离开）',
+            'finalization.plan.effect-owned-by-event',
+            `节点 ${entry.nodeId} 的 ${plannedAction.component}.${plannedAction.event} 直接修改了数值；`
+            + '界面事件只负责沿边进入结果视频，数值与飘字必须由目标节点结算',
             location,
           ))
         }
+        const targetNode = pack.graph.nodes.find((candidate) => candidate.id === plannedAction.targetNodeId)
+        const targetPlan = targetNode?.data.interaction
+        const resolutionPlan = targetPlan?.settlements?.find((settlement) => (
+          settlement.sourcePillarActionId === plannedAction.sourcePillarActionId
+          && targetPlan.sourcePillarBeatId === entry.plan.sourcePillarBeatId
+        ))
+        const resolutionReaction = resolutionPlan && targetNode
+          ? matchingSettlementReaction(
+              targetNode,
+              resolutionPlan.triggerSpec as ReactionTrigger | undefined,
+              {
+                effect: plannedAction.effect,
+                edges: pack.graph.edges,
+                targetNodeId: resolutionPlan.targetNodeId,
+                sourceHandle: resolutionPlan.exit,
+                producer: resolutionPlan.id
+                  ? { kind: 'settlement', ref: resolutionPlan.id }
+                  : undefined,
+              },
+            )
+          : undefined
+        if (!resolutionReaction || !actionEffects(resolutionReaction.do).some((effect) => (
+          actionEffectMatches(effect, plannedAction.effect!)
+        ))) {
+          issues.push(issue(
+            'finalization.plan.effect-unwired',
+            `节点 ${entry.nodeId} 的 ${plannedAction.component}.${plannedAction.event} 未在目标节点 `
+            + `${plannedAction.targetNodeId ?? '（缺失）'} 的时间轴结算修改 ${plannedAction.effect.target}`,
+            plannedAction.targetNodeId
+              ? { kind: 'blueprint', blueprintId: entry.blueprintId, nodeId: plannedAction.targetNodeId }
+              : location,
+          ))
+        } else {
+          const targetFeedbackChildren = expandNodeOverlays(overlays, targetNode!)
+            .flatMap((instance) => instance.children)
+            .filter((child) => {
+              const roles = gameplayRoles(child.component)
+              return roles.includes('state-feedback') || roles.includes('transient-feedback')
+            })
+          if (!plannedAction.feedbackSpec || !feedbackSpecMatches(
+            plannedAction.feedbackSpec,
+            resolutionReaction.do,
+            targetFeedbackChildren,
+            project,
+          )) {
+            issues.push(issue(
+              'finalization.plan.effect-feedback-missing',
+              `目标节点 ${targetNode!.id} 的动作结算未按 ${plannedAction.component}.${plannedAction.event} feedbackSpec 落实数值反馈`,
+              { kind: 'blueprint', blueprintId: entry.blueprintId, nodeId: targetNode!.id },
+            ))
+          }
+        }
+      } else if (!plannedAction.feedbackSpec || !candidateActions.some((actions) => feedbackSpecMatches(
+        plannedAction.feedbackSpec,
+        actions,
+        feedbackChildren,
+        project,
+      ))) {
+        issues.push(issue(
+          'finalization.plan.state-feedback-missing',
+          `节点 ${entry.nodeId} 的 ${plannedAction.component}.${plannedAction.event} 未按 feedbackSpec 落实反馈`,
+          location,
+        ))
+      }
+      if (exit !== 'none' && !candidateActions.some((actions) => reactionAdvanceMatches(
+        actions,
+        pack.graph.edges,
+        plannedAction.targetNodeId,
+        exit,
+        { kind: 'component-event', ref: `${plannedAction.component}.${plannedAction.event}` },
+      ))) {
+        issues.push(issue(
+          'finalization.plan.exit-missing',
+          `节点 ${entry.nodeId} 的 ${plannedAction.component}.${plannedAction.event} reaction 未引用契约出口 ${exit}`
+          + `${plannedAction.targetNodeId ? ` → ${plannedAction.targetNodeId}` : ''}`,
+          location,
+        ))
       }
     }
+
+    for (const settlement of entry.plan.settlements ?? []) {
+      const reaction = matchingSettlementReaction(
+        entry.node,
+        settlement.triggerSpec as ReactionTrigger | undefined,
+        {
+          edges: pack.graph.edges,
+          targetNodeId: settlement.targetNodeId,
+          sourceHandle: settlement.exit,
+          producer: settlement.id
+            ? { kind: 'settlement', ref: settlement.id }
+            : undefined,
+        },
+      )
+      if (!reaction) {
+        issues.push(issue(
+          'finalization.plan.settlement-unwired',
+          `节点 ${entry.nodeId} 的结算 ${settlement.id} 没有逐字段匹配 triggerSpec 的 reaction`,
+          location,
+        ))
+        continue
+      }
+      if (!settlement.feedbackSpec || !feedbackSpecMatches(
+        settlement.feedbackSpec,
+        reaction.do,
+        feedbackChildren,
+        project,
+      )) issues.push(issue(
+        'finalization.plan.settlement-feedback-missing',
+        `节点 ${entry.nodeId} 的结算 ${settlement.id} 未按 feedbackSpec 落实反馈`,
+        location,
+      ))
+      if (settlement.exit && !reactionAdvanceMatches(
+        reaction.do,
+        pack.graph.edges,
+        settlement.targetNodeId,
+        settlement.exit,
+        { kind: 'settlement', ref: settlement.id },
+      )) {
+        issues.push(issue(
+          'finalization.plan.settlement-exit-missing',
+          `节点 ${entry.nodeId} 的结算 ${settlement.id} 未引用契约边 ${settlement.exit}`
+          + `${settlement.targetNodeId ? ` → ${settlement.targetNodeId}` : ''}`,
+          location,
+        ))
+      }
+    }
+
+    const terminalReaders = [
+      ...pack.graph.edges.filter((edge) => edge.source === entry.nodeId).map((edge) => edge.data?.condition),
+      ...(entry.node.data.reactions ?? [])
+        .filter((reaction) => reaction.when.type === 'state')
+        .map((reaction) => reaction.when.type === 'state' ? reaction.when.condition : undefined),
+    ]
     for (const terminal of entry.plan.terminals ?? []) {
-      // 终局条件必须在图上留痕：出边条件或 state reaction 里判断过它比较的对象。
-      // 按标识符匹配而不是整串：契约写 `entity.tiger.attr.hp`，图上可能是
-      // `{entityId:'tiger', attr:'hp'}`（effect 结构）或 `tiger.hp <= 0`（表达式），
-      // 三种写法指同一件事，比整串会永远判不通过。
       const subject = terminal.when.split(/[<>=!]/u)[0]!.trim()
-      const tokens = subject.split(/[^A-Za-z0-9_]+/u)
-        .filter((token) => token && !['entity', 'attr', 'var'].includes(token))
-      if (tokens.length > 0 && !tokens.every((token) => wiringSurface.includes(token))) {
+      if (subject && !terminalReaders.some((reader) => stateReferenceKeys(reader).has(subject))) {
         issues.push(issue(
           'finalization.plan.terminal-unwired',
-          `节点 ${entry.nodeId} 的契约有终局条件「${terminal.when}」，`
-          + '但图上没有任何出边条件或 reaction 判断它：这局永远不会结束',
+          `节点 ${entry.nodeId} 的终局条件「${terminal.when}」没有落实为本节点出边条件或 state reaction`,
           location,
         ))
       }
@@ -1709,7 +2867,14 @@ export function choiceConsequenceIssues(
     const outgoing = new Map<string, typeof blueprint.graph.edges>()
     blueprint.graph.edges.forEach((edge) => outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]))
     for (const [nodeId, edges] of outgoing) {
-      const branches = edges.filter((edge) => edge.sourceHandle && edge.sourceHandle !== 'default')
+      // 结算产生的出边不是玩家选择：共享结果节点上两条同 ms 的结算都回到下一拍，
+      // 属于正常收束。按 producer 判定而不是按节点 beat 跳过整个节点——后者会把
+      // 叙事节点上真正的假选择一起放过去。
+      const branches = edges.filter((edge) => (
+        edge.sourceHandle
+        && edge.sourceHandle !== 'default'
+        && edge.data?.design?.producer?.kind !== 'settlement'
+      ))
       const handles = new Set(branches.map((edge) => edge.sourceHandle))
       if (branches.length < 2 || handles.size < 2) continue
       foundChoice = true
@@ -1739,6 +2904,8 @@ function choiceHandleHasStateConsequence(
 ): boolean {
   const planned = node.data.interaction?.actions?.some((action) => {
     const exit = action.exit ?? action.event
+    if (exit !== handle) return false
+    if (action.stateMutationOwner === 'none') return true
     const effect = action.effect
     return exit === handle
       && typeof effect?.target === 'string'
@@ -1795,7 +2962,9 @@ function graphConnectivityIssues(project: GraphLibraryDocument): ValidationIssue
       visited.add(nodeId)
       blueprint.graph.edges.filter((edge) => edge.source === nodeId).forEach((edge) => queue.push(edge.target))
     }
-    const unreachable = blueprint.graph.nodes.filter((node) => !visited.has(node.id))
+    const unreachable = blueprint.graph.nodes.filter((node) => (
+      !visited.has(node.id) && !(node.id === 'entry' && blueprint.entry !== 'entry' && !node.data.interaction)
+    ))
     unreachable.forEach((node) => issues.push(issue('graph.node.unreachable', `节点 ${node.id} 从 entry 不可达`, { kind: 'blueprint', blueprintId, nodeId: node.id })))
     if (![...visited].some((nodeId) => !blueprint.graph.edges.some((edge) => edge.source === nodeId))) {
       issues.push(issue('graph.terminal.missing', `蓝图 ${blueprintId} 没有可达终点`, { kind: 'blueprint', blueprintId }))
@@ -1825,13 +2994,16 @@ function declaredReferences(project: GraphLibraryDocument): {
 
 function outlineNodeSummaryIssues(project: GraphLibraryDocument): ValidationIssue[] {
   const issues: ValidationIssue[] = []
-  for (const { blueprintId, node } of allNodes(project)) {
-    if (!node.data.chapterSummary?.trim()) {
-      issues.push(issue(
-        'outline.node-summary.missing',
-        `节点 ${node.id} 缺少章节梗概；总脉络必须让每个节点讲清演什么`,
-        { kind: 'blueprint', blueprintId, nodeId: node.id },
-      ))
+  for (const [blueprintId, blueprint] of Object.entries(project.manifest.packs)) {
+    for (const node of blueprint.graph.nodes) {
+      if (node.id === 'entry' && blueprint.entry !== 'entry' && !node.data.interaction) continue
+      if (!node.data.chapterSummary?.trim()) {
+        issues.push(issue(
+          'outline.node-summary.missing',
+          `节点 ${node.id} 缺少章节梗概；总脉络必须让每个节点讲清演什么`,
+          { kind: 'blueprint', blueprintId, nodeId: node.id },
+        ))
+      }
     }
   }
   return issues
@@ -1854,13 +3026,16 @@ function workScaleNodeCountIssues(
   const actual = mainPack.graph.nodes.length
   const min = budget.minNodeCount ?? budget.nodeCount
   const max = budget.maxNodeCount ?? budget.nodeCount
-  return actual >= min && actual <= max
-    ? []
-    : [issue(
-      'outline.node-count-mismatch',
-      `${budget.label}主图章节数建议为 ${budget.nodeCount} 个左右（允许 ${min}~${max} 个），当前为 ${actual} 个；战斗包内节拍不计入章节预算，所有主图终局章节都计入总数`,
-      { kind: 'blueprint', blueprintId: project.manifest.mainPackId },
-    )]
+  if (actual >= min && actual <= max) return []
+  const location = { kind: 'blueprint' as const, blueprintId: project.manifest.mainPackId }
+  const message = (
+    `${budget.label}主图章节数建议为 ${budget.nodeCount} 个左右（允许 ${min}~${max} 个），当前为 ${actual} 个；`
+    + '战斗包内节拍不计入章节预算，所有主图终局章节都计入总数'
+  )
+  // 超过上限是物理上交不出去的图；低于下限还能玩，只提醒。
+  return actual > max
+    ? [issue('outline.node-count-mismatch', message, location)]
+    : [warningIssue('outline.node-count-mismatch', message, location)]
 }
 
 function workScaleCharacterCountIssues(
@@ -1906,19 +3081,21 @@ function outlineDeclarationIssues(project: GraphLibraryDocument): ValidationIssu
   const issues: ValidationIssue[] = []
   for (const { blueprintId, node } of allNodes(project)) {
     for (const binding of node.data.cast ?? []) {
-      if (!binding.characterId.trim()) {
+      const characterId = binding.characterId.trim()
+      if (!characterId || !isValidNewRuleId(characterId)) {
         issues.push(issue(
           'outline.character.invalid-id',
-          `节点 ${node.id} 的 cast 声明缺少稳定 characterId`,
+          `节点 ${node.id} 的 characterId ${characterId || '（空）'} 不合法：${RULE_ID_RULE_TEXT}`,
           { kind: 'blueprint', blueprintId, nodeId: node.id },
         ))
       }
     }
     for (const binding of node.data.scenes ?? []) {
-      if (!binding.sceneId.trim()) {
+      const sceneId = binding.sceneId.trim()
+      if (!sceneId || !isValidNewRuleId(sceneId)) {
         issues.push(issue(
           'outline.scene.invalid-id',
-          `节点 ${node.id} 的 scenes 声明缺少稳定 sceneId`,
+          `节点 ${node.id} 的 sceneId ${sceneId || '（空）'} 不合法：${RULE_ID_RULE_TEXT}`,
           { kind: 'blueprint', blueprintId, nodeId: node.id },
         ))
       }
@@ -2067,10 +3244,22 @@ function sceneReferenceIssues(
 /** 节点与边上任何形式的状态后果配置。 */
 function settlementConfigured(data: Record<string, unknown> | undefined): boolean {
   if (!data) return false
-  return Boolean(
-    data.effect || data.effects || data.reaction || data.actions
-    || data.settlement || data.settlements || data.routingSettlement,
-  )
+  if (
+    data.effect || data.effects || data.reaction || data.reactions || data.actions
+    || data.settlement || data.settlements || data.routingSettlement
+  ) return true
+  const mounts = data.overlayNodes
+  if (Array.isArray(mounts) && mounts.some((mount) => (
+    mount && typeof mount === 'object'
+    && Array.isArray((mount as { reactions?: unknown }).reactions)
+    && ((mount as { reactions: unknown[] }).reactions.length > 0)
+  ))) return true
+  const interaction = data.interaction
+  if (interaction && typeof interaction === 'object') {
+    const actions = (interaction as { actions?: Array<{ effect?: unknown }> }).actions
+    if (actions?.some((action) => Boolean(action.effect))) return true
+  }
+  return false
 }
 
 /**
@@ -2247,6 +3436,71 @@ export function inspectBlueprintLogic(project: GraphLibraryDocument): Validation
   ]
 }
 
+/**
+ * 支柱编译产物必须通过的可玩性审查。
+ *
+ * 支柱确认门与交付审查用的是同一套检查，包括 100% 覆盖率与状态生命周期。
+ * 不跑 GraphSession 真实推演，也不跑角色/场景参考图和视频预设。
+ *
+ * 覆盖率一度被关在支柱门之外，理由是「编译器盖章，策划改 IR 也补不上」。那是
+ * 编译器欠债，不是检查过严：欠债还上之后，剩下的失败（战斗回合没有回边、声明了
+ * 却没人读的变量）恰恰只有改支柱才能修。关掉它等于把这些缺口留到蓝图冻结之后，
+ * 那时候已经没有合法修法了。
+ *
+ * 调用方必须把结果改写成 `document.pillar.*` 码再交给支柱 ready：原码的 owner
+ * 会指向 `playtest.validating`，未确认的策划会被编排者错派去审查阶段。
+ */
+export function inspectCompiledPlayability(
+  project: GraphLibraryDocument,
+  pillarMarkdown?: string,
+  options: { includeQualityStamps?: boolean } = {},
+): ValidationIssue[] {
+  const includeQualityStamps = options.includeQualityStamps ?? true
+  const seen = new Set<string>()
+  const issues: ValidationIssue[] = []
+  const skip = new Set([
+    // 过场默认 hide-interface 的事件 reaction 里没有 hideOverlay，属于编译器施工
+    // 缺口，策划改 IR 补不上；它不参与任何覆盖率，暂不作为门。
+    'finalization.plan.state-feedback-missing',
+  ])
+  const push = (items: ValidationIssue[]): void => {
+    for (const item of items) {
+      if (item.level === 'warning') continue
+      if (skip.has(item.code)) continue
+      const key = `${item.code}\0${item.message}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      issues.push(item)
+    }
+  }
+  push(inspectBlueprintLogic(project))
+  push(graphConnectivityIssues(project))
+  push(edgeProducerIssues(project))
+  push(runtimeShapeIssues(project))
+  push(deadLoopIssues(project))
+  push(orphanExitIssues(project))
+  push(numericSanityIssues(project))
+  push(attrRatioMetadataIssues(project))
+  push(outlineCausalChainIssues(project, pillarMarkdown))
+  if (includeQualityStamps) {
+    push(stateLifecycleIssues(project))
+    push(semanticQualityMetricIssues(project))
+  }
+  return issues
+}
+
+function pillarPlayabilityIssues(
+  project: GraphLibraryDocument,
+  pillarMarkdown: string,
+  location: PageLocation,
+): ValidationIssue[] {
+  return inspectCompiledPlayability(project, pillarMarkdown).map((item) => issue(
+    'document.pillar.not-buildable',
+    `编译蓝图尚未可玩：${item.message}`,
+    location,
+  ))
+}
+
 export function inspectAssetReadiness(
   project: GraphLibraryDocument,
   characters: Readonly<Record<string, CharacterDefinition>>,
@@ -2274,14 +3528,14 @@ export interface ProjectValidationResult {
  *
  * 1. 语言漂移、公式未消费、结局缺失是质量提示，不阻塞完成；
  * 2. 角色/场景参考图生成、节点视频预设是为视频生产服务的支线资料，不阻塞蓝图本身交付；
- * 3. 基础需求维度、篇幅和章节/角色/场景规模预算是指导性指标，不一致时给出 warning 提醒，不阻塞蓝图交付。
+ * 3. 基础需求维度是指导性指标；低于篇幅下限仍只 warning。超过上限由
+ *    `outline.node-count-matches-scale` 自己发 error，不再整项降级。
  */
 const WARNING_CHECKS = new Set([
   'content.language-consistency',
   'content.formula-usage',
   'content.ending-presence',
   'brief.required-dimensions',
-  'outline.node-count-matches-scale',
   'finalization.character-references-valid',
   'finalization.scene-references-valid',
   'finalization.node-presets-complete',
@@ -2325,7 +3579,7 @@ export async function validateProjectForActivity(
   for (const documentType of ['core', 'inquiry', 'pillar'] as const) {
     checks.set(
       `document.${documentType}.ready`,
-      documentSubstanceIssues(documentType, inspected.documentContents[documentType]),
+      documentSubstanceIssues(documentType, inspected.documentContents[documentType], workflowState),
     )
   }
   void activity
@@ -2387,7 +3641,16 @@ export async function validateProjectForActivity(
   checks.set('rules.bindings.valid', project
     ? [...settlementIssues(project), ...ruleBindingReferenceIssues(project), ...attrRatioMetadataIssues(project)]
     : inspected.issues)
+  checks.set('rules.settlement-ownership', project
+    ? finalizationPlanWiringIssues(project).filter((item) => (
+        item.code.startsWith('finalization.plan.effect-')
+        || item.code.startsWith('finalization.plan.settlement-')
+      ))
+    : inspected.issues)
   checks.set('ui.reuses-existing-overlays', project ? baseOverlayReuseIssues(project) : inspected.issues)
+  checks.set('ui.event-routing-only', project
+    ? finalizationPlanWiringIssues(project).filter((item) => item.code === 'finalization.plan.effect-owned-by-event')
+    : inspected.issues)
   checks.set('ui.interactions.reachable', project
     ? [
       ...interactionReachabilityIssues(project),
@@ -2411,10 +3674,32 @@ export async function validateProjectForActivity(
   checks.set('outline.declarations-complete', project ? outlineDeclarationIssues(project) : inspected.issues)
   checks.set('outline.declaration-budget', project ? outlineBudgetIssues(project) : inspected.issues)
   // 玩法契约：三条线共享的唯一设计，三段各有闸门（设计 §玩法契约）。
-  checks.set('outline.interaction-plan', project ? outlineInteractionPlanIssues(project, workflowState) : inspected.issues)
+  checks.set('outline.interaction-plan', project
+    ? outlineInteractionPlanIssues(project, workflowState, inspected.documentContents.pillar)
+    : inspected.issues)
+  checks.set('outline.causal-chain', project
+    ? outlineCausalChainIssues(project, inspected.documentContents.pillar)
+    : inspected.issues)
+  checks.set('outline.downstream-contract', project
+    ? outlineDownstreamContractIssues(project)
+    : inspected.issues)
   checks.set('combat.pack-required', project ? combatPackIssues(project) : inspected.issues)
   checks.set('rules.plan-formulas', project ? rulesPlanFormulaIssues(project) : inspected.issues)
   checks.set('finalization.plan-wired', project ? finalizationPlanWiringIssues(project) : inspected.issues)
+  checks.set('finalization.state-lifecycle', project ? stateLifecycleIssues(project) : inspected.issues)
+  checks.set('finalization.outcome-proof', project
+    ? outlineCausalChainIssues(project, inspected.documentContents.pillar)
+    : inspected.issues)
+  checks.set('finalization.causal-quality', project
+    ? [
+      ...outlineCausalChainIssues(project, inspected.documentContents.pillar),
+      ...finalizationPlanWiringIssues(project),
+      ...stateLifecycleIssues(project),
+      ...edgeProducerIssues(project),
+      ...choiceIssues(project),
+    ]
+    : inspected.issues)
+  checks.set('playtest.semantic-quality', project ? semanticQualityMetricIssues(project) : inspected.issues)
 
   // ── 场景：与角色两项对称 ──
   const sceneReferenceIssueList = project ? sceneReferenceIssues(project, scenes, assetsById) : inspected.issues

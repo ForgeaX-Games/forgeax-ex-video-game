@@ -211,6 +211,25 @@ describe('EffectsEditor numeric operations', () => {
     expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
     expect(screen.getByRole('button', { name: '确认' })).toBeDisabled()
   })
+
+  it('hides the per-row delete control when list mutation is disabled', () => {
+    render(
+      <EffectsEditor
+        value={[{
+          kind: 'attr',
+          entityId: 'hero',
+          attr: 'hp',
+          op: 'add',
+          value: 1,
+        }]}
+        entities={{ hero: { id: 'hero', name: '主角', attrs: { hp: 100 } } }}
+        allowAdd={false}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
+  })
 })
 
 describe('ConditionEditor score compatibility', () => {

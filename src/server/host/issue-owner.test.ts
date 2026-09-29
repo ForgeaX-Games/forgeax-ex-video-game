@@ -2,43 +2,36 @@ import { describe, expect, it } from 'vitest'
 import { ownerForIssueCode } from './issue-owner'
 
 /**
- * 只读阶段的失败必须自带「该返工哪一步」。
- *
- * `playtest.validating` 写域是空的：它能看见问题却改不了，只能 `report_blocker` 交回。
- * 此前「交回哪一步」全靠模型判断，第二局它判错了——把界面缺口当成整装的活，
- * 于是同样的四条边改了三遍还是过不去（问题 18 的死循环）。
- * 现在每条 issue 带 owner，失败即指路。
+ * 编译阶段没有工具面，审查阶段也已收回写域。蓝图缺口的 owner 收口到
+ * `document.pillar`：编译产物只能靠改编译输入再整份重编译来修。
  */
 describe('问题归属', () => {
-  it('结构类问题归整装（它有 graph 写域）', () => {
-    expect(ownerForIssueCode('playtest.dead-loop')).toBe('game.finalizing')
-    expect(ownerForIssueCode('playtest.edge.dangling')).toBe('game.finalizing')
-    expect(ownerForIssueCode('playtest.edge.duplicate-handle')).toBe('game.finalizing')
-    expect(ownerForIssueCode('graph.node.orphan')).toBe('game.finalizing')
+  it('结构类问题归支柱（编译产物只能重编译）', () => {
+    expect(ownerForIssueCode('playtest.dead-loop')).toBe('document.pillar')
+    expect(ownerForIssueCode('playtest.edge.dangling')).toBe('document.pillar')
+    expect(ownerForIssueCode('playtest.edge.duplicate-handle')).toBe('document.pillar')
+    expect(ownerForIssueCode('graph.node.orphan')).toBe('document.pillar')
   })
 
-  it('数值类问题归数值线（区间与公式都在规则目录里）', () => {
-    expect(ownerForIssueCode('playtest.variable.range-inverted')).toBe('rules.catalog')
-    expect(ownerForIssueCode('playtest.variable.initial-out-of-range')).toBe('rules.catalog')
-    expect(ownerForIssueCode('playtest.attr.range-inverted')).toBe('rules.catalog')
-    expect(ownerForIssueCode('rules.plan.formula-missing')).toBe('rules.catalog')
-    expect(ownerForIssueCode('rules.formula.invalid-call')).toBe('rules.catalog')
-    expect(ownerForIssueCode('finalization.formula.empty')).toBe('rules.catalog')
+  it('数值类问题也归支柱，不回规则编译活动', () => {
+    expect(ownerForIssueCode('playtest.variable.range-inverted')).toBe('document.pillar')
+    expect(ownerForIssueCode('playtest.variable.initial-out-of-range')).toBe('document.pillar')
+    expect(ownerForIssueCode('playtest.attr.range-inverted')).toBe('document.pillar')
+    expect(ownerForIssueCode('rules.plan.formula-missing')).toBe('document.pillar')
+    expect(ownerForIssueCode('rules.formula.invalid-call')).toBe('document.pillar')
+    expect(ownerForIssueCode('finalization.formula.empty')).toBe('document.pillar')
   })
 
-  it('结算引用类问题归 rules.binding（它把规则接到边与 reaction 上）', () => {
-    expect(ownerForIssueCode('rules.binding.unknown-entity')).toBe('rules.binding')
-    expect(ownerForIssueCode('finalization.plan.effect-unwired')).toBe('rules.binding')
-    expect(ownerForIssueCode('finalization.binding.unknown-variable')).toBe('rules.binding')
-  })
-
-  it('界面类问题归 ui.authoring（挂载与输入键都在界面写域）', () => {
-    expect(ownerForIssueCode('ui.overlay.non-base')).toBe('ui.authoring')
-    expect(ownerForIssueCode('ui.component.unknown-input')).toBe('ui.authoring')
-    expect(ownerForIssueCode('ui.component.event-unbound')).toBe('ui.authoring')
-    expect(ownerForIssueCode('ui.exit.no-source')).toBe('ui.authoring')
-    expect(ownerForIssueCode('finalization.plan.component-unmounted')).toBe('ui.authoring')
-    expect(ownerForIssueCode('finalization.interaction.unreachable')).toBe('ui.authoring')
+  it('结算引用与界面缺口同样回到支柱重编译', () => {
+    expect(ownerForIssueCode('rules.binding.unknown-entity')).toBe('document.pillar')
+    expect(ownerForIssueCode('finalization.plan.effect-unwired')).toBe('document.pillar')
+    expect(ownerForIssueCode('finalization.binding.unknown-variable')).toBe('document.pillar')
+    expect(ownerForIssueCode('ui.overlay.non-base')).toBe('document.pillar')
+    expect(ownerForIssueCode('ui.component.unknown-input')).toBe('document.pillar')
+    expect(ownerForIssueCode('ui.component.event-unbound')).toBe('document.pillar')
+    expect(ownerForIssueCode('ui.exit.no-source')).toBe('document.pillar')
+    expect(ownerForIssueCode('finalization.plan.component-unmounted')).toBe('document.pillar')
+    expect(ownerForIssueCode('finalization.interaction.unreachable')).toBe('document.pillar')
   })
 
   it('角色与场景类问题各归自己那条线', () => {
@@ -50,6 +43,12 @@ describe('问题归属', () => {
     expect(ownerForIssueCode('scene.preview.stale')).toBe('scenes.previewing')
   })
 
+  it('总脉络执行问题归支柱', () => {
+    expect(ownerForIssueCode('outline.interaction.effect-settlement-missing')).toBe('document.pillar')
+    expect(ownerForIssueCode('outline.cross-beat-effect-resolution')).toBe('document.pillar')
+    expect(ownerForIssueCode('outline.resolves-actions-cross-beat')).toBe('document.pillar')
+  })
+
   it('认不出的码不硬猜 owner', () => {
     // 猜错比不猜更糟：会把 peer 引向一条错误的返工路径。
     expect(ownerForIssueCode('something.unexpected')).toBeUndefined()
@@ -57,7 +56,7 @@ describe('问题归属', () => {
 })
 
 describe('owner 随校验结果回到 Agent 手上', () => {
-  it('蓝图审查失败的 issue 带 owner，且指向有对应写域的活动', async () => {
+  it('蓝图审查失败的 issue 带 owner，且指向支柱而不是审查活动', async () => {
     const { validateProjectForActivity } = await import('./project-inspection')
     const { WRITE_SCOPES } = await import('../../workflow/contracts')
     const encoder = new TextEncoder()
@@ -105,9 +104,9 @@ describe('owner 随校验结果回到 Agent 手上', () => {
     const issues = result.evidence[0]!.issues ?? []
     expect(issues.map((entry) => entry.code)).toContain('playtest.dead-loop')
     const owner = issues.find((entry) => entry.code === 'playtest.dead-loop')!.owner!
-    expect(owner).toBe('game.finalizing')
-    // 指路必须指向真的能改的活动：审查活动写域为空，返工目标必须有 graph 写域。
+    expect(owner).toBe('document.pillar')
+    // 审查自己没有写域：它只能报告，修复必须回到支柱再整份重编译。
     expect(WRITE_SCOPES['playtest.validating']).toEqual([])
-    expect(WRITE_SCOPES[owner]).toContain('graph')
+    expect(WRITE_SCOPES[owner]).toContain('documents')
   })
 })

@@ -61,10 +61,11 @@ describe('ImageGenSheet', () => {
     const props = renderSheet({ initialValues: { model: 'lite' } })
     expect(screen.getByLabelText('模型')).toBeDisabled()
     expect(screen.getByLabelText('模型')).toHaveTextContent('lite')
-    expect(screen.getByRole('button', { name: '16:9 2560×1440' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('combobox', { name: '比例' })).toHaveAttribute('data-value', '2560x1440')
     expect(screen.queryByRole('button', { name: '尺寸' })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '3:2 2496×1664' }))
+    fireEvent.click(screen.getByRole('combobox', { name: '比例' }))
+    fireEvent.click(screen.getByRole('option', { name: '3:2' }))
     fireEvent.click(screen.getByRole('button', { name: '视觉风格' }))
     const styleDialog = screen.getByRole('dialog', { name: '风格选择' })
     const styleElement = document.querySelector('style[data-reel-style="game-video-visual-style-picker"]')
@@ -203,7 +204,7 @@ describe('ImageGenSheet', () => {
     expect(polishPrompt).toHaveBeenCalledWith('Hero portrait')
 
     fireEvent.click(screen.getByRole('button', { name: '清空提示词' }))
-    await waitFor(() => expect(screen.getByRole('textbox', { name: '提示词' })).toBeEmptyDOMElement())
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '提示词' }).textContent).toBe(''))
   })
 
   it('switches image history by cover without rendering copy or restoring prompt settings', () => {
@@ -217,6 +218,8 @@ describe('ImageGenSheet', () => {
       createdAt: 1,
     }
     const props = renderSheet({
+      // image/icon roots no longer render generation history; use a root that still does.
+      targetRoot: 'character',
       state: { ...idleState, history: [task] },
       initialValues: { prompt: 'Current draft' },
       historyAssets: [{
@@ -241,7 +244,7 @@ describe('ImageGenSheet', () => {
     expect(props.onLocateAsset).not.toHaveBeenCalled()
     expect(screen.getByLabelText('图片生成结果').querySelector('.generation-preview-image-like__media')).toHaveAttribute('src', 'https://example.com/result.png')
     expect(screen.getByRole('textbox', { name: '提示词' })).toHaveTextContent('Current draft')
-    expect(screen.getByRole('button', { name: '16:9 2560×1440' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('combobox', { name: '比例' })).toHaveAttribute('data-value', '2560x1440')
     expect(screen.getByLabelText('历史记录')).not.toHaveTextContent('History prompt')
     expect(screen.getByLabelText('历史记录').querySelector('.generation-history-item__content')).toBeNull()
     expect(screen.getByLabelText('历史记录').querySelector('.generation-history-item__actions')).toBeNull()
@@ -316,6 +319,8 @@ describe('ImageGenSheet', () => {
 
   it('hides apply for the current image and reveals it only after selecting another history image', () => {
     renderSheet({
+      // image/icon roots no longer render generation history; use a root that still does.
+      targetRoot: 'character',
       initialHistoryAssetId: 'current-image',
       appliedAssetId: 'current-image',
       historyAssets: [
@@ -342,6 +347,22 @@ describe('ImageGenSheet', () => {
     expect(screen.queryByRole('button', { name: '应用' })).not.toBeInTheDocument()
     fireEvent.click(within(screen.getByLabelText('历史记录')).getByRole('button', { name: '查看Previous image' }))
     expect(screen.getByRole('button', { name: '应用' })).toBeEnabled()
+  })
+
+  it.each(['image', 'icon'] as const)('does not render generation history for the %s asset root', (targetRoot) => {
+    renderSheet({
+      targetRoot,
+      historyAssets: [{
+        id: 'generated-image-1',
+        generationId: 'generation-1',
+        label: 'Generated image',
+        url: 'https://example.com/generated.png',
+        status: 'succeeded',
+      }],
+    })
+
+    expect(screen.queryByLabelText('历史记录')).toBeNull()
+    expect(document.querySelector('.igen-workspace')).not.toHaveClass('has-history')
   })
 
   it('keeps completed image media free of status, prompt, and asset-library actions', () => {

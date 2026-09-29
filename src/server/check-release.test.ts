@@ -17,7 +17,7 @@ const videoGenerationToolIds = [
   'game-video:generate-node-video',
 ] as const
 const videoGenerationRequirement = [{ id: 'media.video.generate', version: 1 }]
-const reviewedExtensionHostSpec = '0.3.0'
+const reviewedExtensionHostSpec = '0.3.3'
 const oldToolId = ['gv', 'id:get-graph'].join('')
 const oldStorageKey = ['game', 'video:graph:view'].join('')
 const oldDottedStorageKey = ['gv', 'id.nodePanel.previewW'].join('')

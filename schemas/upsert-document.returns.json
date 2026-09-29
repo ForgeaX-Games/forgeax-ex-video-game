@@ -17,6 +17,39 @@
     "error": {
       "type": "string",
       "description": "失败原因原文。document 为 null 时必看这里，不要重试同样的内容。"
+    },
+    "failedChecks": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "写入前校验失败的完成门检查项。"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["level", "code", "message"],
+        "properties": {
+          "level": { "enum": ["error", "warning"] },
+          "code": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      },
+      "description": "写入前校验发现的问题；error 会阻止落盘，warning 仅提示。"
+    },
+    "incomplete": {
+      "type": "boolean",
+      "description": "支柱 IR 已落盘但尚未写齐骨架节拍。此时 document 非空，应继续 upsert 补 missingBeatIds。"
+    },
+    "missingBeatIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "骨架里还没写到的节拍 ID。只补这些，不要重交已经合并过的全文。"
+    },
+    "nextBeatIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "本批 upsert 允许写入的节拍 ID。过场可一批交齐，分叉/战斗/终局每次只交 1 拍。"
     }
   }
 }

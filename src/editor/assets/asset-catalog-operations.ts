@@ -13,6 +13,7 @@ import { createKinoVideoClient, type KinoVideoClient } from './kino-api'
 import { validateExternalVideoUrl } from './video-external-import'
 import { uploadProviderResource, type BrowserUploadMediaType } from './video-upload'
 import { t } from '../../i18n'
+import type { MediaAsset, MediaProductionType } from '@/authoring/assets/registry-types'
 
 export type CatalogCardTarget =
   | { kind: 'asset'; row: CatalogItemRow }
@@ -52,7 +53,7 @@ function displayName(fileName: string): string {
   return fileName.replace(/\.[^.]+$/, '') || fileName
 }
 
-const UPLOAD_PRODUCTION_TYPES: Readonly<Record<CatalogUploadKind, string>> = {
+const UPLOAD_PRODUCTION_TYPES: Readonly<Record<CatalogUploadKind, MediaProductionType>> = {
   image: 'shot_image',
   video: 'video_clip',
   audio: 'audio_track',
@@ -62,7 +63,7 @@ function uploadedAsset(
   kind: CatalogUploadKind,
   file: File,
   resource: { resource_id: string, url: string },
-): Record<string, unknown> {
+): MediaAsset {
   const id = `asset_upload_${resource.resource_id}`
   return {
     id,
@@ -77,6 +78,8 @@ function uploadedAsset(
     provider: { kind: 'kino', ref: resource.resource_id, upstreamResourceId: resource.resource_id },
     meta: { kinoResourceId: resource.resource_id },
     sourceModule: 'game-video',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
   }
 }
 
@@ -88,49 +91,62 @@ export function createAssetCatalogOperations(
   const upload = options.upload ?? uploadProviderResource
   const operationId = options.operationId ?? defaultOperationId
 
-  return {
-    async createUploadRegistration({
+  const prepareUploadRegistration = async ({
+    gameId,
+    location,
+    file,
+    kind,
+    targetTabKind = kind,
+  }: UploadRegistrationInput): Promise<{ asset: MediaAsset; register: () => Promise<void> }> => {
+    const resource = await upload({
+      client: kinoClient,
       gameId,
-      location,
+      mediaType: kind,
       file,
-      kind,
-      targetTabKind = kind,
-    }: UploadRegistrationInput): Promise<() => Promise<void>> {
-      const resource = await upload({
-        client: kinoClient,
-        gameId,
-        mediaType: kind,
-        file,
-        source: 'upload',
-      })
-      const asset = uploadedAsset(kind, file, resource)
-      if (targetTabKind === 'character') asset.productionType = 'character_ref'
-      if (targetTabKind === 'scene') asset.productionType = 'scene_ref'
-      const registrationId = operationId()
-      const entityId = `${targetTabKind}_${registrationId}`
-      const catalogItemId = targetTabKind === 'image' ? String(asset.id) : entityId
-      const placementTarget = location.kind !== 'catalog-root' && location.tabKind === targetTabKind
-        ? location.target
-        : catalogRootTarget(targetTabKind)
-      const input = {
-        operationId: registrationId,
-        asset,
-        placement: {
-          placementKey: `${targetTabKind}:${catalogItemId}`,
-          folderId: placementTarget,
-          sortKey: String(asset.label),
+      source: 'upload',
+    })
+    const asset = uploadedAsset(kind, file, resource)
+    if (targetTabKind === 'character') asset.productionType = 'character_ref'
+    if (targetTabKind === 'scene') asset.productionType = 'scene_ref'
+    const registrationId = operationId()
+    const entityId = `${targetTabKind}_${registrationId}`
+    const catalogItemId = targetTabKind === 'image' ? String(asset.id) : entityId
+    const placementTarget = location.kind !== 'catalog-root' && location.tabKind === targetTabKind
+      ? location.target
+      : catalogRootTarget(targetTabKind)
+    const input = {
+      operationId: registrationId,
+      asset: { ...asset },
+      placement: {
+        placementKey: `${targetTabKind}:${catalogItemId}`,
+        folderId: placementTarget,
+        sortKey: String(asset.label),
+      },
+      ...(targetTabKind === 'image' ? {} : {
+        apply: {
+          mode: 'catalog' as const,
+          tabKind: targetTabKind,
+          entityId,
+          createEntity: { name: String(asset.label) },
+          source: 'upload' as const,
         },
-        ...(targetTabKind === 'image' ? {} : {
-          apply: {
-            mode: 'catalog' as const,
-            tabKind: targetTabKind,
-            entityId,
-            createEntity: { name: String(asset.label) },
-            source: 'upload' as const,
-          },
-        }),
-      }
-      return () => catalogClient.registerGenerated(input)
+      }),
+    }
+    return { asset, register: () => catalogClient.registerGenerated(input) }
+  }
+
+  const uploadAndRegister = async (input: UploadRegistrationInput): Promise<MediaAsset> => {
+    const prepared = await prepareUploadRegistration(input)
+    await prepared.register()
+    return prepared.asset
+  }
+
+  return {
+    uploadAndRegister,
+
+    async createUploadRegistration(input: UploadRegistrationInput): Promise<() => Promise<void>> {
+      const prepared = await prepareUploadRegistration(input)
+      return prepared.register
     },
 
     async createExternalVideoRegistration({
@@ -155,7 +171,7 @@ export function createAssetCatalogOperations(
       const label = String(asset.label)
       const input = {
         operationId: operationId(),
-        asset,
+        asset: { ...asset },
         placement: {
           placementKey: `video:${assetId}`,
           folderId: catalogRootTarget('video'),
@@ -184,7 +200,15 @@ export function createAssetCatalogOperations(
       })
     },
 
-    moveCatalogItem(row: CatalogItemRow, folderId: string): Promise<void> {
+    moveCatalogItem(row: CatalogItemRow, folderId: string, createPlacement = false): Promise<void> {
+      if (createPlacement) {
+        return catalogClient.place({
+          operationId: operationId(),
+          placementKey: row.placementKey,
+          folderId,
+          sortKey: row.name,
+        })
+      }
       return catalogClient.moveAsset({
         operationId: operationId(),
         placementKey: row.placementKey,

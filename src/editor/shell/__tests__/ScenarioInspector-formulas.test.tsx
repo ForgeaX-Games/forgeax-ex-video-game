@@ -255,7 +255,7 @@ describe('ScenarioInspector formulas', () => {
       />,
     )
 
-    fireEvent.change(screen.getByRole('textbox', { name: '搜索公式' }), { target: { value: '防御' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索公式' }), { target: { value: '防御' } })
     // 公式名称展示为 span：用文本查询验证搜索过滤仍工作
     expect(screen.getByText('减法')).toBeTruthy()
     expect(screen.queryByText('加法')).toBeNull()
@@ -277,16 +277,19 @@ describe('ScenarioInspector formulas', () => {
     }
 
     render(<Harness />)
-    fireEvent.click(screen.getByRole('button', { name: '伤害更多操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
+    fireEvent.click(screen.getByRole('button', { name: '公式 伤害更多操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '重命名' }))
 
-    const dialog = screen.getByRole('dialog', { name: '重命名' })
-    const idInput = within(dialog).getByLabelText('公式 ID')
+    const dialog = screen.getByRole('dialog', { name: /重命名/ })
+    const idInput = within(dialog).getByLabelText('公式id')
     const confirm = within(dialog).getByRole('button', { name: '确认' })
 
     fireEvent.change(idInput, { target: { value: '1damage' } })
-    expect(within(dialog).getByRole('alert')).toHaveTextContent('ID 只能包含大小写英文字母、数字和下划线，且不能以数字开头')
-    expect(confirm).toBeDisabled()
+    expect(idInput).not.toHaveAttribute('aria-invalid')
+    expect(within(dialog).queryByRole('alert')).toBeNull()
+    expect(confirm).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(confirm)
+    expect(screen.getByRole('alert')).toHaveTextContent('公式id无效')
     fireEvent.change(within(dialog).getByLabelText('公式名称'), { target: { value: '暴击伤害' } })
     fireEvent.change(idInput, { target: { value: 'damage' } })
     expect(confirm).toBeEnabled()

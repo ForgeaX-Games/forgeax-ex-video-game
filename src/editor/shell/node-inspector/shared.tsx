@@ -6,7 +6,7 @@ import { useState, type ReactNode } from 'react'
 import type { Entity, GameEdge, OverlayChild, RoutingSettlement, Variable } from '@/runtime/core/schema/graph-schema'
 import { authoringOptionLabel } from '@/authoring/formulas/authoring-option-label'
 import { getComponentManifest } from '@/runtime/core/registry/component-registry'
-import { LooseNumberInput } from '../TermChainEditor'
+import { LooseNumberInput } from '../LooseNumberInput'
 import { NiField, NiSelect } from '../ni-ui'
 
 export const OVERLAY_CONFIG_CONTROL_WIDTH = '320px'

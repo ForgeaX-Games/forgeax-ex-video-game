@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { makeNodiaFixture } from '../../editor/demo/__tests__/fixtures/nodia-fixture'
 import { validateScenario } from '../core/validate/validate'
 import { getSubProcess } from '../core/schema/graph-schema'
+import { node, scnOf } from './test-fixtures'
 
-describe('nodia graph e2e (runs on GraphRuntime)', () => {
-  it('authored graph passes the validator', () => {
-    const scn = makeNodiaFixture()
+describe('graph e2e (runs on GraphRuntime)', () => {
+  it('a small authored graph passes the validator', () => {
+    const scn = scnOf({
+      nodes: [node('entry'), node('next')],
+      edges: [{ id: 'e1', source: 'entry', target: 'next', sourceHandle: 'default', targetHandle: 'in' }],
+    })
     const issues = validateScenario(scn)
     expect(
       issues.filter((issue) =>
@@ -15,12 +18,21 @@ describe('nodia graph e2e (runs on GraphRuntime)', () => {
     ).toEqual([])
   })
 
-  it('combat turn containers are subflows (我方回合/敌方回合)', () => {
-    const scn = makeNodiaFixture()
+  it('combat turn containers are subflows', () => {
+    const scn = scnOf({
+      nodes: [
+        node('a_my', {
+          subProcess: { entry: 'wait', graph: { nodes: [node('wait')], edges: [] } },
+        }),
+        node('b_ai', {
+          subProcess: { entry: 'tele', graph: { nodes: [node('tele')], edges: [] } },
+        }),
+      ],
+      edges: [],
+    })
     const aMy = scn.graph.nodes.find((n) => n.id === 'a_my')
     const bAi = scn.graph.nodes.find((n) => n.id === 'b_ai')
     expect(getSubProcess(aMy!.data)?.entry).toBe('wait')
     expect(getSubProcess(bAi!.data)?.entry).toBe('tele')
   })
-
 })

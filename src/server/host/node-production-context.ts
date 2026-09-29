@@ -4,6 +4,10 @@ import { resolveNodeVideoPreset, validateNodeVideoGenerationPreset } from '@/run
 import { inspectProject } from './project-inspection'
 import { isCurrentCharacterPreview } from '../generation/character-previews'
 import { isCurrentScenePreview } from '../generation/scene-previews'
+import {
+  composeNodeVideoPromptFromGraph,
+  isInsufficientVideoPrompt,
+} from '@/authoring/commands/node-video-prompt'
 
 export async function getNodeProductionContext(
   context: ExtensionContext,
@@ -89,9 +93,35 @@ export async function getNodeProductionContext(
       : typeof mapped === 'string' ? mapped.trim() : undefined
     return asset?.status === 'ready' && resourceId ? resourceId : undefined
   }
-  const prompt = media?.kind === 'video' && media.prompt?.trim()
+  const authoredPrompt = media?.kind === 'video' && media.prompt?.trim()
     ? media.prompt.trim()
-    : (node.data.chapterSummary?.trim() || node.data.name || '')
+    : ''
+  const suggestedPrompt = isInsufficientVideoPrompt(authoredPrompt, {
+    name: node.data.name,
+    chapterSummary: node.data.chapterSummary,
+  })
+    ? composeNodeVideoPromptFromGraph({
+      name: node.data.name,
+      chapterSummary: node.data.chapterSummary,
+      storyText: node.data.storyText,
+      narrativeIntent: node.data.interaction?.narrativeIntent,
+      playerInformation: node.data.interaction?.playerInformation,
+      actionIntents: (node.data.interaction?.actions ?? [])
+        .map((action) => action.intent)
+        .filter((intent): intent is string => Boolean(intent?.trim())),
+      characterLines: (node.data.cast ?? []).flatMap((binding) => {
+        const character = characters[binding.characterId]
+        if (!character?.name) return []
+        return [character.summary?.trim() ? `${character.name}（${character.summary.trim()}）` : character.name]
+      }),
+      sceneLines: (node.data.scenes ?? []).flatMap((binding) => {
+        const scene = sceneEntities[binding.sceneId]
+        if (!scene?.name) return []
+        return [scene.summary?.trim() ? `${scene.name}（${scene.summary.trim()}）` : scene.name]
+      }),
+    })
+    : authoredPrompt
+  const prompt = suggestedPrompt
   const readinessIssues: string[] = []
   if (!prompt) readinessIssues.push('media.prompt is missing')
   // Submission readiness only covers fields consumed by Kino. Blueprint authoring
@@ -195,6 +225,7 @@ export async function getNodeProductionContext(
     },
     video: {
       prompt: prompt || undefined,
+      suggestedPrompt,
       currentRef,
       binding: {
         state: bindingState,

@@ -4,3 +4,10 @@
  * 要 GRAPH_SAVE_LOCK，而 extension-service 现在也 import component-authoring）。
  */
 export const GRAPH_SAVE_LOCK = 'game-video-graph-save'
+
+/**
+ * Cross-module package lock. The value intentionally matches the stable lock
+ * key used by @forgeax/extension-host's GamePackageService so workflow seeding
+ * and package status reads cannot observe different file-write phases.
+ */
+export const GAME_PACKAGE_LOCK = 'extension-package'

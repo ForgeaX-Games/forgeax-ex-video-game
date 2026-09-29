@@ -1,3 +1,6 @@
+import { parsePillarInteractionContract } from '@/authoring/documents/pillar-interaction-contract'
+import { renderAuthorPillarMarkdown } from '@/authoring/documents/pillar-render'
+
 const AUTHOR_LAYER_KEYWORD = '作者可见层'
 const CONTRACT_LAYER_KEYWORDS = ['契约层', '下游备忘', '默认折叠', '不展示']
 const CONTRACT_BLOCK_MARKER = 'schema_version:'
@@ -86,7 +89,12 @@ function stripContractBlocks(lines: string[]): string[] {
       let end = index + 1
       while (end < lines.length && !(lines[end] ?? '').trim().startsWith(closing)) end += 1
       const block = lines.slice(index, Math.min(end + 1, lines.length))
-      if (!block.some((entry) => entry.includes(CONTRACT_BLOCK_MARKER))) kept.push(...block)
+      const isContract = block.some((entry) => (
+        entry.includes(CONTRACT_BLOCK_MARKER)
+        || entry.includes('pillar-interaction-contract')
+        || entry.includes('"schemaVersion"')
+      ))
+      if (!isContract) kept.push(...block)
       index = end + 1
       continue
     }
@@ -119,4 +127,19 @@ function stripContractBlocks(lines: string[]): string[] {
 export function extractAuthorVisible(markdown: string): string {
   const authorRegions = selectAuthorRegions(stripPillarMetadata(markdown.split('\n')))
   return stripContractBlocks(authorRegions).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/**
+ * 作者文档视图的正文。支柱以 IR 为唯一事实源，每次打开都从契约重渲染表格，
+ * 这样已经落盘的旧文档（只有标题和动作一句）也会立刻看到界面 / 结算 / 数值。
+ */
+export function authorDocumentMarkdown(documentType: string, content: string): string {
+  if (documentType === 'pillar') {
+    try {
+      return renderAuthorPillarMarkdown(parsePillarInteractionContract(content, { authoring: true }))
+    } catch {
+      return extractAuthorVisible(content)
+    }
+  }
+  return extractAuthorVisible(content)
 }

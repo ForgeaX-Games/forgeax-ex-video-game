@@ -10,6 +10,7 @@ import type { Overlay, OverlayReaction } from './graph-schema'
 import type {
   ComponentEvent,
   ComponentManifest,
+  ComponentOutput,
   NodeAction,
   OverlayEventRef,
   OverlayNode,
@@ -41,11 +42,25 @@ export function eventsFromParams(inputs: Record<string, unknown> | undefined): C
   const out: ComponentEvent[] = []
   for (const e of events) {
     if (!e || typeof e !== 'object') continue
-    const rec = e as { id?: unknown; label?: unknown }
+    const rec = e as { id?: unknown; label?: unknown; outputs?: unknown }
     if (typeof rec.id !== 'string') continue
+    const outputs = Array.isArray(rec.outputs)
+      ? rec.outputs.flatMap((output): ComponentOutput[] => {
+          if (!output || typeof output !== 'object') return []
+          const value = output as { key?: unknown; label?: unknown; valueType?: unknown }
+          if (typeof value.key !== 'string') return []
+          if (value.valueType !== 'string' && value.valueType !== 'number' && value.valueType !== 'boolean') return []
+          return [{
+            key: value.key,
+            ...(typeof value.label === 'string' ? { label: value.label } : {}),
+            valueType: value.valueType,
+          }]
+        })
+      : undefined
     out.push({
       id: rec.id,
       ...(typeof rec.label === 'string' ? { label: rec.label } : {}),
+      ...(outputs?.length ? { outputs } : {}),
     })
   }
   return out
@@ -90,6 +105,7 @@ export function aggregateOverlayEvents(
         localEventId: ev.id,
         label: ev.label,
         componentId: child.component,
+        ...(ev.outputs?.length ? { outputs: ev.outputs } : {}),
       })
     }
   }
@@ -121,7 +137,7 @@ function eventReactionsFor(reactions: Reaction[] | undefined, eventId: string): 
 }
 
 /** 新规格稳定 key 优先；尾部别名仅供读取尚未被编辑器重写的既有工程。 */
-function eventKeys(outcome: string, childId?: string, mountId?: string): string[] {
+export function eventReactionKeys(outcome: string, childId?: string, mountId?: string): string[] {
   const keys: string[] = []
   if (childId) keys.push(overlayReactionKey(childId, outcome))
   keys.push(outcome)
@@ -142,7 +158,7 @@ export function resolveEventReactions(
   mountId?: string,
 ): Reaction[] {
   if (!reactions?.length) return []
-  for (const k of eventKeys(outcome, childId, mountId)) {
+  for (const k of eventReactionKeys(outcome, childId, mountId)) {
     const hits = eventReactionsFor(reactions, k)
     if (hits.length) return hits
   }

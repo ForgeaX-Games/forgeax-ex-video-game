@@ -242,7 +242,7 @@ const PREVIEW_CSS = `
   flex:1; min-height:0; height:100%; aspect-ratio:auto;
 }
 .ocp-viewport {
-  position:relative; width:100%; aspect-ratio:16 / 9; overflow:hidden;
+  position:relative; width:256px; height:144px; overflow:hidden;
   flex:none; container-type:size; background:#4c4c4c;
 }
 .ocp-root.is-workspace-fill .ocp-viewport {

@@ -44,6 +44,8 @@ export interface PreflightResult {
     requiredInputs: string[]
     stopConditions: string[]
     writeScope: string[]
+    /** Exact transport names the target peer must resolve before dispatch. */
+    requiredToolNames: string[]
   }
 }
 
@@ -177,6 +179,7 @@ export function preflightActivity(
       requiredInputs: contract.requiredInputs.map((input) => input.kind),
       stopConditions: [...contract.stopConditions],
       writeScope: [...writeScopesFor(activity)],
+      requiredToolNames: [...contract.allowedToolNames],
     },
   }
 }
@@ -255,6 +258,7 @@ export function preflightAssetActivity(
       requiredInputs: contract.requiredInputs.map((input) => input.kind),
       stopConditions: [...contract.stopConditions],
       writeScope: [...writeScopesFor(activity)],
+      requiredToolNames: [...contract.allowedToolNames],
     },
   }
 }

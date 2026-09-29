@@ -41,4 +41,14 @@ describe('VideoFullscreenDialog', () => {
 
     expect(onImport).toHaveBeenCalledOnce()
   })
+
+  it('通过下拉菜单设置视频播放倍速', () => {
+    render(<VideoFullscreenDialog open src="/assets/intro.mp4" label="开场动画" onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '播放倍速' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '2.0X' }))
+
+    expect(screen.getByLabelText('开场动画 视频预览')).toHaveProperty('playbackRate', 2)
+    expect(screen.queryByRole('menu', { name: '播放倍速' })).toBeNull()
+  })
 })

@@ -414,12 +414,32 @@ describe('graph-edit', () => {
   })
 
   it('duplicateNodes: 多节点 + 内部边', () => {
-    let g = connect(g0(), { source: 'a', sourceHandle: 'default', target: 'b', id: 'e-ab' })
-    const { graph: next, nodeIds } = duplicateNodes(g, ['a', 'b'])
+    const g: GameGraph = {
+      nodes: [
+        {
+          ...n('a'),
+          data: {
+            name: 'a',
+            reactions: [{ when: { type: 'complete' }, do: [{ kind: 'advance', edgeId: 'e-ab' }] }],
+          },
+        },
+        n('b'),
+      ],
+      edges: [{ id: 'e-ab', source: 'a', sourceHandle: 'default', target: 'b', targetHandle: 'in' }],
+    }
+    const { graph: next, nodeIds } = duplicateNodes(g, ['a', 'b'], {
+      nodeIdForSource: { a: 'a-copy', b: 'b-copy' },
+    })
     expect(nodeIds).toHaveLength(2)
+    expect(nodeIds).toEqual(['a-copy', 'b-copy'])
     expect(next.nodes.length).toBe(4)
-    expect(next.edges.filter((e) => nodeIds.includes(e.source) && nodeIds.includes(e.target))).toHaveLength(1)
+    const copiedEdge = next.edges.find((e) => nodeIds.includes(e.source) && nodeIds.includes(e.target))!
+    expect(copiedEdge).toBeDefined()
     expect(next.nodes.find((n) => n.id === nodeIds[0])!.data.name).toContain('副本')
+    expect(next.nodes.find((n) => n.id === 'a-copy')!.data.reactions![0]!.do[0]).toEqual({
+      kind: 'advance',
+      edgeId: copiedEdge.id,
+    })
   })
 
   it('duplicateNodes: 子流程容器递归重铸内部节点、边和引用 id', () => {

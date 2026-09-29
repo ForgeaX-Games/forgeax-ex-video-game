@@ -9,9 +9,7 @@
  */
 import type { ComponentEvent, ComponentInput, ComponentManifest, Overlay } from '../schema/node-config-schema'
 import type { GameNode, NodeHandle } from '../schema/graph-schema'
-import type { OverlayInstanceChild } from '../schema/node-config-schema'
-import { expandNodeOverlays } from '../schema/expand-overlay'
-import { eventsFromParams } from '../schema/overlay-events'
+import { aggregateNodeOverlayEvents, eventsFromParams } from '../schema/overlay-events'
 
 export interface ComponentDef<P = Record<string, unknown>> {
   /**
@@ -100,12 +98,19 @@ export class ComponentRegistry {
     return events.map((e) => ({ id: e.id, label: e.label }))
   }
 
-  /** 节点出口：`default` + 各挂载组件可发事件（边 sourceHandle 对齐）。 */
+  /**
+   * 节点出口：`default` + 各挂载组件可发事件。
+   * 事件 handle 用稳定命名空间 id（`aggregateNodeOverlayEvents`，与边 sourceHandle 对齐），
+   * 单挂载裸 key / 多挂载 `mountId:…` / 多交互 `childId:…`，并携带组件 label 供 UI 展示。
+   */
   deriveOutputs(node: GameNode, overlays?: Record<string, Overlay>): NodeHandle[] {
-    const instances = expandNodeOverlays(overlays, node)
-    const children: OverlayInstanceChild[] = instances.flatMap((i) => i.children)
+    const events = aggregateNodeOverlayEvents(
+      node.data.overlayNodes ?? [],
+      overlays,
+      (componentId) => this.getManifest(componentId),
+    )
     const out: NodeHandle[] = [{ id: 'default' }]
-    for (const el of children) out.push(...this.handlesOf(el.component, el.inputs as Record<string, unknown>))
+    for (const ev of events) out.push({ id: ev.eventId, label: ev.label })
     const seen = new Set<string>()
     return out.filter((h) => (seen.has(h.id) ? false : (seen.add(h.id), true)))
   }

@@ -111,7 +111,7 @@ export function GamePlayer({ scenario, game, resolveAsset, rngSeed, onEnded, pau
           overlayMounts={snap.overlayMounts}
           skins={skins}
           skinCtx={skinCtx}
-          onEmit={(elementId, key) => setSnap(sessionRef.current.emitEvent(elementId, key))}
+          onEmit={(elementId, key, payload) => setSnap(sessionRef.current.emitEvent(elementId, key, payload))}
           onTick={(nowMs) => setSnap(sessionRef.current.tick(nowMs))}
           onPerformanceEnd={endPerformance}
         />

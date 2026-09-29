@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlueprintDoc, GameGraph } from '@/runtime/core/schema/graph-schema'
 import { useCatalogNav } from '../../persist/catalogNavStore'
@@ -81,13 +81,13 @@ function expandUiTree(): void {
 }
 
 describe('NewSidebar interface tree', () => {
-  it('keeps add available while hiding rename and delete for the built-in Templates folder', () => {
+  it('keeps add available while hiding rename and delete for the built-in interface-template folder', () => {
     useGraphScenario.setState((state) => ({
       meta: {
         ...state.meta,
         uiTree: {
           root: [
-            { kind: 'folder', id: 'ui-folder:custom', name: '模板', children: [] },
+            { kind: 'folder', id: 'ui-folder:custom', name: '界面模板', children: [] },
             { kind: 'folder', id: 'ui-folder:basic', name: '控件', children: [] },
           ],
         },
@@ -97,9 +97,9 @@ describe('NewSidebar interface tree', () => {
     render(<NewSidebar />)
     expandUiTree()
 
-    expect(screen.getByLabelText('新增界面 模板')).toBeTruthy()
-    expect(screen.queryByLabelText('重命名 模板')).toBeNull()
-    expect(screen.queryByLabelText('删除 模板')).toBeNull()
+    expect(screen.getByLabelText('新增界面 界面模板')).toBeTruthy()
+    expect(screen.queryByLabelText('重命名 界面模板')).toBeNull()
+    expect(screen.queryByLabelText('删除 界面模板')).toBeNull()
   })
 
   it('uses a 220px default rail and exposes the manifest asset catalog hierarchy', () => {
@@ -127,16 +127,16 @@ describe('NewSidebar interface tree', () => {
     expect(allTreeLabels.indexOf('规则')).toBeLessThan(allTreeLabels.indexOf('资产库'))
     fireEvent.click(screen.getByRole('button', { name: '展开 资产库' }))
     expect(sidebar.querySelector('.ns-label[title="视频"]')?.textContent).toContain('视频')
-    expect(sidebar.querySelector('.ns-label[title="控件"]')?.textContent).toContain('控件')
-    // 资产目录子项顺序由 CATALOG_TAB_KINDS 固定：角色 → 场景 → 视频 → 图片 → 图标 → 控件 → 音频
+    expect(sidebar.querySelector('.ns-label[title="控件"]')).toBeNull()
+    // 控件已迁至界面树，资产库保留其他分类。
     const assetsIdx = allTreeLabels.indexOf('资产库')
     const expandedTreeLabels = [...sidebar.querySelectorAll('[role="treeitem"] .ns-label')]
       .map((el) => el.getAttribute('title'))
-    expect(expandedTreeLabels.slice(assetsIdx + 1, assetsIdx + 8)).toEqual([
-      '角色', '场景', '视频', '图片', '图标', '控件', '音频',
+    expect(expandedTreeLabels.slice(assetsIdx + 1, assetsIdx + 7)).toEqual([
+      '角色', '场景', '视频', '图片', '图标', '音频',
     ])
     expect(expandedTreeLabels).not.toContain('字体')
-    for (const label of ['图标', '控件', '视频', '音频', '图片']) {
+    for (const label of ['图标', '视频', '音频', '图片']) {
       expect(screen.queryByLabelText(`重命名 ${label}`)).toBeNull()
       expect(screen.queryByLabelText(`删除 ${label}`)).toBeNull()
     }
@@ -148,7 +148,6 @@ describe('NewSidebar interface tree', () => {
 
     for (const [label, root] of [
       ['图标', 'icon'],
-      ['控件', 'control'],
       ['音频', 'audio'],
       ['场景', 'scene'],
       ['视频', 'video'],
@@ -162,6 +161,13 @@ describe('NewSidebar interface tree', () => {
       })
       expect(screen.getByText(label).closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'true')
     }
+
+    expandUiTree()
+    fireEvent.click(screen.getByText('控件').closest('[role="treeitem"]')!)
+    expect(useGraphView.getState().view).toBe('assets')
+    expect(useCatalogNav.getState()).toMatchObject({
+      location: { kind: 'tab-root', tabKind: 'control', target: 'root:control' },
+    })
 
     fireEvent.click(screen.getByText('资产库').closest('[role="treeitem"]')!)
     expect(useGraphView.getState().view).toBe('assets')
@@ -489,8 +495,8 @@ describe('NewSidebar blueprint folder interactions', () => {
     render(<NewSidebar />)
     fireEvent.click(document.querySelector('.ns-label[title="蓝图"]')!.closest('[role="treeitem"]')!)
 
-    expect(screen.queryByLabelText('设为入口 主蓝图')).toBeNull()
-    expect(screen.queryByLabelText('删除 主蓝图')).toBeNull()
+    expect(screen.queryByLabelText('设为主蓝图')).toBeNull()
+    expect(screen.queryByLabelText('删除该蓝图')).toBeNull()
     fireEvent.click(screen.getByLabelText('重命名 主蓝图'))
 
     expect(screen.getByRole('textbox', { name: '重命名蓝图' })).toHaveValue('主蓝图')
@@ -503,7 +509,7 @@ describe('NewSidebar blueprint folder interactions', () => {
     render(<NewSidebar />)
     fireEvent.click(document.querySelector('.ns-label[title="蓝图"]')!.closest('[role="treeitem"]')!)
 
-    fireEvent.click(screen.getByLabelText('设为入口 支线 A'))
+    fireEvent.click(screen.getByLabelText('设为主蓝图'))
 
     expect(useGraphScenario.getState().mainBlueprintId).toBe(branchId)
   })
@@ -512,7 +518,8 @@ describe('NewSidebar blueprint folder interactions', () => {
     useGraphScenario.getState().createBlueprint('支线 B')
     render(<NewSidebar />)
     fireEvent.click(document.querySelector('.ns-label[title="蓝图"]')!.closest('[role="treeitem"]')!)
-    const trigger = screen.getByLabelText('删除 支线 B')
+    const branchRow = screen.getByText('支线 B').closest('[role="treeitem"]') as HTMLElement
+    const trigger = within(branchRow).getByLabelText('删除该蓝图')
     fireEvent.click(trigger)
 
     expect(screen.getByRole('dialog', { name: '删除蓝图' })).toHaveTextContent('确定删除「支线 B」？')
@@ -528,7 +535,8 @@ describe('NewSidebar blueprint folder interactions', () => {
     useGraphScenario.getState().createBlueprint('支线 D')
     render(<NewSidebar />)
     fireEvent.click(document.querySelector('.ns-label[title="蓝图"]')!.closest('[role="treeitem"]')!)
-    const trigger = screen.getByLabelText('删除 支线 D')
+    const branchRow = screen.getByText('支线 D').closest('[role="treeitem"]') as HTMLElement
+    const trigger = within(branchRow).getByLabelText('删除该蓝图')
     fireEvent.click(trigger)
 
     fireEvent.click(trigger)

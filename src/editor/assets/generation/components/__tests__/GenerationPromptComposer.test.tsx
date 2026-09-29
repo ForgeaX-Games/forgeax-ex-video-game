@@ -12,9 +12,10 @@ describe('GenerationPromptComposer', () => {
   it('keeps prompt and inline mentions controlled while exposing the action slots', () => {
     const onSubmit = vi.fn()
     const onStyle = vi.fn()
-    render(<ControlledComposer onSubmit={onSubmit} onOpenStylePicker={onStyle} />)
+    const { container } = render(<ControlledComposer onSubmit={onSubmit} onOpenStylePicker={onStyle} />)
 
     const editor = screen.getByRole('textbox', { name: 'Generation prompt' })
+    expect(screen.getByTestId('top-slot').parentElement).toBe(container.querySelector('.generation-prompt-composer'))
     editor.textContent = 'Use '
     fireEvent.input(editor)
     fireEvent.click(screen.getByRole('button', { name: 'Mention an asset' }))

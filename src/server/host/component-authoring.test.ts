@@ -52,10 +52,39 @@ const optionButton = {
     { key: 'label', label: '文字', valueType: 'string', default: '选项' },
     { key: 'selected', label: '选中', valueType: 'boolean', default: false },
   ],
-  events: [{ id: 'select', label: '选择' }],
+  events: [{
+    id: 'select',
+    label: '选择',
+    outputs: [{ key: 'count', label: '数量', valueType: 'number' }],
+  }],
+  gameplaySemantics: {
+    roles: ['player-choice'],
+    purpose: '让玩家选择一个文本选项并进入对应剧情。',
+    stateBindings: [],
+    eventSemantics: [{
+      event: 'select', intent: '选择该选项', requiredConsequences: ['feedback', 'advance'],
+      stateMutationOwner: 'settlement',
+      downstreamPayoff: '下游视频呈现该选项的结果。',
+    }],
+    requiredCompanions: [],
+    recommendedSettlements: ['choice-event-route'],
+    requiredFeedback: ['选择后锁定按钮'],
+    antiPatterns: ['多个选项无差异合流'],
+  },
   implementation: `function OptionButton(props) {
-    return React.createElement('button', { onClick: function () { props.emit?.('select') } }, props.label)
+    return React.createElement('button', { onClick: function () { props.emit?.('select', { count: 1 }) } }, props.label)
   }`,
+}
+
+const statusSemantics = {
+  roles: ['transient-feedback'],
+  purpose: '显示一次状态变化提示。',
+  stateBindings: [],
+  eventSemantics: [],
+  requiredCompanions: [],
+  recommendedSettlements: ['watch-state-feedback'],
+  requiredFeedback: ['提示与实际状态一致'],
+  antiPatterns: ['只提示但不修改状态'],
 }
 
 describe('component authoring', () => {
@@ -86,6 +115,7 @@ describe('component authoring', () => {
       id: 'StatusChip',
       label: '状态标签',
       events: [],
+      gameplaySemantics: statusSemantics,
       implementation: "function StatusChip() { return React.createElement('span', null, 'Ready') }",
     })).resolves.toMatchObject({ created: true, componentCount: 2 })
 
@@ -94,7 +124,27 @@ describe('component authoring', () => {
     expect(moduleSource).toContain('function OptionButton(props)')
     expect(moduleSource).toContain('function StatusChip()')
     expect(moduleSource).toContain('"id":"OptionButton"')
+    expect(moduleSource).toContain('"outputs":[{"key":"count","label":"数量","valueType":"number"}]')
     expect(moduleSource).toContain('export default [')
+  })
+
+  test('rejects duplicate and unsupported event output declarations', async () => {
+    const { context } = createFilesContext()
+
+    await expect(upsertAuthoredComponent(context, {
+      ...optionButton,
+      events: [{
+        id: 'select',
+        outputs: [
+          { key: 'count', valueType: 'number' },
+          { key: 'count', valueType: 'number' },
+        ],
+      }],
+    })).rejects.toThrow('unique logical identifier')
+    await expect(upsertAuthoredComponent(context, {
+      ...optionButton,
+      events: [{ id: 'select', outputs: [{ key: 'payload', valueType: 'object' }] }],
+    })).rejects.toThrow('valueType must be string, number, or boolean')
   })
 
   test('updates one definition without dropping other authored controls', async () => {
@@ -103,6 +153,7 @@ describe('component authoring', () => {
     await upsertAuthoredComponent(context, {
       id: 'StatusChip',
       events: [],
+      gameplaySemantics: statusSemantics,
       implementation: "function StatusChip() { return React.createElement('span') }",
     })
 
@@ -249,6 +300,20 @@ describe('component authoring', () => {
       id: 'CountdownTimer',
       inputs: [{ key: 'duration', valueType: 'number', default: 10 }],
       events: [{ id: 'complete' }],
+      gameplaySemantics: {
+        roles: ['timed-input'],
+        purpose: '展示剩余时间并在归零时发出完成事件。',
+        stateBindings: [{ input: 'duration', meaning: '倒计时总时长', required: true }],
+        eventSemantics: [{
+          event: 'complete', intent: '时间耗尽', requiredConsequences: ['feedback', 'advance'],
+          stateMutationOwner: 'settlement',
+          downstreamPayoff: '下游呈现超时结果。',
+        }],
+        requiredCompanions: [],
+        recommendedSettlements: ['timed-decision'],
+        requiredFeedback: ['持续显示剩余时间'],
+        antiPatterns: ['归零后没有结果'],
+      },
       implementation: `function CountdownTimer(props) {
         const [remaining, setRemaining] = React.useState(props.duration)
         React.useEffect(function () {
@@ -322,6 +387,7 @@ describe('component authoring', () => {
     await upsertAuthoredComponent(context, {
       id: 'StatusChip',
       events: [],
+      gameplaySemantics: statusSemantics,
       implementation: "function StatusChip() { return React.createElement('span', null, 'Ready') }",
     })
 

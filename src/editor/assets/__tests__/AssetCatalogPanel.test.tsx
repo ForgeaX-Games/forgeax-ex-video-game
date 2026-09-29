@@ -149,8 +149,9 @@ describe('AssetCatalogPanel', () => {
     expect(ASSET_CATALOG_PANEL_CSS).toContain('height: 58px;')
     expect(ASSET_CATALOG_PANEL_CSS).toContain('gap: 16px;')
     expect(ASSET_CATALOG_PANEL_CSS).toContain('width: 221px;')
-    expect(ASSET_CATALOG_PANEL_CSS).toContain('grid-template-columns: repeat(auto-fill, 140px);')
-    expect(ASSET_CATALOG_PANEL_CSS).toContain('gap: 24px 52px;')
+    expect(ASSET_CATALOG_PANEL_CSS).toContain('--adaptive-grid-min-column-gap: 52px;')
+    expect(ASSET_CATALOG_PANEL_CSS).toContain('grid-template-columns: repeat(var(--adaptive-grid-columns, 1), 140px);')
+    expect(ASSET_CATALOG_PANEL_CSS).toContain('column-gap: var(--adaptive-grid-column-gap, var(--adaptive-grid-min-column-gap));')
     expect(ASSET_CATALOG_PANEL_CSS).toContain('padding: 20px 24px 26px;')
     expect(ASSET_CATALOG_PANEL_CSS).toContain('padding: 40px 24px 26px;')
     expect(ASSET_CATALOG_PANEL_CSS).toContain('padding: 24px 24px 26px;')
@@ -186,6 +187,17 @@ describe('AssetCatalogPanel', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索' }), { target: { value: '视频' } })
     expect(container.querySelectorAll('.acp-root-card')).toHaveLength(1)
     expect(screen.getByRole('button', { name: '视频' })).toBeTruthy()
+  })
+
+  it('uses the rule-style empty state for empty categories and searches', () => {
+    useCatalogNav.setState({ location: { kind: 'tab-root', tabKind: 'font', target: 'root:font' } })
+    const { container } = render(<AssetCatalogPanel gameId="demo" />)
+
+    expect(screen.getByText('暂无字体')).toBeTruthy()
+    expect(container.querySelector('.catalog-empty-state-icon img')).toBeTruthy()
+
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索' }), { target: { value: '不存在' } })
+    expect(screen.getByText('暂无搜索结果')).toBeTruthy()
   })
 
   it('opens the image editor from the asset itself and keeps preview as a separate action', () => {
@@ -232,13 +244,12 @@ describe('AssetCatalogPanel', () => {
     })
   })
 
-  it('opens one external video import form from the video toolbar', () => {
+  it('hides the external video import action from the video toolbar', () => {
     useCatalogNav.setState({ location: { kind: 'tab-root', tabKind: 'video', target: 'root:video' } })
     const { container } = render(<AssetCatalogPanel gameId="demo" />)
 
     expect(container.querySelectorAll('.acp-form input')).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', { name: '外部' }))
-    expect(container.querySelectorAll('.acp-form input')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: '外部' })).toBeNull()
   })
 
   it('creates an empty folder immediately with the next available sibling name', async () => {
@@ -290,7 +301,7 @@ describe('AssetCatalogPanel', () => {
     expect(container.querySelector('.acp-root')).toHaveClass('acp-video-list')
     expect(screen.getByRole('button', { name: '生成' }).querySelector('img')).toBeTruthy()
     expect(screen.getByRole('button', { name: '本地' }).querySelector('img')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '外部' }).querySelector('img')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '外部' })).toBeNull()
     expect(screen.getByRole('searchbox', { name: '搜索' })).toBeTruthy()
     expect(container.querySelector('video[controls]')).toBeNull()
     expect(screen.getByRole('status')).toHaveTextContent('生成中')
@@ -390,7 +401,7 @@ describe('AssetCatalogPanel', () => {
 
     expect(screen.getByRole('dialog', { name: '主题曲' })).toBeTruthy()
     expect(screen.getByLabelText('主题曲 音频预览')).toHaveAttribute('src', 'https://cdn.test/theme.mp3')
-    expect(screen.getByRole('button', { name: '全屏' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '全屏' })).not.toBeInTheDocument()
   })
 
   it('uses the paused video first frame for the catalog preview without rendering its poster as an image', () => {
@@ -425,7 +436,7 @@ describe('AssetCatalogPanel', () => {
   it.each([
     ['character', true, true, false, '角色'],
     ['scene', true, true, false, '场景'],
-    ['video', true, true, true, '视频'],
+    ['video', true, true, false, '视频'],
     ['icon', true, true, false, '图标'],
     ['control', true, true, false, '控件'],
     ['audio', false, true, false, '音频'],
@@ -520,6 +531,7 @@ describe('AssetCatalogPanel', () => {
     render(<AssetCatalogPanel gameId="demo" />)
 
     const dialog = await chooseCardAction('主角', '重命名')
+    expect(dialog).toHaveClass('gc-rule-dialog', 'gc-rule-rename-dialog', 'acp-card-dialog')
     const input = within(dialog).getByLabelText('资源名称')
     expect(input).toHaveValue('主角')
 
@@ -551,6 +563,7 @@ describe('AssetCatalogPanel', () => {
     render(<AssetCatalogPanel gameId="demo" />)
 
     const dialog = await chooseCardAction('主角', '删除')
+    expect(dialog).toHaveClass('gc-rule-dialog', 'gc-rule-delete-dialog')
     expect(within(dialog).getByRole('heading', { name: '删除文件' })).toBeTruthy()
     expect(dialog).toHaveTextContent('确认删除[主角]吗？其他蓝图中对此资产的调用引用将被清除。')
 
@@ -615,7 +628,7 @@ describe('AssetCatalogPanel', () => {
     })
   })
 
-  it('offers batch selection only for the image asset tab', () => {
+  it('does not expose batch selection controls', () => {
     render(<AssetCatalogPanel gameId="demo" />)
     expect(screen.queryByRole('checkbox')).toBeNull()
 
@@ -624,6 +637,6 @@ describe('AssetCatalogPanel', () => {
       tabKind: 'image',
       target: 'root:image',
     }))
-    expect(screen.getAllByRole('checkbox')).toHaveLength(2)
+    expect(screen.queryByRole('checkbox')).toBeNull()
   })
 })

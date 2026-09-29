@@ -38,6 +38,12 @@ export interface EvalCtx {
    * 仅在 watch 反应执行期由引擎注入；优先于其它符号。
    */
   locals?: Record<string, number>
+  /**
+   * 组件事件出参（`eventPayload.<key>`）；仅事件反应执行期由引擎注入，栈出即失效。
+   * number 值可参与数值运算；非 number 值读 `eventPayload.<key>` 会抛错（见 resolveRef），
+   * 应改用 `{ ref: 'eventPayload.<key>' }` 字符串通道透传。
+   */
+  eventPayload?: Record<string, unknown>
   /** Internal recursion guard for formula.<id> references. */
   formulaStack?: ReadonlySet<string>
 }
@@ -273,6 +279,12 @@ function resolveRef(path: string[], ctx: EvalCtx): number {
   // 单段局部量（watch 注入的 prev/next/delta 等）优先。
   if (path.length === 1 && ctx.locals && head! in ctx.locals) return ctx.locals[head!]!
   if (head === 'score') return ctx.score ?? 0
+  if (head === 'eventPayload') {
+    const key = rest.join('.')
+    const v = ctx.eventPayload?.[key]
+    if (typeof v !== 'number') throw new ExprError(`eventPayload.${key} 不是数值或未提供（非 number 出参请走 { ref: 'eventPayload.${key}' }）`)
+    return v
+  }
   if (head === 'var') {
     const id = rest.join('.')
     const v = ctx.vars?.[id]
@@ -480,10 +492,12 @@ export interface ExprRefs {
    * 带点的引用（`entity.x.attr.hp`）是一个整体 id token，永不落进这里。
    */
   locals: string[]
+  /** 事件出参引用（`eventPayload.<key>`），供 validator 校验声明。 */
+  eventPayload: string[]
 }
 
 export function collectRefs(src: string): ExprRefs {
-  const refs: ExprRefs = { vars: [], entities: [], flags: [], formulas: [], usesScore: false, locals: [] }
+  const refs: ExprRefs = { vars: [], entities: [], flags: [], formulas: [], usesScore: false, locals: [], eventPayload: [] }
   const walk = (n: Node): void => {
     switch (n.t) {
       case 'ref': {
@@ -493,6 +507,7 @@ export function collectRefs(src: string): ExprRefs {
         else if (head === 'flag') refs.flags.push(rest.join('.'))
         else if (head === 'entity') refs.entities.push(rest[0] ?? '')
         else if (head === 'formula') refs.formulas.push(rest.join('.'))
+        else if (head === 'eventPayload') refs.eventPayload.push(rest.join('.'))
         else if (head && !rest.length) refs.locals.push(head)
         break
       }

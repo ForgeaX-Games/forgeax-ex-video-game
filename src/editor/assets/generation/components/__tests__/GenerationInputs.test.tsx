@@ -19,7 +19,8 @@ describe('generation input atoms', () => {
       />,
     )
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'pro' } })
+    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }))
+    fireEvent.click(screen.getByRole('option', { name: 'pro' }))
     fireEvent.click(screen.getByRole('button', { name: '1080p' }))
     const durationSlider = screen.getByRole('slider', { name: 'Duration slider' })
     expect(durationSlider).toHaveAttribute('min', '4')

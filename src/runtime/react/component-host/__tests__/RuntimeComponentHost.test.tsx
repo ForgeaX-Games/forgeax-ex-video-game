@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { cleanup, render } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentManifest } from '@/runtime/core/schema/node-config-schema'
 import { RuntimeComponentHost, type OverlayRendererRegistration } from '../RuntimeComponentHost'
 import type { SkinCtx } from '../rendererRegistry'
@@ -23,6 +23,15 @@ function Leaf(props: Record<string, unknown>): JSX.Element {
       data-current={String(props.current)}
       data-max={String(props.max)}
     />
+  )
+}
+
+function EventLeaf(props: Record<string, unknown>): JSX.Element {
+  const emit = props.emit as ((key: string, payload?: Record<string, unknown>) => void) | undefined
+  return (
+    <button type="button" onClick={() => emit?.('select', { count: 2, label: 'double' })}>
+      select
+    </button>
   )
 }
 
@@ -88,5 +97,20 @@ describe('RuntimeComponentHost', () => {
       <RuntimeComponentHost registration={registration} overlay={overlay} ctx={hud(350)} />,
     )
     expect(view.getByTestId('leaf')).toHaveAttribute('data-current', '350')
+  })
+
+
+  it('forwards an event payload from the leaf to the runtime callback', () => {
+    const emit = vi.fn()
+    const view = render(
+      <RuntimeComponentHost
+        registration={{ component: EventLeaf, manifest }}
+        overlay={{ elementId: 'choice', component: 'test.hud', inputs: {} }}
+        emit={emit}
+      />,
+    )
+
+    fireEvent.click(view.getByRole('button', { name: 'select' }))
+    expect(emit).toHaveBeenCalledWith('select', { count: 2, label: 'double' })
   })
 })

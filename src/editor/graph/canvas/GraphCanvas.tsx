@@ -4,7 +4,7 @@ import { t as translateUi } from '@/i18n'
  *
  * SSOT = 传入的 GameGraph；画布用 `toFXView` 派生渲染（含 handle 派生），编辑手势经 `graph-edit`
  * 纯函数写回 graph（受控模式，避免 RF 内部状态与 SSOT 分叉）。
- *  - 连边 onConnect → connect()；删边/删点 onEdgesChange/onNodesChange('remove') / 边 hover 删除钮；拖拽 → setNodePosition()。
+ *  - 连边、删边、删点和拖拽都派发标准 BlueprintGraphCommand，与 Agent 批量拓扑事务共享执行器。
  *  - 删边走 disconnect：清 graph.edges，并 unbind 指向该边的 advance（空 event reaction 一并删）。
  *  - 运行时可视化：传 activeNodeId / traversedEdgeIds → 高亮当前执行节点 + 点亮已走边；点节点回调 onJump。
  */
@@ -163,17 +163,8 @@ function ensureCanvasStyle(): void {
     .gv-readonly-flow .react-flow__pane,.gv-readonly-flow .react-flow__node{cursor:grab}
     .gv-readonly-flow .react-flow__edge{pointer-events:none;cursor:grab}
     .gv-readonly-flow .react-flow__pane.dragging{cursor:grabbing}
-    /* Figma 14597_22208：hover 出口/入口箭头才露「添加节点」+（纯 CSS hover/focus-within）。
-       箭头本体只有 10×12，过小不便 hover：用 padding 把命中区扩到 ~34×24，再用等量负 margin 抵消，保持行内布局不动；
-       这圈 padding 同时充当箭头到外侧 + 之间的 hover 桥。出口 + 在右，入口 + 在左。
-       当前产品改为拖线落空弹「添加节点」，暂用 display:none 隐藏「+」，逻辑与 DOM 保留便于回滚。 */
+    /* 箭头本体只有 10×12：padding 把命中区扩到 ~34×24，再用等量负 margin 抵消，保持行内布局不动。 */
     .gv-handle-more{position:relative;display:inline-flex;align-items:center;justify-content:center;padding:6px 12px;margin:-6px -12px;z-index:40}
-    /* Figma 14597_22208 原样：20.82 圆 + 1.04 内偏移描边、底透明；left/top 把它摆到箭头右侧并垂直居中。 */
-    .gv-handle-add-btn{display:none;position:absolute;left:100%;top:50%;transform:translateY(-50%);z-index:50;align-items:center;justify-content:center;width:20.82px;height:20.82px;border-radius:50%;outline:1.04px solid rgba(255,255,255,0.60);outline-offset:-1.04px;background:transparent;cursor:pointer;line-height:0;opacity:0;pointer-events:none;transition:opacity .12s,transform .12s}
-    .gv-handle-add-btn.is-before{left:auto;right:100%}
-    .gv-handle-more:hover .gv-handle-add-btn,.gv-handle-more:focus-within .gv-handle-add-btn{opacity:1;pointer-events:auto}
-    .gv-handle-add-btn:hover{outline-color:#fff;background:rgba(255,255,255,0.15);transform:translateY(-50%) scale(1.1)}
-    .gv-handle-add-btn:hover svg path{fill-opacity:1}
     /* 边中点悬浮删除：扩大命中区后 hover 才露按钮；试玩 readOnly 不挂 onDelete */
     .gv-edge-delete{position:absolute;transform:translate(-50%,-50%);pointer-events:all;z-index:8}
     .gv-edge-delete button{position:relative;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin:0;padding:0;border:1px solid #2a3a55;border-radius:999px;background:rgba(20,24,32,.96);color:#9DC0F5;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.45);line-height:0}
@@ -218,7 +209,8 @@ import { getSubFlowPack, isSubflowContainerData } from '@/runtime/core/schema/gr
 import type { FXNode } from '@/runtime/core/schema/react-flow-schema'
 import { toFXView } from './fx-view'
 import { GraphMiniMap } from './GraphMiniMap'
-import { connect, disconnect, duplicateNodes, insertNodeAfter, insertNodeBefore, removeNode, setNodePosition } from '@/authoring/graph/graph-edit'
+import { duplicateNodes, insertNodeAfter, insertNodeBefore } from '@/authoring/graph/graph-edit'
+import { executeBlueprintGraphCommand } from '@/authoring/commands/blueprint-graph-command'
 import quoteIcon from './icons/quote.svg'
 import quoteIconNormal from './icons/quote-normal.svg'
 
@@ -243,11 +235,8 @@ interface CanvasNodeViewData {
   isPack?: boolean
   /** 当前图的入口业务节点。 */
   isEntry?: boolean
+  canEdit?: boolean
   onDrill?: (nodeId: string) => void
-  /** 出口箭头 hover 出的「+」：在该出口（sourceHandle）后插入新节点；rowIndex 用于纵向错开。 */
-  onInsertAfter?: (nodeId: string, sourceHandle: string, rowIndex: number) => void
-  /** 入口箭头 hover 出的「+」：在该节点前方插入新节点，并改接所有入边。 */
-  onInsertBefore?: (nodeId: string) => void
   onPlay?: (nodeId: string) => void
   onReference?: (nodeId: string) => void
   onGenerateVideo?: (nodeId: string) => void
@@ -436,12 +425,6 @@ const Ico = {
       <path d="M5 12h14" />
     </svg>
   ),
-  /** Figma 14597_22208 handle 添加节点：实心 + 号（设计稿导出原样） */
-  add: (
-    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden>
-      <path d="M6.87219 1.56177H5.57069L5.59713 5.67062H1.5625V6.97212H5.59713L5.59713 10.9325H6.89862L6.89862 6.97212L10.9333 6.97212V5.67062L6.89862 5.67062L6.87219 1.56177Z" fill="white" fillOpacity="0.6" />
-    </svg>
-  ),
   /** 引用（节点信息引用到 AI Chat）—— 常态 I18683_74159;18186_179274，hover 态 I18683_70614;63_1890 */
   quote: (
     <span className="gv-bp-quote-icon">
@@ -465,29 +448,23 @@ const Ico = {
 }
 
 /**
- * 出口箭头 ▶ + 连线用的 source Handle + hover 才露的「添加节点」+。
- * 顶部行的第一个出口与下方每行出口共用这一份实现，保证箭头列与 hover 交互不会分叉。
+ * 出口箭头 ▶ + 连线用的 source Handle。
+ * 顶部行的第一个出口与下方每行出口共用这一份实现，保证箭头列不会分叉。
  * Handle 绝对定位盖在箭头上（不占 flex 宽度），确保箭头右边缘贴着节点边、各行对齐同一列。
- * 「+」当前由 CSS display:none 隐藏；添加节点主路径改为拖线落空浮层。
  */
 function FlowOutlet({
-  nodeId,
   handle,
-  rowIndex,
   color,
   canEdit,
-  onInsertAfter,
 }: {
-  nodeId: string
   handle: FXNode['outputs'][number]
-  rowIndex: number
   color: string
   canEdit: boolean
-  onInsertAfter?: (nodeId: string, sourceHandle: string, rowIndex: number) => void
 }): JSX.Element {
-  const flowId = handle.data?.flowId ?? handle.id.replace(/^source:/, '')
+  // hover 引脚图标时给出完整稳定 id（多挂载同名 label 时用于区分是哪一个）。
+  const flowId = handle.data?.flowId ?? handle.id
   return (
-    <span className="gv-handle-more" style={{ color }}>
+    <span className="gv-handle-more" style={{ color }} title={flowId}>
       <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
         <svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M0 0L10 6L0 12V0Z" fill="currentColor" /></svg>
       </span>
@@ -511,70 +488,23 @@ function FlowOutlet({
           pointerEvents: canEdit ? undefined : 'none',
         }}
       />
-      {onInsertAfter && (
-        <div
-          className="gv-handle-add-btn nodrag nopan"
-          role="button"
-          tabIndex={0}
-          aria-label={`${translateUi('ui.template.1375a32478f4')}${handle.data?.displayLabel ?? flowId}${translateUi('ui.template.d1c1e2d2b1ba')}`}
-          title={translateUi('ui.copy.56ba925f1285')}
-          onClick={(e) => {
-            e.stopPropagation()
-            onInsertAfter(nodeId, flowId, rowIndex)
-          }}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' && e.key !== ' ') return
-            e.preventDefault()
-            e.stopPropagation()
-            onInsertAfter(nodeId, flowId, rowIndex)
-          }}
-        >
-          {Ico.add}
-        </div>
-      )}
     </span>
   )
 }
 
 /**
- * 入口箭头 ▶ + target Handle + hover 才露在左侧的「添加节点」+。
- * 点击后在该节点前方插入新节点，并把所有入边改接到新节点。
- * 「+」当前由 CSS display:none 隐藏；Handle 仍为 10×12 便于拖线落空添加。
+ * 入口箭头 ▶ + target Handle。
+ * Handle 仍为 10×12 便于拖线落空添加。
  */
 function FlowInlet({
-  nodeId,
   handles,
   canEdit,
-  onInsertBefore,
 }: {
-  nodeId: string
   handles: FXNode['inputs']
   canEdit: boolean
-  onInsertBefore?: (nodeId: string) => void
 }): JSX.Element {
   return (
     <span className="gv-handle-more" style={{ color: 'rgba(255,255,255,0.60)' }}>
-      {onInsertBefore && (
-        <div
-          className="gv-handle-add-btn is-before nodrag nopan"
-          role="button"
-          tabIndex={0}
-          aria-label={translateUi('ui.copy.003a47f4ba08')}
-          title={translateUi('ui.copy.56ba925f1285')}
-          onClick={(e) => {
-            e.stopPropagation()
-            onInsertBefore(nodeId)
-          }}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' && e.key !== ' ') return
-            e.preventDefault()
-            e.stopPropagation()
-            onInsertBefore(nodeId)
-          }}
-        >
-          {Ico.add}
-        </div>
-      )}
       <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
         <InputIcon />
       </span>
@@ -608,8 +538,7 @@ function FlowInlet({
 }
 
 function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
-  const { fx, details, active, isGroup, isPack, isEntry, onDrill, onInsertAfter, onInsertBefore, onPlay, onReference, onGenerateVideo, onDuplicate, onDelete } = data as CanvasNodeViewData
-  const canEdit = !!(onInsertAfter || onInsertBefore || onPlay || onReference || onGenerateVideo || onDuplicate || onDelete)
+  const { fx, details, active, isGroup, isPack, isEntry, canEdit = false, onDrill, onPlay, onReference, onGenerateVideo, onDuplicate, onDelete } = data as CanvasNodeViewData
   const [hovered, setHovered] = useState(false)
   // 常态阴影对齐设计稿。选中/试玩描边用 inset box-shadow（不用 outline），
   // 避免描边画在溢出的右侧操作条上面。运行中/选中边框统一为 #7DACED。
@@ -797,7 +726,7 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           return (
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.60)', height: 17 }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <FlowInlet nodeId={id} handles={fx.inputs} canEdit={canEdit} onInsertBefore={onInsertBefore} />
+                <FlowInlet handles={fx.inputs} canEdit={canEdit} />
                 <span>{translateUi('ui.copy.e8850440f247')}</span>
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: firstColor }}>
@@ -805,12 +734,9 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
                 {/* 第一个出口的箭头 + Handle 也在此行（替代原「输出」位置）。 */}
                 {first && (
                   <FlowOutlet
-                    nodeId={id}
                     handle={first}
-                    rowIndex={0}
                     color={firstColor}
                     canEdit={canEdit}
-                    onInsertAfter={onInsertAfter}
                   />
                 )}
               </span>
@@ -818,23 +744,19 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           )
         })()}
         {/* 其余 output（从第二个开始）每个一行：右对齐文字 + 右侧 handle。 */}
-        {fx.outputs.slice(1).map((h, i) => {
+        {fx.outputs.slice(1).map((h) => {
           const fid = h.data?.flowId ?? h.id
           const display = h.data?.displayLabel ?? h.label ?? fid
           const c = handleColor(fid)
-          const hi = i + 1 // handle 索引：0 = 第一个出口，1+ = 后续
           return (
             <div key={h.id} style={{ fontSize: 12, color: c, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
               <span title={fid}>{display}</span>
               {/* 行末右指三角箭头与文字间距 8px（对齐 Figma 输入组间距）；
                   三角是行末最后一个占位元素，右边缘与顶部第一出口三角对齐同一垂直列（贴节点边缘）。 */}
               <FlowOutlet
-                nodeId={id}
                 handle={h}
-                rowIndex={hi}
                 color={c}
                 canEdit={canEdit}
-                onInsertAfter={onInsertAfter}
               />
             </div>
           )
@@ -1051,7 +973,7 @@ export interface GraphCanvasProps {
   keyboardDeleteEnabled?: boolean
   /** 只渲染这些节点（子流程下钻视图）；undefined = 全部。编辑仍作用于完整 graph。 */
   visibleNodeIds?: Set<string>
-  /** 变化时重新 fitView（自适应布局 / 重置 demo 后由 store bump）。 */
+  /** 变化时重新 fitView（自适应布局后由 store bump）。 */
   fitSignal?: number
   /** 下钻层级签名变化时 fitView（与增删节点无关，避免画布漂移）。 */
   drillFitKey?: string
@@ -1089,8 +1011,6 @@ export interface GraphCanvasProps {
   onAddNode?: (position: { x: number; y: number }) => void
   /** 画布右下角：自适应布局（dagre 重排 + fitView）。 */
   onFitLayout?: () => void
-  /** 顶部栏：以当前蓝图声明的入口节点为起点试玩整张图。 */
-  onPlayBlueprint?: () => void
   /**
    * 居中时额外给右侧留白的像素（试玩浮层宽）。必须是稳定原始值——若每帧传新
    * object 当 padding，会反复 fitView，拖动画布/节点时视口被拽回去。
@@ -1145,7 +1065,6 @@ function GraphCanvasInner({
   onPaneClick,
   onAddNode,
   onFitLayout,
-  onPlayBlueprint,
   fitReserveRightPx = 0,
   fitViewOnMount = true,
   defaultZoom,
@@ -1218,37 +1137,6 @@ function GraphCanvasInner({
     [graph, onChange, flashTip],
   )
 
-  /**
-   * 出口箭头旁的「+」：在该出口后插入新节点（原有下游边改从新节点默认出口继续）。
-   * 多出口分叉时按出口行号纵向错开，避免几个新节点叠在同一处。
-   * 「+」当前 CSS 隐藏；拖线落空浮层也复用 insertNodeAfter。
-   */
-  const onInsertAfter = useCallback(
-    (nodeId: string, sourceHandle: string, rowIndex: number) => {
-      const { graph: next, nodeId: created } = insertNodeAfter(graph, nodeId, {
-        sourceHandle,
-        gapY: rowIndex * 120,
-      })
-      if (next === graph) return
-      onChange(next)
-      setSelectedIds([created])
-      onJump?.(created)
-    },
-    [graph, onChange, onJump],
-  )
-
-  /** 入口箭头旁的「+」：在该节点前方插入新节点，并改接所有入边。 */
-  const onInsertBefore = useCallback(
-    (nodeId: string) => {
-      const { graph: next, nodeId: created } = insertNodeBefore(graph, nodeId)
-      if (next === graph) return
-      onChange(next)
-      setSelectedIds([created])
-      onJump?.(created)
-    },
-    [graph, onChange, onJump],
-  )
-
   const onDuplicateNode = useCallback(
     (nodeId: string) => applyDuplicate([nodeId]),
     [applyDuplicate],
@@ -1289,7 +1177,7 @@ function GraphCanvasInner({
   /** hover 删边 / Delete 键删边同源：disconnect 清 edges + 指向该边的 advance。 */
   const onDeleteEdge = useCallback(
     (edgeId: string) => {
-      onChange(disconnect(graph, edgeId))
+      onChange(executeBlueprintGraphCommand(graph, { op: 'disconnect', edgeId }))
     },
     [graph, onChange],
   )
@@ -1303,10 +1191,12 @@ function GraphCanvasInner({
     if (!pendingDelete) return
     let g = graph
     if (pendingDelete.type === 'single') {
-      g = removeNode(g, pendingDelete.nodeId)
+      g = executeBlueprintGraphCommand(g, { op: 'remove-node', nodeId: pendingDelete.nodeId })
       setSelectedIds((ids) => ids.filter((id) => id !== pendingDelete.nodeId))
     } else {
-      for (const id of pendingDelete.ids) g = removeNode(g, id)
+      for (const id of pendingDelete.ids) {
+        g = executeBlueprintGraphCommand(g, { op: 'remove-node', nodeId: id })
+      }
     }
     onChange(g)
     setPendingDelete(null)
@@ -1403,9 +1293,8 @@ function GraphCanvasInner({
             isEntry,
             isGroup,
             isPack,
+            canEdit: !readOnly,
             onDrill,
-            onInsertAfter: readOnly ? undefined : onInsertAfter,
-            onInsertBefore: readOnly ? undefined : onInsertBefore,
             onPlay: readOnly ? undefined : onPlay,
             onReference: readOnly ? undefined : onReference,
             onGenerateVideo: readOnly ? undefined : onGenerateVideo,
@@ -1416,7 +1305,7 @@ function GraphCanvasInner({
       })
     pruneNodeMeasures(measureCache.current, nextSignatures.keys())
     return { rfNodes: nodes, signatures: nextSignatures }
-  }, [fx, graph, overlays, videoOptions, entities, variables, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onInsertBefore, onPlay, onReference, onGenerateVideo, onDuplicateNode, onDeleteNode])
+  }, [fx, graph, overlays, videoOptions, entities, variables, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onPlay, onReference, onGenerateVideo, onDuplicateNode, onDeleteNode])
 
   // 度量回调晚于提交，等这里更新完再来查签名正好对得上当前这版卡片。
   useEffect(() => {
@@ -1601,9 +1490,13 @@ function GraphCanvasInner({
       let next = graph
       const removed = new Set<string>()
       for (const c of changes) {
-        if (c.type === 'position' && c.position) next = setNodePosition(next, c.id, c.position)
+        if (c.type === 'position' && c.position) {
+          next = executeBlueprintGraphCommand(next, {
+            op: 'set-node-position', nodeId: c.id, position: c.position,
+          })
+        }
         else if (c.type === 'remove') {
-          next = removeNode(next, c.id)
+          next = executeBlueprintGraphCommand(next, { op: 'remove-node', nodeId: c.id })
           removed.add(c.id)
         }
         // select：框选过程不在这里 setState（见 onSelectionStart/End）；普通点选走 onSelectionChange / onNodeClick。
@@ -1635,7 +1528,11 @@ function GraphCanvasInner({
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
       let next = graph
-      for (const c of changes) if (c.type === 'remove') next = disconnect(next, c.id)
+      for (const c of changes) {
+        if (c.type === 'remove') {
+          next = executeBlueprintGraphCommand(next, { op: 'disconnect', edgeId: c.id })
+        }
+      }
       if (next !== graph) onChange(next)
     },
     [graph, onChange],
@@ -1647,7 +1544,10 @@ function GraphCanvasInner({
       // 连到了合法 handle：标记成功，onConnectEnd 便不再弹「添加节点」。
       connectMade.current = true
       const sourceHandle = (conn.sourceHandle ?? 'source:default').replace(/^source:/, '')
-      onChange(connect(graph, { source: conn.source, sourceHandle, target: conn.target }))
+      onChange(executeBlueprintGraphCommand(graph, {
+        op: 'connect',
+        spec: { source: conn.source, sourceHandle, target: conn.target },
+      }))
     },
     [graph, onChange],
   )
@@ -1710,7 +1610,7 @@ function GraphCanvasInner({
     [readOnly, screenToFlowPosition],
   )
 
-  /** 点「添加节点」：复用与 hover「+」一致的插入逻辑，新节点落在松手处。 */
+  /** 点「添加节点」：新节点落在松手处。 */
   const confirmPendingInsert = useCallback(() => {
     setPendingInsert((p) => {
       if (!p) return null
@@ -1904,15 +1804,6 @@ function GraphCanvasInner({
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.2085 6.41732V3.20898H6.41683M10.7918 7.58398V10.7923H7.5835M5.25016 5.25065L3.70033 3.70082M10.3 10.3005L8.75016 8.75065M7.87516 6.12565L6.12516 7.87437" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /></svg>
             </span>
             <span className="gv-chrome-label">{translateUi('ui.copy.c10427c6d740')}</span>
-          </button>
-        )}
-        {/* 整页试玩底栏已覆盖「切蓝图再播」；顶栏入口先隐藏，逻辑与 onPlayBlueprint 契约仍保留。 */}
-        {onPlayBlueprint && (
-          <button type="button" data-testid="play-current-blueprint" onClick={onPlayBlueprint} title={translateUi('ui.copy.67f74d4f8847')} aria-label={translateUi('ui.copy.b3f9fb63ec2c')} style={{ display: 'none' }}>
-            <span className="gv-chrome-ico" aria-hidden>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4.95833 2.91667L11.0833 7L4.95833 11.0833V2.91667Z" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /></svg>
-            </span>
-            <span className="gv-chrome-label">{translateUi('ui.copy.b3f9fb63ec2c')}</span>
           </button>
         )}
       </div>

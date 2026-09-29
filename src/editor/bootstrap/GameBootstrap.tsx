@@ -10,9 +10,9 @@ export interface GameBootstrapProps {
   gameId?: string
   onBoot: (gameId: string) => void | Promise<void>
   /**
-   * When true, an `uninitialized` package is initialized silently instead of
-   * showing the "从模板新建" guide. Hosts opt in per mount (e.g. Arrival's
-   * in-process video-game surface); the default keeps the manual confirmation.
+   * When true, an `uninitialized` package keeps the workflow shell mounted
+   * instead of showing the template guide. The workflow creates the package
+   * files when its first blueprint artifact is ready.
    */
   autoInitialize?: boolean
   children: ReactNode
@@ -20,11 +20,23 @@ export interface GameBootstrapProps {
 
 type BootstrapState =
   | { kind: 'loading' }
+  | { kind: 'deferred' }
   | { kind: 'guide' }
   | { kind: 'dismissed' }
   | { kind: 'ready' }
   | { kind: 'inconsistent'; missing: string[] }
   | { kind: 'error'; error: PackageError; retry: 'status' | 'initialize' }
+
+const PACKAGE_INCONSISTENT_RETRY_MAX = 8
+const PACKAGE_INCONSISTENT_RETRY_DELAY_MS = 250
+const PACKAGE_STATUS_INCONSISTENT_RETRY_MAX = 3
+const PACKAGE_STATUS_INCONSISTENT_RETRY_DELAY_MS = 100
+
+function isTransientPackageInconsistent(cause: unknown): boolean {
+  if (cause instanceof ExtensionClientError) return cause.code === 'package_inconsistent'
+  if (!cause || typeof cause !== 'object') return false
+  return (cause as { code?: unknown }).code === 'package_inconsistent'
+}
 
 function packageError(cause: unknown, target: string): PackageError {
   if (isExtensionBoundaryError(cause)) {
@@ -56,10 +68,18 @@ function isExtensionBoundaryError(cause: unknown): boolean {
 
 export function GameBootstrap({ gameId, onBoot, autoInitialize = false, children }: GameBootstrapProps): JSX.Element | null {
   const t = useT()
-  const [state, setState] = useState<BootstrapState>({ kind: 'loading' })
+  // Workflow-owned mounts have a usable shell before the package exists.
+  // Starting in `loading` would briefly replace that shell with the status
+  // probe copy on every mount/retry while the workflow is still collecting
+  // requirements.
+  const [state, setState] = useState<BootstrapState>(() => (
+    autoInitialize ? { kind: 'deferred' } : { kind: 'loading' }
+  ))
   const onBootRef = useRef(onBoot)
   const mountedRef = useRef(true)
   const statusRunRef = useRef(0)
+  const inconsistentStatusRetryRef = useRef(0)
+  const readinessTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>()
 
   useEffect(() => {
     onBootRef.current = onBoot
@@ -69,15 +89,28 @@ export function GameBootstrap({ gameId, onBoot, autoInitialize = false, children
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      if (readinessTimerRef.current !== undefined) clearTimeout(readinessTimerRef.current)
     }
   }, [])
 
   const bootExisting = useCallback(async (
     gameId: string,
     isCurrent: () => boolean = () => mountedRef.current,
+    retry = 0,
   ) => {
-    await onBootRef.current(gameId)
-    if (isCurrent()) setState({ kind: 'ready' })
+    try {
+      await onBootRef.current(gameId)
+      if (isCurrent()) setState({ kind: 'ready' })
+    } catch (cause) {
+      // GamePackageService writes the three portable files sequentially under a
+      // journal. A concurrent first read can observe that brief partial state;
+      // retry it before presenting a permanent corruption error.
+      if (isTransientPackageInconsistent(cause) && retry < PACKAGE_INCONSISTENT_RETRY_MAX) {
+        await new Promise<void>((resolve) => setTimeout(resolve, PACKAGE_INCONSISTENT_RETRY_DELAY_MS))
+        if (isCurrent()) return bootExisting(gameId, isCurrent, retry + 1)
+      }
+      throw cause
+    }
   }, [])
 
   const initialize = useCallback(async () => {
@@ -97,11 +130,17 @@ export function GameBootstrap({ gameId, onBoot, autoInitialize = false, children
     }
   }, [bootExisting, gameId])
 
-  const readStatus = useCallback(async () => {
+  const readStatus = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
     if (!mountedRef.current) return
+    if (readinessTimerRef.current !== undefined) {
+      clearTimeout(readinessTimerRef.current)
+      readinessTimerRef.current = undefined
+    }
     const statusRun = ++statusRunRef.current
     const isCurrentRun = () => mountedRef.current && statusRunRef.current === statusRun
-    setState({ kind: 'loading' })
+    // A deferred poll runs while the workflow keeps writing: swapping the
+    // shell for the checking screen every 1.5s would flicker the whole pane.
+    if (!background && !autoInitialize) setState({ kind: 'loading' })
     let errorTarget = 'package status'
     try {
       const host = getExtensionHost()
@@ -110,13 +149,45 @@ export function GameBootstrap({ gameId, onBoot, autoInitialize = false, children
       const status = statusOf(await host.gamePackage.status())
       if (!isCurrentRun()) return
       if (status?.state === 'initialized') {
+        inconsistentStatusRetryRef.current = 0
         errorTarget = 'package'
         await bootExisting(gameId ?? context.gameId, isCurrentRun)
       }
-      else if (status?.state === 'inconsistent') setState({ kind: 'inconsistent', missing: status.missing ?? [] })
+      else if (status?.state === 'partial') {
+        inconsistentStatusRetryRef.current = 0
+        if (!status.missing?.includes('blueprint.json')) {
+          await bootExisting(gameId ?? context.gameId, isCurrentRun)
+        } else if (autoInitialize) {
+          // The workflow owns the early project state. A missing blueprint is
+          // expected before outline generation, so leave the shell mounted and
+          // wait for the workflow writer to publish the first blueprint.
+          setState({ kind: 'deferred' })
+          readinessTimerRef.current = setTimeout(() => {
+            readinessTimerRef.current = undefined
+            if (isCurrentRun()) void readStatus({ background: true })
+          }, 1500)
+        } else setState({ kind: 'guide' })
+      }
+      else if (status?.state === 'inconsistent') {
+        if (inconsistentStatusRetryRef.current < PACKAGE_STATUS_INCONSISTENT_RETRY_MAX) {
+          inconsistentStatusRetryRef.current += 1
+          await new Promise<void>((resolve) => setTimeout(resolve, PACKAGE_STATUS_INCONSISTENT_RETRY_DELAY_MS))
+          if (isCurrentRun()) void readStatus({ background })
+          return
+        }
+        setState({ kind: 'inconsistent', missing: status.missing ?? [] })
+      }
       else if (status?.state === 'uninitialized') {
-        if (autoInitialize) await initialize()
-        else setState({ kind: 'guide' })
+        inconsistentStatusRetryRef.current = 0
+        if (autoInitialize) {
+          // A new video game starts with workflow state, not a complete game
+          // package. Let the workflow projection render its empty/phase view.
+          setState({ kind: 'deferred' })
+          readinessTimerRef.current = setTimeout(() => {
+            readinessTimerRef.current = undefined
+            if (isCurrentRun()) void readStatus({ background: true })
+          }, 1500)
+        } else setState({ kind: 'guide' })
       }
       else setState({ kind: 'error', retry: 'status', error: { target: 'package status', hint: 'Invalid package status', retryable: true } })
     } catch (cause) {
@@ -129,6 +200,7 @@ export function GameBootstrap({ gameId, onBoot, autoInitialize = false, children
 
   if (state.kind === 'ready') return <>{children}</>
   if (state.kind === 'loading') return <section className="ga-bootstrap" aria-live="polite"><p>{t('bootstrap.checking')}</p></section>
+  if (state.kind === 'deferred') return <>{children}</>
   if (state.kind === 'dismissed') return null
   if (state.kind === 'inconsistent') {
     return <section className="ga-bootstrap" role="alert"><h1>{t('bootstrap.inconsistent.title')}</h1><p>{t('bootstrap.inconsistent.missing')} {state.missing.join(', ') || t('bootstrap.inconsistent.requiredFiles')}</p><p>{t('bootstrap.inconsistent.fix')}</p></section>

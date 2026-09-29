@@ -7,17 +7,21 @@ import { Fragment, useEffect, useState } from 'react'
 import type { Entity, GameGraph, GameNode, GameNodeData, Overlay, RoutingSettlement, Variable } from '@/runtime/core/schema/graph-schema'
 import { authoringOptionLabel } from '@/authoring/formulas/authoring-option-label'
 import type { NodeAction, OverlayReaction, Reaction, OverlayEventRef } from '@/runtime/core/schema/node-config-schema'
-import { createOverlayMount, overlayMountId } from '@/runtime/core/schema/node-config-schema'
+import { overlayMountId } from '@/runtime/core/schema/node-config-schema'
 import { aggregateOverlayEvents, resolveEventReactionDo } from '@/runtime/core/schema/overlay-events'
 import { resolveMountChildren } from '@/runtime/core/schema/expand-overlay'
 import { getComponentManifest } from '@/runtime/core/registry/component-registry'
 import {
-  disconnect,
   updateEventRouteTiming,
-  updateNodeData,
-  upsertBranchEdge,
   type NodeDataPatch,
 } from '@/authoring/graph/graph-edit'
+import {
+  eventHandleEdges,
+  removeMountEventAction,
+  routeMountEventToNode,
+  upsertEventReaction,
+} from '@/authoring/graph/event-response-edit'
+import { mountOverlayOnGraph } from '@/authoring/graph/overlay-edit'
 import type { EditorPickerCtx } from '../editors'
 import type {
   EntityAttributeCreateHandler,
@@ -29,7 +33,6 @@ import { ComponentInputsDisclosure } from '../ComponentInputsDisclosure'
 import type { KeyBindingConflict } from '../keyBindingConflicts'
 import { overlayDisplayLabel } from '../schemeOverlays'
 import { ComponentEventsEditor } from '../ComponentEventsEditor'
-import { resolveMountLayoutForChildren } from '@/runtime/core/schema/layout'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { NI_ROOT_CLASS, NiAddMenu, NiChip, NiDivider, NiIcon, NiIconButton, NiSection } from '../ni-ui'
 import {
@@ -78,86 +81,6 @@ function eventReactionDo(reactions: Reaction[] | undefined, ev: OverlayEventRef)
   return resolveEventReactionDo(reactions, ev.localEventId, ev.childId, ev.mountId) ?? []
 }
 
-/** 清理节点挂载 reaction 的全部历史别名；目录 reaction 的稳定 key 由 ComponentEventsEditor 单独维护。 */
-function eventKeySet(ev: OverlayEventRef): Set<string> {
-  const keys = new Set<string>([ev.localEventId, ev.eventId])
-  keys.add(`${ev.childId}:${ev.localEventId}`)
-  keys.add(`${ev.mountId}:${ev.localEventId}`)
-  keys.add(`${ev.mountId}:${ev.childId}:${ev.localEventId}`)
-  return keys
-}
-
-function upsertEventReaction(
-  reactions: Reaction[] | undefined,
-  ev: OverlayEventRef,
-  doActions: NodeAction[],
-): Reaction[] | undefined {
-  const keys = eventKeySet(ev)
-  const rest = (reactions ?? []).filter((r) => !(r.when.type === 'event' && keys.has(r.when.id)))
-  if (doActions.length) rest.push({ when: { type: 'event', id: ev.localEventId }, do: doActions })
-  return rest.length ? rest : undefined
-}
-
-/** 本节点上某交互出口（sourceHandle = localEventId）的出边。 */
-function handleEdges(graph: GameGraph, nodeId: string, handle: string) {
-  return graph.edges.filter((e) => e.source === nodeId && (e.sourceHandle ?? 'default') === handle)
-}
-
-/**
- * 「覆盖物事件 → 目标节点」捷径：upsert `sourceHandle=localEventId` 的边，并把 advance 写到**当前挂载**。
- * 同 handle 已有多条边（加权边池）时不改边，仅提示走「出边」。
- * 清空目标 = 拆掉该 handle 下出边（disconnect 会清掉指向它们的 advance）。
- */
-function routeMountEventToNode(
-  graph: GameGraph,
-  nodeId: string,
-  mountIndex: number,
-  ev: OverlayEventRef,
-  targetId: string,
-): GameGraph {
-  const handle = ev.localEventId
-  const pool = handleEdges(graph, nodeId, handle)
-  if (!targetId) {
-    let g = graph
-    for (const e of pool) g = disconnect(g, e.id)
-    return g
-  }
-  if (pool.length > 1) return graph
-
-  let g = upsertBranchEdge(graph, { source: nodeId, sourceHandle: handle, target: targetId })
-  const edge = handleEdges(g, nodeId, handle).find((e) => e.target === targetId)
-    ?? handleEdges(g, nodeId, handle)[0]
-  if (!edge) return g
-
-  const node = g.nodes.find((n) => n.id === nodeId)
-  if (!node?.data.overlayNodes?.[mountIndex]) return g
-
-  // 保留本事件已有的 effect/spawn（任一挂载上的），只换成指向新边的 advance；收拢到当前挂载。
-  let preserved: NodeAction[] = []
-  for (const m of node.data.overlayNodes) {
-    const doList = eventReactionDo(m.reactions, ev)
-    if (doList.length) {
-      preserved = doList.filter((a) => a.kind !== 'advance')
-      break
-    }
-  }
-  const keys = eventKeySet(ev)
-  const strip = (rs: Reaction[] | undefined): Reaction[] | undefined => {
-    const next = (rs ?? []).filter((r) => !(r.when.type === 'event' && keys.has(r.when.id)))
-    return next.length ? next : undefined
-  }
-  const mounts = node.data.overlayNodes.map((m, i) => {
-    let reactions = strip(m.reactions)
-    if (i === mountIndex) {
-      const doActions: NodeAction[] = [...preserved, { kind: 'advance', edgeId: edge.id }]
-      reactions = [...(reactions ?? []), { when: { type: 'event', id: handle }, do: doActions }]
-    }
-    return { ...m, reactions }
-  })
-  const dataReactions = strip(node.data.reactions)
-  return updateNodeData(g, nodeId, { overlayNodes: mounts, reactions: dataReactions })
-}
-
 function OverlayReactionsEditor({
   events,
   catalogReactions,
@@ -174,6 +97,7 @@ function OverlayReactionsEditor({
   graph,
   nodeId,
   onChange,
+  onRemoveAction,
   onRouteTo,
   routingSettlement,
   onSetRouteTiming,
@@ -199,6 +123,7 @@ function OverlayReactionsEditor({
   graph: GameGraph
   nodeId: string
   onChange: (next: Reaction[] | undefined) => void
+  onRemoveAction: (event: OverlayEventRef, actionIndex: number) => void
   /** 选目标节点：upsert 边 + 本挂载 advance；空串 = 清除该出口边。 */
   onRouteTo: (ev: OverlayEventRef, targetId: string) => void
   routingSettlement?: RoutingSettlement
@@ -232,9 +157,10 @@ function OverlayReactionsEditor({
         onCreateVariable={onCreateVariable}
         onCreateFormula={onCreateFormula}
         onMountActionsChange={(event, actions) => onChange(upsertEventReaction(reactions, event, actions))}
+        onRemoveMountAction={onRemoveAction}
         renderRoute={(event) => {
           const actions = eventReactionDo(reactions, event)
-          const pool = handleEdges(graph, nodeId, event.localEventId)
+          const pool = eventHandleEdges(graph, nodeId, event.eventId)
           const advance = actions.find((action): action is Extract<NodeAction, { kind: 'advance' }> => action.kind === 'advance')
           const advanceEdge = advance ? graph.edges.find((edge) => edge.id === advance.edgeId) : undefined
           const multiPool = pool.length > 1
@@ -484,14 +410,21 @@ export function OverlaySection({
                         const next = (d.overlayNodes ?? []).map((m, j) => (j === i ? { ...m, reactions } : m))
                         patchData({ overlayNodes: next })
                       }}
-                      onRouteTo={(ev, targetId) => onChange(routeMountEventToNode(graph, node.id, i, ev, targetId))}
+                      onRemoveAction={(event, actionIndex) => onChange(removeMountEventAction(
+                        graph,
+                        node.id,
+                        mid,
+                        event,
+                        actionIndex,
+                      ))}
+                      onRouteTo={(ev, targetId) => onChange(routeMountEventToNode(graph, node.id, mid, ev, targetId))}
                       routingSettlement={d.routingSettlement}
                       onCreateEntityAttribute={onCreateEntityAttribute}
                       onCreateEntity={onCreateEntity}
                       onCreateVariable={onCreateVariable}
                       onCreateFormula={onCreateFormula}
                       onSetRouteTiming={(ev, transition, settlement) => onChange(
-                        updateEventRouteTiming(graph, node.id, ev.localEventId, transition, settlement),
+                        updateEventRouteTiming(graph, node.id, ev.eventId, transition, settlement),
                       )}
                     />
                   </>
@@ -508,20 +441,14 @@ export function OverlaySection({
         options={schemeOverlayIds.map((id) => ({ value: id, label: overlayDisplayLabel(id, overlays) }))}
         onSelect={(oid) => {
           if (!oid) return
-          const mounts = [...(d.overlayNodes ?? [])]
           const definition = overlays?.[oid]
-          const layout = resolveMountLayoutForChildren(
-            undefined,
-            definition?.children.map((child) => child.layout) ?? [],
-          )
-          const created = createOverlayMount(mounts, oid)
-          const mount = { ...created, ...(layout ? { layout } : {}) }
-          mounts.push(mount)
-          patchData({ overlayNodes: mounts })
+          if (!definition) return
+          const mounted = mountOverlayOnGraph(graph, node.id, oid, definition)
+          if (!mounted.mountId) return
+          onChange(mounted.graph)
           // 新挂载直接选中并展开（与「添加结算」一致）：手风琴下不这么做，新加的那张是收着的。
-          const createdId = overlayMountId(mount)
-          setExpandedId(createdId)
-          onFocusMount?.(createdId)
+          setExpandedId(mounted.mountId)
+          onFocusMount?.(mounted.mountId)
         }}
       />
     </NiSection>

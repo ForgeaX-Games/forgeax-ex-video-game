@@ -9,7 +9,7 @@ import {
   resetGraphBlueprintSyncForTests,
   type BlueprintSyncMsg,
 } from '../graphBlueprintSync'
-import { NODIA_DEMO_PROJECT } from '@/authoring/demo/demo'
+import { EMPTY_LIBRARY_DOCUMENT } from '@/authoring/blueprint/empty-library'
 import { emptyBlueprintDoc } from '@/authoring/blueprint/blueprint-project'
 import { __resetGameScopeForTest, setHostGameSlug, setSyncGameId } from '../gameScope'
 
@@ -40,7 +40,7 @@ beforeEach(() => {
   MockBroadcastChannel.instances = []
   globalThis.BroadcastChannel = MockBroadcastChannel as unknown as typeof BroadcastChannel
   resetGraphBlueprintSyncForTests()
-  const p = structuredClone(NODIA_DEMO_PROJECT)
+  const p = structuredClone(EMPTY_LIBRARY_DOCUMENT)
   const mainId = p.manifest.mainPackId
   useGraphScenario.setState({
     blueprints: p.manifest.packs,
@@ -79,7 +79,7 @@ describe('graphBlueprintSync', () => {
     expect(posts.some((m) => m.type === 'mainSet' && m.id === id)).toBe(true)
 
     // 设回原主包再删子蓝图
-    const originalMain = NODIA_DEMO_PROJECT.manifest.mainPackId
+    const originalMain = EMPTY_LIBRARY_DOCUMENT.manifest.mainPackId
     useGraphScenario.getState().setMainBlueprint(originalMain)
     useGraphScenario.getState().selectBlueprint(originalMain)
     posts.length = 0
@@ -117,8 +117,8 @@ describe('graphBlueprintSync', () => {
     expect(posts).toEqual([])
 
     posts.length = 0
-    foreign.postMessage({ type: 'select', id: NODIA_DEMO_PROJECT.manifest.mainPackId } satisfies BlueprintSyncMsg)
-    expect(useGraphScenario.getState().activeBlueprintId).toBe(NODIA_DEMO_PROJECT.manifest.mainPackId)
+    foreign.postMessage({ type: 'select', id: EMPTY_LIBRARY_DOCUMENT.manifest.mainPackId } satisfies BlueprintSyncMsg)
+    expect(useGraphScenario.getState().activeBlueprintId).toBe(EMPTY_LIBRARY_DOCUMENT.manifest.mainPackId)
     expect(posts).toEqual([])
 
     dispose()

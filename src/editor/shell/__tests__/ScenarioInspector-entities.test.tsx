@@ -103,8 +103,8 @@ describe('ScenarioInspector entity attributes', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新增属性' }))
     expect(screen.getByRole('dialog', { name: '新建属性' })).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('属性名称'), { target: { value: '生命值' } })
-    fireEvent.change(screen.getByLabelText('属性id'), { target: { value: 'hp' } })
+    fireEvent.change(screen.getByLabelText('实体属性名称'), { target: { value: '生命值' } })
+    fireEvent.change(screen.getByLabelText('实体属性id'), { target: { value: 'hp' } })
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
     const names = document.querySelectorAll('.gc-rule-id-pair-name')
     expect(names[0]).toHaveTextContent('属性1')
@@ -180,7 +180,11 @@ describe('ScenarioInspector entity attributes', () => {
 
     fireEvent.click(overflow)
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(screen.getByRole('dialog', { name: '删除实体 主角' })).toHaveTextContent('确认删除[主角]吗？')
+    const dialog = screen.getByRole('dialog', { name: '删除实体 主角' })
+    expect(dialog).toHaveTextContent('确认删除[主角]吗？')
+    expect(dialog.querySelector('p')).toHaveStyle({ display: 'block' })
+    expect(CATALOG_CSS).toContain('.gc-rule-delete-dialog > p { display:grid; min-height:96px; place-items:center; margin:16px 0; }')
+    expect(CATALOG_CSS).toContain('.gc-rule-dialog p span { color:#ff9c2a; white-space:normal; overflow-wrap:anywhere; }')
   })
 
   it('stores each attribute initial value independently', () => {

@@ -21,8 +21,8 @@ describe('AudioCatalogPreview', () => {
     expect(screen.getByRole('button', { name: '重新播放' })).toBeTruthy()
     expect(screen.getByText('0:00')).toBeTruthy()
     expect(screen.getByText('1:05')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '1.0x' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '全屏' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '播放倍速' })).toHaveTextContent('1.0x')
+    expect(screen.queryByRole('button', { name: '全屏' })).not.toBeInTheDocument()
   })
 
   it('plays, seeks, and changes speed through the shared controls', () => {
@@ -35,7 +35,8 @@ describe('AudioCatalogPreview', () => {
     fireEvent.loadedMetadata(audio)
     fireEvent.click(screen.getByRole('button', { name: '播放' }))
     fireEvent.change(screen.getByRole('slider', { name: '媒体进度' }), { target: { value: '4' } })
-    fireEvent.click(screen.getByRole('button', { name: '1.0x' }))
+    fireEvent.click(screen.getByRole('button', { name: '播放倍速' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '1.5X' }))
 
     expect(play).toHaveBeenCalledOnce()
     expect(audio.currentTime).toBe(4)

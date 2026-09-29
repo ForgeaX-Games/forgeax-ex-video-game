@@ -29,7 +29,7 @@ export type GameVideoHttpRoute = {
   /** Service method for POST routes that share the JSON body → service pattern. */
   readonly service?: GameVideoServiceMethod
   /** Free-form GET/POST handlers implemented in router.ts. */
-  readonly kind?: 'asset-catalog' | 'image-generation-lifecycle' | 'list-assets' | 'get-asset' | 'list-documents' | 'get-document' | 'upsert-document' | 'delete-component' | 'bundled-media' | 'get-style-axes' | 'set-style-axes' | 'host-media' | 'audio-waveform' | 'get-workflow-state' | 'get-node-production-context' | 'bind-node-kino-references' | 'get-pillar-author-gate-proposal'
+  readonly kind?: 'asset-catalog' | 'image-generation-lifecycle' | 'list-assets' | 'get-asset' | 'list-documents' | 'get-document' | 'upsert-document' | 'delete-component' | 'get-style-axes' | 'set-style-axes' | 'host-media' | 'audio-waveform' | 'get-workflow-state' | 'get-node-production-context' | 'bind-node-kino-references' | 'get-pillar-author-gate-proposal'
 }
 
 /** Ordered for documentation; router may use maps for O(1) lookup. */
@@ -53,7 +53,6 @@ export const GAME_VIDEO_HTTP_ROUTES: readonly GameVideoHttpRoute[] = [
   { method: 'POST', path: 'stage-artifacts/import', service: 'importStageArtifacts' },
   { method: 'DELETE', path: 'components/:id', kind: 'delete-component' },
   { method: 'POST', path: 'documents/design-options/apply', service: 'applyDesignOptions' },
-  { method: 'GET', path: 'media/bundled/:name', kind: 'bundled-media' },
   { method: 'GET', path: 'style-axes', kind: 'get-style-axes' },
   { method: 'POST', path: 'style-axes', kind: 'set-style-axes' },
   { method: 'POST', path: 'references/characters/import', service: 'importCharacterRefs' },

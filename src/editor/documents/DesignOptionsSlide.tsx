@@ -4,6 +4,7 @@ import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { applyDesignOptions, fetchProjectDocument, type ProjectDocument } from './document-client'
 import { parseDesignOptions, type DesignOption, type DesignOptionId } from '@/authoring/documents/core-design-options'
 import { useDesignOptionsGate } from './design-options-gate'
+import { hasInProcessHost } from '@/editor/host-init'
 import { useDocumentNav } from '../persist/documentNavStore'
 import applyIcon from '../ui-assets/design-options-apply.svg'
 import leftArrowIcon from '../ui-assets/design-options-arrow-left.png'
@@ -33,14 +34,18 @@ const CSS = `
 .gdo-mask{position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:rgba(20,20,20,.76);color:#FF9C2A;font-size:18px}.gdo-error{flex:none;width:min(100%,900px);margin:0 0 10px;padding:10px 14px;border:1px solid rgba(255,120,120,.6);border-radius:8px;background:rgba(120,30,30,.3);color:#ffc2c2}.gdo-status{flex:none;min-height:18px;margin:6px 0 0;color:rgba(255,255,255,.68);font-size:12px}
 @media (max-width:760px){.gdo-root{padding:12px}.gdo-prompt{font-size:16px;padding:2px 24px}.gdo-slot-left,.gdo-slot-right{opacity:0;pointer-events:none}.gdo-card{padding:18px 22px}.gdo-meta{grid-template-columns:92px 1fr}.gdo-actions{width:100%;gap:10px}.gdo-action{width:auto;min-width:0;flex:1}}
 @media (max-height:700px){.gdo-root{padding-top:8px;padding-bottom:6px}.gdo-prompt{margin-bottom:8px}.gdo-card{padding-top:18px;padding-bottom:18px}.gdo-actions{padding-top:8px}.gdo-status{min-height:14px;margin-top:2px}}
+@media (max-height:760px){.gdo-option{height:min(654px,100%)} }
 @media (prefers-reduced-motion:reduce){.gdo-option{transition:none}}
 `
 
 export type CarouselSlot = 'left' | 'center' | 'right'
 type CardFrame = { top: number; left: number; width: number; height: number }
 
+// Core option generation is an asynchronous peer task. The document version
+// is the completion signal; a wall-clock timeout would turn a slow, healthy
+// generation into a false failure. Keep the poll cadence modest and let the
+// workflow's complete_activity/report_blocker result decide when it ends.
 const REGENERATE_REFRESH_INTERVAL_MS = 1_000
-const REGENERATE_REFRESH_TIMEOUT_MS = 90_000
 
 export function resolveCarouselSlot(
   optionIndex: number,
@@ -252,6 +257,15 @@ export function DesignOptionsSlide({
 
   const apply = async () => {
     if (!active || isBusy) return
+    // 应用方案是不可逆的：它会把选中方案物化成正式 core 文档并盖章 core 门。
+    // 宿主挂载下，唤醒编排者的唯一通道是 `gate.onApplied`；缺了它再往下走，
+    // 结果就是产物变了、编排者毫不知情，作者只看到「弹窗消失但没有下文」。
+    // 与其静默成功，不如什么都不写、把重试的机会留在作者手上。
+    if (hasInProcessHost() && !gate?.onApplied) {
+      setError(t('videoGame.designOptions.hostUnavailable'))
+      setStatus('')
+      return
+    }
     setBusy(true)
     setError(null)
     setStatus(t('videoGame.designOptions.applying'))
@@ -278,10 +292,10 @@ export function DesignOptionsSlide({
     token: number,
   ): Promise<void> => {
     if (!documentId || !onContentReload) return
-    const deadline = Date.now() + REGENERATE_REFRESH_TIMEOUT_MS
-    while (regenerationToken.current === token && Date.now() < deadline) {
+    let delayMs = REGENERATE_REFRESH_INTERVAL_MS
+    while (regenerationToken.current === token) {
       await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, REGENERATE_REFRESH_INTERVAL_MS)
+        window.setTimeout(resolve, delayMs)
       })
       if (regenerationToken.current !== token) return
       try {
@@ -297,12 +311,9 @@ export function DesignOptionsSlide({
         return
       } catch {
         // A peer may briefly expose a partially written document; keep polling
-        // until the content is valid or the bounded refresh window expires.
+        // until the workflow reports completion or a valid document appears.
       }
-    }
-    if (regenerationToken.current === token) {
-      setError(t('videoGame.designOptions.regenerateFailed'))
-      setStatus('')
+      delayMs = Math.min(delayMs * 2, 5_000)
     }
   }
 

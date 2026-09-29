@@ -27,7 +27,6 @@ function renderEditor(
       usageCount={0}
       onRename={vi.fn()}
       onRemove={vi.fn()}
-      onPromptChange={vi.fn()}
       onAddChild={vi.fn()}
       onRemoveChild={vi.fn()}
       onPatchChild={vi.fn()}
@@ -62,6 +61,10 @@ describe('OverlaySchemeEditor workspace layout', () => {
     expect(workspaceStyles).toContain('.ose-tabs button:hover { background:transparent; }')
     expect(workspaceStyles).not.toContain('button[aria-selected="true"]::after')
     expect(screen.getByTestId('component-library')).toBeTruthy()
+    const header = libraryRegion.querySelector('.ose-bottom-header')
+    expect(header).toContainElement(activeTab)
+    expect(header).toContainElement(screen.getByRole('searchbox'))
+    expect(screen.getByTestId('component-library').querySelector('.ocl-toolbar')).toBeNull()
     expect(screen.queryByLabelText('界面方案名称')).toBeNull()
     const separator = screen.getByRole('separator', { name: '调整画布区域高度' })
     expect(separator).toHaveAttribute('aria-valuenow', '56')
@@ -89,6 +92,7 @@ describe('OverlaySchemeEditor workspace layout', () => {
 
     expect(screen.getByRole('tab', { name: '图层' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByTestId('overlay-layers')).toBeTruthy()
+    expect(screen.queryByRole('searchbox')).toBeNull()
     expect(screen.getByRole('button', { name: /状态提示 · notice/ })).toHaveAttribute('aria-pressed', 'true')
   })
 
@@ -330,7 +334,6 @@ describe('OverlaySchemeEditor workspace layout', () => {
       usageCount: 0,
       onRename: vi.fn(),
       onRemove: vi.fn(),
-      onPromptChange: vi.fn(),
       onAddChild: vi.fn(),
       onRemoveChild: vi.fn(),
       onPatchChild: vi.fn(),
@@ -400,32 +403,3 @@ describe('OverlaySchemeEditor workspace layout', () => {
   })
 })
 
-describe('OverlaySchemeEditor placement hint', () => {
-  it('commits a manual prompt edit on blur', () => {
-    const onPromptChange = vi.fn()
-    renderEditor({
-      overlay: { id: 'workspace', title: '战斗界面', children: [] },
-      onPromptChange,
-    })
-
-    const input = screen.getByTestId('overlay-prompt-editor').querySelector('input') as HTMLInputElement
-    fireEvent.change(input, { target: { value: '  我方状态 HUD 一般放在右下角。  ' } })
-    fireEvent.blur(input)
-
-    expect(onPromptChange).toHaveBeenCalledWith('我方状态 HUD 一般放在右下角。')
-  })
-
-  it('does not write when the value is unchanged', () => {
-    const onPromptChange = vi.fn()
-    renderEditor({
-      overlay: { id: 'workspace', title: '战斗界面', prompt: '底部居中', children: [] },
-      onPromptChange,
-    })
-
-    const input = screen.getByTestId('overlay-prompt-editor').querySelector('input') as HTMLInputElement
-    fireEvent.change(input, { target: { value: '底部居中' } })
-    fireEvent.blur(input)
-
-    expect(onPromptChange).not.toHaveBeenCalled()
-  })
-})

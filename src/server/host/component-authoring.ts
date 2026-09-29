@@ -13,6 +13,7 @@ import {
   stampDocumentRevision,
 } from './document-revision'
 import { componentContracts } from './component-catalog'
+import type { ComponentGameplaySemantics, GameplayComponentRole } from '@/workflow/gameplay-semantics'
 import { GRAPH_SAVE_LOCK } from './locks'
 
 const encoder = new TextEncoder()
@@ -109,7 +110,13 @@ type AuthoredInput = {
   component?: string
 }
 
-type AuthoredEvent = { id: string; label?: string }
+type AuthoredOutput = {
+  key: string
+  label?: string
+  valueType: 'string' | 'number' | 'boolean'
+}
+
+type AuthoredEvent = { id: string; label?: string; outputs?: AuthoredOutput[] }
 
 type AuthoredComponentDefinition = {
   schemaVersion: 1
@@ -120,6 +127,7 @@ type AuthoredComponentDefinition = {
     events: AuthoredEvent[]
     /** 面向 AI 的摆放位置与潜规则提示。 */
     prompt?: string
+    gameplaySemantics?: ComponentGameplaySemantics
   }
   implementation: string
 }
@@ -319,15 +327,140 @@ function authoredEvents(value: unknown): AuthoredEvent[] {
   const seen = new Set<string>()
   return value.map((raw, index) => {
     const event = record(raw, `events[${index}]`)
-    assertOnlyKeys(event, ['id', 'label'], `events[${index}]`)
+    assertOnlyKeys(event, ['id', 'label', 'outputs'], `events[${index}]`)
     const id = requiredString(event.id, `events[${index}].id`, 64)
     if (!COMPONENT_ID.test(id) || seen.has(id)) {
       throw new ComponentAuthoringInputError(`events[${index}].id must be a unique logical identifier`)
     }
     seen.add(id)
     const label = optionalString(event.label, `events[${index}].label`)
-    return { id, ...(label === undefined ? {} : { label }) }
+    let outputs: AuthoredOutput[] | undefined
+    if (event.outputs !== undefined) {
+      if (!Array.isArray(event.outputs) || event.outputs.length > 40) {
+        throw new ComponentAuthoringInputError(`events[${index}].outputs must be an array with at most 40 entries`)
+      }
+      const seenOutputs = new Set<string>()
+      outputs = event.outputs.map((rawOutput, outputIndex) => {
+        const at = `events[${index}].outputs[${outputIndex}]`
+        const output = record(rawOutput, at)
+        assertOnlyKeys(output, ['key', 'label', 'valueType'], at)
+        const key = requiredString(output.key, `${at}.key`, 64)
+        if (!COMPONENT_ID.test(key) || seenOutputs.has(key)) {
+          throw new ComponentAuthoringInputError(`${at}.key must be a unique logical identifier`)
+        }
+        seenOutputs.add(key)
+        if (output.valueType !== 'string' && output.valueType !== 'number' && output.valueType !== 'boolean') {
+          throw new ComponentAuthoringInputError(`${at}.valueType must be string, number, or boolean`)
+        }
+        const outputLabel = optionalString(output.label, `${at}.label`)
+        return {
+          key,
+          ...(outputLabel === undefined ? {} : { label: outputLabel }),
+          valueType: output.valueType,
+        }
+      })
+    }
+    return {
+      id,
+      ...(label === undefined ? {} : { label }),
+      ...(outputs?.length ? { outputs } : {}),
+    }
   })
+}
+
+const GAMEPLAY_ROLES = new Set<GameplayComponentRole>([
+  'narrative-display',
+  'player-choice',
+  'combat-command',
+  'timed-input',
+  'state-feedback',
+  'transient-feedback',
+])
+
+function semanticStringList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new ComponentAuthoringInputError(`${label} must be an array`)
+  return value.map((item, index) => requiredString(item, `${label}[${index}]`, 500))
+}
+
+function authoredGameplaySemantics(
+  value: unknown,
+  required: boolean,
+): ComponentGameplaySemantics | undefined {
+  if (value === undefined) {
+    if (required) {
+      throw new ComponentAuthoringInputError(
+        'gameplaySemantics is required and must explain purpose, state bindings, event consequences, feedback, settlements, and anti-patterns',
+      )
+    }
+    return undefined
+  }
+  const input = record(value, 'gameplaySemantics')
+  assertOnlyKeys(input, [
+    'roles', 'purpose', 'stateBindings', 'eventSemantics', 'requiredCompanions',
+    'recommendedSettlements', 'requiredFeedback', 'antiPatterns',
+  ], 'gameplaySemantics')
+  const roles = semanticStringList(input.roles, 'gameplaySemantics.roles')
+  if (roles.length === 0 || roles.some((role) => !GAMEPLAY_ROLES.has(role as GameplayComponentRole))) {
+    throw new ComponentAuthoringInputError('gameplaySemantics.roles contains an unsupported role')
+  }
+  if (!Array.isArray(input.stateBindings)) {
+    throw new ComponentAuthoringInputError('gameplaySemantics.stateBindings must be an array')
+  }
+  const stateBindings = input.stateBindings.map((raw, index) => {
+    const binding = record(raw, `gameplaySemantics.stateBindings[${index}]`)
+    if (typeof binding.required !== 'boolean') {
+      throw new ComponentAuthoringInputError(`gameplaySemantics.stateBindings[${index}].required must be boolean`)
+    }
+    return {
+      input: requiredString(binding.input, `gameplaySemantics.stateBindings[${index}].input`),
+      meaning: requiredString(binding.meaning, `gameplaySemantics.stateBindings[${index}].meaning`, 500),
+      required: binding.required,
+    }
+  })
+  if (!Array.isArray(input.eventSemantics)) {
+    throw new ComponentAuthoringInputError('gameplaySemantics.eventSemantics must be an array')
+  }
+  const eventSemantics = input.eventSemantics.map((raw, index) => {
+    const event = record(raw, `gameplaySemantics.eventSemantics[${index}]`)
+    const requiredConsequences = semanticStringList(
+      event.requiredConsequences,
+      `gameplaySemantics.eventSemantics[${index}].requiredConsequences`,
+    )
+    if (requiredConsequences.some((item) => !['effect', 'feedback', 'advance'].includes(item))) {
+      throw new ComponentAuthoringInputError(
+        `gameplaySemantics.eventSemantics[${index}].requiredConsequences contains an unsupported value`,
+      )
+    }
+    if (
+      event.stateMutationOwner !== 'settlement'
+      && (required || event.stateMutationOwner !== undefined)
+    ) {
+      throw new ComponentAuthoringInputError(
+        `gameplaySemantics.eventSemantics[${index}].stateMutationOwner must be settlement`,
+      )
+    }
+    return {
+      event: requiredString(event.event, `gameplaySemantics.eventSemantics[${index}].event`),
+      intent: requiredString(event.intent, `gameplaySemantics.eventSemantics[${index}].intent`, 500),
+      requiredConsequences: requiredConsequences as Array<'effect' | 'feedback' | 'advance'>,
+      stateMutationOwner: 'settlement' as const,
+      downstreamPayoff: requiredString(
+        event.downstreamPayoff,
+        `gameplaySemantics.eventSemantics[${index}].downstreamPayoff`,
+        500,
+      ),
+    }
+  })
+  return {
+    roles: roles as GameplayComponentRole[],
+    purpose: requiredString(input.purpose, 'gameplaySemantics.purpose', 1000),
+    stateBindings,
+    eventSemantics,
+    requiredCompanions: semanticStringList(input.requiredCompanions, 'gameplaySemantics.requiredCompanions'),
+    recommendedSettlements: semanticStringList(input.recommendedSettlements, 'gameplaySemantics.recommendedSettlements'),
+    requiredFeedback: semanticStringList(input.requiredFeedback, 'gameplaySemantics.requiredFeedback'),
+    antiPatterns: semanticStringList(input.antiPatterns, 'gameplaySemantics.antiPatterns'),
+  }
 }
 
 function validateImplementation(value: unknown): string {
@@ -386,7 +519,7 @@ function parseAuthoredComponentDefinition(
   requireInputDefaults: boolean,
 ): AuthoredComponentDefinition {
   const input = record(value, 'input')
-  assertOnlyKeys(input, ['id', 'label', 'inputs', 'events', 'implementation', 'prompt'], 'input')
+  assertOnlyKeys(input, ['id', 'label', 'inputs', 'events', 'implementation', 'prompt', 'gameplaySemantics'], 'input')
   const id = requiredString(input.id, 'id', 64)
   if (!COMPONENT_ID.test(id)) {
     throw new ComponentAuthoringInputError('id must start with a letter and contain only letters, numbers, dot, underscore, or hyphen')
@@ -394,6 +527,7 @@ function parseAuthoredComponentDefinition(
   const label = optionalString(input.label, 'label')
   const prompt = optionalString(input.prompt, 'prompt', 2000)
   const inputs = authoredInputs(input.inputs, requireInputDefaults)
+  const gameplaySemantics = authoredGameplaySemantics(input.gameplaySemantics, requireInputDefaults)
   return {
     schemaVersion: 1,
     manifest: {
@@ -402,6 +536,7 @@ function parseAuthoredComponentDefinition(
       ...(inputs === undefined || inputs.length === 0 ? {} : { inputs }),
       events: authoredEvents(input.events),
       ...(prompt === undefined ? {} : { prompt }),
+      ...(gameplaySemantics ? { gameplaySemantics } : {}),
     },
     implementation: validateImplementation(input.implementation),
   }

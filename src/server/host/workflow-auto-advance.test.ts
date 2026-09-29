@@ -179,7 +179,7 @@ describe('文档落盘即凭据：Host 自行推进工作流', () => {
     expect(state.activityStatus).toBe('working')
   })
 
-  it('支柱正文变化会自动重做校验并重开作者确认门', async () => {
+  it('待确认支柱正文变化会自动重做校验并保持作者确认门打开', async () => {
     const ctx = context()
     await prepareForCoreDesign(ctx)
     const validate = validatorFor(['design-options', 'core', 'pillar'])
@@ -187,7 +187,6 @@ describe('文档落盘即凭据：Host 自行推进工作流', () => {
     await approveCoreGate(ctx)
     await autoAdvanceWorkflowForDocument(ctx, 'pillar', { validate })
     const first = (await readWorkflowState(ctx))!
-    const approved = await confirmPillarAuthorGate(ctx, { productionId: 'pillar-v1' })
 
     await autoAdvanceWorkflowForDocument(ctx, 'pillar', {
       validate,
@@ -201,8 +200,28 @@ describe('文档落盘即凭据：Host 自行推进工作流', () => {
       first.activities['document.pillar']!.revision,
     )
     expect(regenerated.gates.pillar).toMatchObject({ status: 'pending' })
-    expect(regenerated.gates.pillar?.evidenceRef).toBeUndefined()
-    expect(regenerated.revision).toBeGreaterThan(approved.revision)
+  })
+
+  it('已确认支柱不会因为正文变化被自动返工清门', async () => {
+    const ctx = context()
+    await prepareForCoreDesign(ctx)
+    const validate = validatorFor(['design-options', 'core', 'pillar'])
+    await autoAdvanceWorkflowForDocument(ctx, 'design-options', { validate })
+    await approveCoreGate(ctx)
+    await autoAdvanceWorkflowForDocument(ctx, 'pillar', { validate })
+    const approved = await confirmPillarAuthorGate(ctx, { productionId: 'pillar-v1' })
+
+    await expect(autoAdvanceWorkflowForDocument(ctx, 'pillar', {
+      validate,
+      reworkCompletedTarget: true,
+    })).rejects.toMatchObject({ code: 'workflow.gate.pillar-frozen' })
+
+    const frozen = (await readWorkflowState(ctx))!
+    expect(frozen.gates.pillar).toMatchObject({
+      status: 'approved',
+      evidenceRef: approved.gates.pillar?.evidenceRef,
+    })
+    expect(frozen.activities['document.pillar']?.status).toBe('complete')
   })
 
   it('不回退已经走过的活动', async () => {

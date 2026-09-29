@@ -5,7 +5,8 @@ import { t as translateUi } from '../../../i18n'
  */
 import type { GameGraph, GameNode, GameNodeData, SubFlowPack, SubFlowPackDef, SubProcess } from '@/runtime/core/schema/graph-schema'
 import { authoringOptionLabel } from '@/authoring/formulas/authoring-option-label'
-import { removeNode, type NodeDataPatch } from '@/authoring/graph/graph-edit'
+import type { NodeDataPatch } from '@/authoring/graph/graph-edit'
+import { executeBlueprintGraphCommand } from '@/authoring/commands/blueprint-graph-command'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { NiAddButton, NiField, NiIcon, NiPillButton, NiSegmented, NiSelect } from '../ni-ui'
 import type { VideoOption } from './shared'
@@ -193,7 +194,9 @@ export function PerformanceSection({
           ariaLabel="🗑 删除节点"
           danger
           onClick={() => {
-            if (confirm(`删除节点「${node.data.name}」及其相关连线？`)) onChange(removeNode(graph, node.id))
+            if (confirm(`删除节点「${node.data.name}」及其相关连线？`)) {
+              onChange(executeBlueprintGraphCommand(graph, { op: 'remove-node', nodeId: node.id }))
+            }
           }}
         />
       </div>

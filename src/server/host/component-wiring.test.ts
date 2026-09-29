@@ -157,6 +157,15 @@ describe('元件契约清单', () => {
       mount: 'window',
       emitsOnUnmount: false,
     })
+    expect(skill?.gameplaySemantics).toMatchObject({
+      roles: ['combat-command'],
+      recommendedSettlements: expect.arrayContaining(['health-terminal', 'resource-threshold']),
+      eventSemantics: expect.arrayContaining([
+        expect.objectContaining({ event: 'light', requiredConsequences: ['advance'], stateMutationOwner: 'settlement' }),
+      ]),
+    })
+    expect(componentContracts().find((entry) => entry.id === 'BattleEnemyHpBar')?.gameplaySemantics)
+      .toMatchObject({ roles: ['state-feedback'] })
   })
 
   it('exposes blueprint quality metrics for agent self-review', async () => {
@@ -165,9 +174,15 @@ describe('元件契约清单', () => {
     expect(inspected.qualityMetrics).toMatchObject({
       interactionDensity: 0,
       decisionConsequenceRate: 0,
+      edgeProducerCoverageRate: 0,
+      pillarTraceCoverageRate: 0,
+      downstreamPayoffCoverageRate: 0,
+      combatLoopClosureRate: 0,
       stateActivityRate: 0,
       formulaConsumptionRate: 0,
-      feedbackCoverageRate: 0,
+      settlementEffectCoverageRate: 1,
+      eventRoutePurityRate: 1,
+      feedbackCoverageRate: 1,
       differentiatedEndingCount: 1,
     })
   })
@@ -532,5 +547,29 @@ describe('出口 handle 的来源', () => {
     expect(issues.map((entry) => entry.code)).toContain('ui.exit.no-source')
     // 报错要把可用出口列出来，否则 Agent 只能猜。
     expect(issues.find((entry) => entry.code === 'ui.exit.no-source')!.message).toContain('kou')
+  })
+
+  it('typed settlement 出边由状态结算驱动，不要求组件发同名事件', async () => {
+    const doc = project({ component: 'InkKou', exits: [{ handle: 'S17' }] })
+    const edge = doc.graph.edges.find((candidate) => candidate.sourceHandle === 'S17')!
+    ;(edge as { data: Record<string, unknown> }).data = {
+      ...edge.data,
+      design: {
+        pillarBeatId: 'B01',
+        producer: { kind: 'settlement', ref: 'S17' },
+        narrativePayoff: '耐久归零进入败局',
+        outcomeEvidenceId: 'B01/S17',
+      },
+    }
+
+    const result = await validateProjectForActivity(
+      context(doc),
+      'game.finalizing',
+      1,
+      ['finalization.interactions-reachable'],
+    )
+
+    expect(result.evidence[0]!.issues?.map((entry) => entry.code) ?? [])
+      .not.toContain('ui.exit.no-source')
   })
 })

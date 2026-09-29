@@ -3,7 +3,7 @@ import { useT } from '../../i18n'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { ImageGenerationWorkspace } from '../assets/generation/ImageGenerationWorkspace'
 import type { ImageGenerationInitialValues } from '../assets/generation/ImageGenerationSurface'
-import { consumeImageGenerationTarget } from '../assets/generation/imageGenerationNavigation'
+import { consumeImageGenerationTarget, type ImageGenerationTarget } from '../assets/generation/imageGenerationNavigation'
 import type { KinoGenerationTask } from '../assets/generation/generation-api'
 import { useAssetCatalog, type CatalogAsset } from '@/editor/assets/asset-catalog'
 import { assetCatalogClient } from '@/editor/assets/asset-catalog-client'
@@ -69,10 +69,12 @@ export function ImageGenerationPage({ onBack }: { onBack: (view: ReturnView) => 
   }
   return (
     <div className="ig-page">
-      <header className="ig-page-head">
-        <button type="button" onClick={close}>{t('imageGeneration.assets')}</button>
-        <span aria-hidden>/</span>
-      <strong>{asset?.name ?? character?.name ?? t('imageGeneration.title')}</strong>
+      <header className="generation-page-head">
+        <div className="generation-page-breadcrumb">
+          <button type="button" onClick={close}>{generationParentLabel(targetRoot, t)}</button>
+          <span aria-hidden>/</span>
+          <strong>{generationPageTitle(targetRoot, t)}</strong>
+        </div>
       </header>
       <ImageGenerationWorkspace
         key={asset ? `${asset.id}:${asset.updatedAt}` : character ? `character:${character.id}` : 'image-generation'}
@@ -154,8 +156,27 @@ function kinoImageSize(value: unknown): KinoImageSize | undefined {
     : undefined
 }
 
+function generationParentLabel(
+  targetRoot: ImageGenerationTarget['targetRoot'],
+  t: (key: string) => string,
+): string {
+  if (targetRoot === 'character') return t('assetCatalog.root.character')
+  if (targetRoot === 'scene') return t('assetCatalog.root.scene')
+  if (targetRoot === 'icon') return t('assetCatalog.root.icon')
+  return t('assetCatalog.root.image')
+}
+
+function generationPageTitle(
+  targetRoot: ImageGenerationTarget['targetRoot'],
+  t: (key: string) => string,
+): string {
+  if (targetRoot === 'character') return t('imageGeneration.pageTitle.character')
+  if (targetRoot === 'scene') return t('imageGeneration.pageTitle.scene')
+  if (targetRoot === 'icon') return t('imageGeneration.pageTitle.icon')
+  if (targetRoot === 'image') return t('imageGeneration.pageTitle.image')
+  return t('imageGeneration.title')
+}
+
 const CSS = `
 .ig-page { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; background:#1a1a1a; color:#fff; }
-.ig-page-head { display:flex; min-height:48px; flex:none; align-items:center; gap:8px; padding:0 24px; border-bottom:1px solid rgba(255,255,255,.1); background:#333; color:rgba(255,255,255,.45); font-size:13px; }
-.ig-page-head button { border:0; padding:0; color:inherit; background:transparent; font:inherit; cursor:pointer; }.ig-page-head strong { color:#fff; }
 `

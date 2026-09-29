@@ -5,6 +5,7 @@ import {
   applyHostInit,
   releaseHostInit,
   resetHostInjectionForTests,
+  type NodeSelectionSource,
 } from '@/editor/host-init'
 import { resetHostInitForTests } from '../../../lib/forgeax-http'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
@@ -73,7 +74,7 @@ const MAIN_DOC: BlueprintDoc = { id: MAIN_ID, title: 'Main', entry: 'intro', gra
 describe('GraphStudio · external inspectorEl', () => {
   let canvasHost: HTMLDivElement
   let inspectorEl: HTMLDivElement
-  let onNodeSelect: ReturnType<typeof vi.fn<(nodeId: string | null) => void>>
+  let onNodeSelect: ReturnType<typeof vi.fn<(nodeId: string | null, source: NodeSelectionSource) => void>>
 
   beforeEach(() => {
     window.localStorage.clear()
@@ -126,30 +127,40 @@ describe('GraphStudio · external inspectorEl', () => {
       .toBe('minmax(0, var(--gv-preview-w)) minmax(0, 1fr)')
   })
 
-  it('notifies onNodeSelect on select and clear; empty state stays in the slot', async () => {
+  it('reports programmatic selection changes without taking ownership of the host tab', async () => {
     render(<GraphStudio scenario={SCENARIO} />, { container: canvasHost })
 
-    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith('intro'))
+    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith('intro', 'programmatic'))
 
     act(() => {
       useGraphScenario.getState().setSelectedNode(null)
     })
 
-    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith(null))
+    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith(null, 'programmatic'))
     expect(inspectorEl.querySelector('[data-testid="node-inspector-empty"]')).toBeTruthy()
     expect(canvasHost.querySelector('[data-testid="node-inspector-empty"]')).toBeNull()
     expect(inspectorEl.querySelector('[data-testid="node-inspector-root"]')).toBeNull()
   })
 
-  it('re-notifies the host when the already-selected node is clicked again', async () => {
+  it('reports a direct canvas click as user selection, including an already-selected node', async () => {
     render(<GraphStudio scenario={SCENARIO} />, { container: canvasHost })
-    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith('intro'))
+    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith('intro', 'programmatic'))
     onNodeSelect.mockClear()
 
     fireEvent.click(canvasHost.querySelector<HTMLElement>('.react-flow__node[data-id="intro"]')!)
 
-    expect(onNodeSelect).toHaveBeenCalledWith('intro')
+    expect(onNodeSelect).toHaveBeenCalledWith('intro', 'user')
     expect(onNodeSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a different canvas node click as user selection', async () => {
+    render(<GraphStudio scenario={SCENARIO} />, { container: canvasHost })
+    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith('intro', 'programmatic'))
+    onNodeSelect.mockClear()
+
+    fireEvent.click(canvasHost.querySelector<HTMLElement>('.react-flow__node[data-id="second"]')!)
+
+    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith('second', 'user'))
   })
 
   it('stays silent when mounting with no selection (host tab must not be kicked)', async () => {
@@ -187,7 +198,7 @@ describe('GraphStudio · external inspectorEl', () => {
     act(() => {
       useGraphScenario.getState().setSelectedNode('second')
     })
-    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith('second'))
+    await waitFor(() => expect(onNodeSelect).toHaveBeenCalledWith('second', 'programmatic'))
     expect(onNodeSelect).toHaveBeenCalledTimes(1)
     secondHost.remove()
   })

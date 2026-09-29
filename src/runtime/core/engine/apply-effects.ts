@@ -4,7 +4,14 @@
  * 通用化（方向 C）：**没有 hp 特权**。实体只是一袋 attrs（+可选 attrMeta 约束）；`attr` effect 写任意
  * attr，按 attrMeta 的 min/max clamp。value 可为常量或表达式 `{expr}`（公式，就地声明，去 combatRules 散耦合）。
  */
-import type { AttrMeta, GraphEffect, NumericEffectOp, TextValue } from '../schema/graph-schema'
+import type {
+  AttrMeta,
+  BooleanValue,
+  GraphEffect,
+  NumOrExpr,
+  NumericEffectOp,
+  TextValue,
+} from '../schema/graph-schema'
 import { evalExpr, type EvalCtx } from './expr'
 import type { Rng } from './rng'
 
@@ -27,7 +34,7 @@ export interface MutableState {
   appliedOnce?: Set<string>
 }
 
-function ctxFrom(state: MutableState): EvalCtx {
+function ctxFrom(state: MutableState, eventPayload?: Record<string, unknown>): EvalCtx {
   return {
     vars: state.vars,
     entities: state.entities,
@@ -35,6 +42,7 @@ function ctxFrom(state: MutableState): EvalCtx {
     formulas: state.formulas,
     score: state.score,
     rng: state.rng,
+    eventPayload,
   }
 }
 
@@ -42,11 +50,11 @@ function ctxFrom(state: MutableState): EvalCtx {
  * 求值失败（缺公式 / 缺变量 / 解析失败）返回 undefined：调用方跳过这条 effect，
  * 不要把 ExprError 冒到 React 外打崩整页。合法结果 0 仍是 number。
  */
-function resolveValue(value: number | { expr: string }, state: MutableState): number | undefined {
+function resolveValue(value: NumOrExpr, state: MutableState, eventPayload?: Record<string, unknown>): number | undefined {
   if (typeof value === 'number') return value
   if (value && typeof value === 'object' && typeof value.expr === 'string') {
     try {
-      return evalExpr(value.expr, ctxFrom(state))
+      return evalExpr(value.expr, ctxFrom(state, eventPayload))
     } catch {
       return undefined
     }
@@ -54,11 +62,20 @@ function resolveValue(value: number | { expr: string }, state: MutableState): nu
   throw new Error(`bad effect value: ${JSON.stringify(value)}`)
 }
 
-function resolveTextValue(value: TextValue, state: MutableState): string {
+function resolveTextValue(value: TextValue, state: MutableState, eventPayload?: Record<string, unknown>): string {
   if (typeof value === 'string') return value
   const path = value.ref.split('.')
   if (path[0] === 'var') return state.textVars?.[path.slice(1).join('.')] ?? ''
+  if (path[0] === 'eventPayload') return String(eventPayload?.[path.slice(1).join('.')] ?? '')
   return value.ref
+}
+
+function resolveBooleanValue(value: BooleanValue, eventPayload?: Record<string, unknown>): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  const path = value.ref.split('.')
+  if (path[0] !== 'eventPayload') return undefined
+  const resolved = eventPayload?.[path.slice(1).join('.')]
+  return typeof resolved === 'boolean' ? resolved : undefined
 }
 
 function clamp(v: number, meta?: { min?: number; max?: number }): number {
@@ -101,8 +118,8 @@ export function effectTargetValue(state: MutableState, eff: GraphEffect): number
   return null
 }
 
-/** 把一组 effect 顺序作用到 state（原地修改）。 */
-export function applyEffects(state: MutableState, effects: readonly GraphEffect[]): void {
+/** 把一组 effect 顺序作用到 state（原地修改）。`eventPayload` 为组件事件出参，仅事件反应执行期传入。 */
+export function applyEffects(state: MutableState, effects: readonly GraphEffect[], eventPayload?: Record<string, unknown>): void {
   for (const eff of effects) {
     // once：仅首次生效（跨回合循环用）。
     if ('once' in eff && eff.once && eff.id) {
@@ -114,11 +131,11 @@ export function applyEffects(state: MutableState, effects: readonly GraphEffect[
       case 'var': {
         if (eff.valueType === 'text') {
           const textVars = (state.textVars ??= {})
-          textVars[eff.varId] = resolveTextValue(eff.value, state)
+          textVars[eff.varId] = resolveTextValue(eff.value, state, eventPayload)
           break
         }
         const cur = state.vars[eff.varId] ?? 0
-        const val = resolveValue(eff.value, state)
+        const val = resolveValue(eff.value, state, eventPayload)
         if (val === undefined) break
         state.vars[eff.varId] = clamp(applyNumericOp(eff.op, cur, val), state.varMeta?.[eff.varId])
         break
@@ -127,19 +144,23 @@ export function applyEffects(state: MutableState, effects: readonly GraphEffect[
         const ent = state.entities[eff.entityId]
         if (!ent) break
         const cur = ent.attrs[eff.attr] ?? 0
-        const val = resolveValue(eff.value, state)
+        const val = resolveValue(eff.value, state, eventPayload)
         if (val === undefined) break
         ent.attrs[eff.attr] = clamp(applyNumericOp(eff.op, cur, val), ent.attrMeta?.[eff.attr])
         break
       }
       case 'flag': {
-        state.flags[eff.varId] = eff.value ? 1 : 0
+        const value = resolveBooleanValue(eff.value, eventPayload)
+        if (value === undefined) break
+        state.flags[eff.varId] = value ? 1 : 0
         break
       }
       case 'item': {
         state.items ??= {}
         const cur = state.items[eff.itemId] ?? 0
-        state.items[eff.itemId] = eff.op === 'give' ? cur + eff.count : Math.max(0, cur - eff.count)
+        const val = resolveValue(eff.count, state, eventPayload)
+        if (val === undefined) break
+        state.items[eff.itemId] = eff.op === 'give' ? cur + val : Math.max(0, cur - val)
         break
       }
     }

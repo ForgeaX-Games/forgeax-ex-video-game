@@ -5,15 +5,15 @@ import {
   createInitialWorkflowState,
   VIDEO_GAME_WORKFLOW_FILE,
 } from './workflow-state'
-import { PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES, RETRY_LEDGER_FILE } from './retry-ledger'
+import { RETRY_LEDGER_FILE } from './retry-ledger'
 import type { VideoGameWorkflowState } from '../../workflow/contracts'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 /**
- * playtest.validating 硬门连续失败后的放行：失败超过阈值后 complete_activity 不再拦截，
- * 便于后续流程继续验证；前几次仍拒绝并返回 failedChecks。
+ * 可玩性硬门必须始终拒绝损坏蓝图：重复重试只能积累诊断，不能把已知失败
+ * 降级为成功交付。
  */
 
 function brokenBlueprint() {
@@ -106,40 +106,22 @@ async function completeOnce(service: ReturnType<typeof createGameVideoService>) 
   }>
 }
 
-describe('playtest.validating 连续失败后放行', () => {
-  it(`前 ${PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES} 次校验失败仍拒绝 complete_activity`, async () => {
-    const { context } = createContext()
+describe('playtest.validating 不会用重试次数绕过硬门', () => {
+  it('连续三次校验失败都拒绝 complete_activity 并保留失败记录', async () => {
+    const { context, files } = createContext()
     const service = createGameVideoService(context)
 
-    for (let i = 1; i <= PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES; i += 1) {
+    for (let i = 1; i <= 3; i += 1) {
       const result = await completeOnce(service)
       expect(result.accepted, `attempt ${i}`).toBe(false)
       expect(result.failedChecks?.length).toBeGreaterThan(0)
       expect(result.attempts).toBe(i)
       expect(result.waivedAfterRetries).toBeUndefined()
     }
-  })
-
-  it(`第 ${PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES + 1} 次起放行，并标记 waivedAfterRetries`, async () => {
-    const { context, files } = createContext()
-    const service = createGameVideoService(context)
-
-    for (let i = 0; i < PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES; i += 1) {
-      await completeOnce(service)
-    }
-    const waived = await completeOnce(service)
-
-    expect(waived.accepted).toBe(true)
-    expect(waived.waivedAfterRetries).toBe(true)
-    expect(waived.attempts).toBe(PLAYTEST_VALIDATING_BYPASS_AFTER_FAILURES + 1)
-    expect(waived.guidance).toContain('放行')
-    // 失败证据仍保留，便于下游看见缺口
-    expect(waived.evidence?.length).toBeGreaterThan(0)
 
     const ledger = JSON.parse(decoder.decode(files.get(RETRY_LEDGER_FILE)!)) as {
       attempts: Record<string, number>
     }
-    // 成功交付后清账
-    expect(Object.keys(ledger.attempts).some((key) => key.startsWith('playtest.validating@'))).toBe(false)
+    expect(Object.keys(ledger.attempts).some((key) => key.startsWith('playtest.validating@'))).toBe(true)
   })
 })

@@ -57,6 +57,8 @@ function chooseMode(mode: 'strict' | 'firstref' | 't2v'): void {
 function pickFrame(buttonLabel: string, assetLabel: string): void {
   fireEvent.click(screen.getByRole('button', { name: buttonLabel }))
   const picker = screen.getByRole('dialog', { name: '选择图片' })
+  const tabLabel = assetLabel === 'Hero' ? '角色' : assetLabel === 'Street' ? '场景' : '图片'
+  fireEvent.click(within(picker).getByRole('tab', { name: tabLabel }))
   fireEvent.click(within(picker).getByRole('button', { name: assetLabel }))
 }
 
@@ -189,7 +191,7 @@ describe('VideoGenSheet compatibility wrapper', () => {
     expect(window.getComputedStyle(firstFrame).fontSize).toBe('12px')
     fireEvent.click(firstFrame)
     const picker = screen.getByRole('dialog', { name: '选择图片' })
-    expect(window.getComputedStyle(within(picker).getByRole('heading', { name: '选择图片' })).fontSize).toBe('13px')
+    expect(window.getComputedStyle(within(picker).getByRole('heading', { name: '选择图片' })).fontSize).toBe('24px')
   })
 
   it('lets the page prompt box fill the remaining composer height', () => {
@@ -198,11 +200,11 @@ describe('VideoGenSheet compatibility wrapper', () => {
 
     expect(promptBox).not.toBeNull()
     const style = getComputedStyle(promptBox!)
-    expect(style.height).toBe('auto')
-    expect(style.minHeight).toBe('164px')
+    expect(style.height).toBe('')
+    expect(style.minHeight).toBe('0')
     expect(style.flexGrow).toBe('1')
     expect(style.flexShrink).toBe('1')
-    expect(style.flexBasis).toBe('0%')
+    expect(style.flexBasis).toBe('auto')
   })
 
   it('uses React button handlers instead of native form submission inside the sandboxed iframe', () => {

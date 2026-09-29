@@ -9,7 +9,7 @@ import { isNumericScalar, type Entity, type NumOrExpr, type Variable } from '@/r
 import type { Formula, FormulaHoleBinding } from '@/authoring/blueprint/formula-authoring'
 import { tryEvalExpr, type EvalCtx } from '@/runtime/core/engine/expr'
 import { createRng } from '@/runtime/core/engine/rng'
-import { LooseNumberInput } from './TermChainEditor'
+import { LooseNumberInput } from './LooseNumberInput'
 import { CascadingPicker, type CascadingPickerOption } from './CascadingPicker'
 import { AiParameterFillButton } from './AiParameterFillButton'
 import { forgeaxHost } from '../../platform/HostSdkBridge'

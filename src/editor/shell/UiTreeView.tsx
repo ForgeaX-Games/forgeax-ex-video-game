@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import type { Overlay } from '@/runtime/core/schema/graph-schema'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { placeAdaptivePop } from './useBlueprintNavActions'
+import { UiTemplateCreateDialog } from './UiTemplateCreateDialog'
 
 export interface UiTreeViewNode {
   id: string
@@ -22,8 +23,12 @@ export interface UiTreeViewProps {
   usageByOverlay?: Record<string, number>
   projectComponentLabels?: Readonly<Record<string, string>>
   selectedTreeNodeId: string | null
+  /** 仅在主区域展示界面页时反映选中高亮。 */
+  active?: boolean
   onSelect: (node: UiTreeViewNode) => void
   onAddScheme: (parentId: string, name: string) => void
+  /** 分栏模式下，请求主区域打开“界面模板”新建弹窗。 */
+  onRequestAddScheme?: (parentId: string) => void
   onRename: (nodeId: string, name: string) => void
   onDelete: (node: UiTreeViewNode) => void
   onDeleteProjectComponent?: (
@@ -31,6 +36,8 @@ export interface UiTreeViewProps {
     label: string,
     trigger: HTMLButtonElement,
   ) => void
+  /** 可作为目录入口选择的文件夹；展开/收起仍由其箭头单独控制。 */
+  selectableFolderIds?: readonly string[]
   /** 起始层级：子树挂在左栏「界面」行下时传 1，使缩进与主树 depth*8 连续。 */
   baseDepth?: number
 }
@@ -85,6 +92,7 @@ const UI_TREE_CSS = `
 .uit-row-actions {
   flex:none; display:none; align-items:center; gap:6px; margin-left:8px;
 }
+.uit-row-actions.is-persistent { display:inline-flex; }
 .uit-row:hover .uit-row-actions,
 .uit-row:focus-within .uit-row-actions,
 .uit-row-actions:has(.is-open) { display:inline-flex; }
@@ -104,18 +112,6 @@ const UI_TREE_CSS = `
   background:#242424; color:#fff; padding:4px 6px;
 }
 .uit-edit button { flex:none; border:0; border-radius:2px; padding:4px 6px; cursor:pointer; }
-/* 与主树 .ns-row.is-editing 同规格：编辑行保持 42px，不跟随子项 36px。 */
-.uit-compose-row {
-  box-sizing:border-box; width:100%; height:42px; display:flex; align-items:center;
-  border-bottom:1px solid rgba(255,255,255,.06); background:rgba(255,255,255,.10);
-}
-.uit-compose-input {
-  flex:1; min-width:0; box-sizing:border-box; height:22px; padding:0 4px;
-  border:0; border-radius:3px; outline:.4px solid rgba(255,255,255,.6);
-  outline-offset:-.4px; background:rgba(44,44,44,.2); color:rgba(255,255,255,.6);
-  font-family:inherit; font-size:16px; line-height:22px;
-}
-.uit-compose-input:focus { outline-color:rgba(255,255,255,.8); }
 .ns-empty {
   min-height:36px; display:flex; align-items:center; border-bottom:1px solid rgba(255,255,255,.06);
   color:rgba(255,255,255,.45); font-size:13px; padding-left:8px;
@@ -157,18 +153,22 @@ function UiTreeRow({
   usageByOverlay,
   projectComponentLabels,
   selectedTreeNodeId,
+  active,
   onSelect,
   onAddScheme,
+  onRequestAddScheme,
   onRename,
   onDelete,
   onDeleteProjectComponent,
+  selectableFolderIds,
 }: UiTreeViewProps & { node: UiTreeViewNode; depth: number }): JSX.Element {
   const isFolder = node.kind === 'folder'
+  const selectableFolder = isFolder && (selectableFolderIds?.includes(node.id) ?? false)
+  const isInterfaceTemplateFolder = node.id === 'ui-folder:custom'
   const [expanded, setExpanded] = useState(false)
   const [mode, setMode] = useState<RowMode>(null)
   const [draft, setDraft] = useState(node.name ?? '')
-  const [composingScheme, setComposingScheme] = useState(false)
-  const [schemeDraft, setSchemeDraft] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
   // 删除确认浮层：复用主树 ns-pop-confirm 的 DOM/样式 + placeAdaptivePop 自适应定位。
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null)
   const deletePopRef = useRef<HTMLDivElement | null>(null)
@@ -220,19 +220,10 @@ function UiTreeRow({
     if (next) onRename(node.id, next)
     setMode(null)
   }
-  const confirmScheme = (): void => {
-    const name = schemeDraft.trim()
-    if (!name) return
-    onAddScheme(node.id, name)
-    setSchemeDraft('')
-    setComposingScheme(false)
-    setExpanded(true)
-  }
-
   return (
     <div className="uit-branch" role="treeitem" aria-expanded={isFolder ? expanded : undefined}>
       <div
-        className={`uit-row${selectedTreeNodeId === node.id ? ' is-selected' : ''}`}
+        className={`uit-row${active !== false && selectedTreeNodeId === node.id ? ' is-selected' : ''}`}
         style={{ paddingLeft: depth * 8 }}
       >
         <div
@@ -242,9 +233,8 @@ function UiTreeRow({
           aria-label={isFolder ? `${label}${translateUi('ui.template.b63c98da6f1d')}` : `${translateUi('ui.template.ac910d3993c9')}${label}`}
           onClick={() => {
             if (mode === 'rename') return
-            // 与主树 activateRow 一致：文件夹行只展开/收起，不切换选中视图；
-            // 只有叶子方案才选中并进入界面页。
             if (isFolder) {
+              if (selectableFolder) onSelect(node)
               setExpanded((value) => !value)
               return
             }
@@ -254,6 +244,7 @@ function UiTreeRow({
             if (mode === 'rename' || (event.key !== 'Enter' && event.key !== ' ')) return
             event.preventDefault()
             if (isFolder) {
+              if (selectableFolder) onSelect(node)
               setExpanded((value) => !value)
               return
             }
@@ -295,17 +286,22 @@ function UiTreeRow({
           {!isFolder && usage > 0 && <span className="uit-usage" title={`${translateUi('ui.template.18bcdbc44f66')}${usage}${translateUi('ui.template.fb98c262e764')}`}>⇢{usage}</span>}
         </div>
         {!node.readOnly && mode !== 'rename' && (
-          <span className="uit-row-actions" onClick={(event) => event.stopPropagation()}>
+          <span className={`uit-row-actions${isInterfaceTemplateFolder ? ' is-persistent' : ''}`} onClick={(event) => event.stopPropagation()}>
             {isFolder ? (
               <button
                 type="button"
-                className={`uit-icon-btn${composingScheme ? ' is-open' : ''}`}
+                className={isInterfaceTemplateFolder
+                  ? `ns-add${createOpen ? ' is-on' : ''}`
+                  : `uit-icon-btn${createOpen ? ' is-open' : ''}`}
                 aria-label={`${translateUi('ui.template.cc81da127732')}${label}`}
                 title={translateUi('ui.copy.cebd3fd2e9d5')}
-                aria-expanded={composingScheme}
+                aria-expanded={createOpen}
                 onClick={() => {
-                  setComposingScheme((current) => !current)
-                  setSchemeDraft('')
+                  if (isInterfaceTemplateFolder && onRequestAddScheme) {
+                    onRequestAddScheme(node.id)
+                    return
+                  }
+                  setCreateOpen(true)
                   setExpanded(true)
                 }}
               >
@@ -349,33 +345,15 @@ function UiTreeRow({
           }}
         >{TrashIcon}</button> : null}
       </div>
-      {isFolder && composingScheme ? (
-        <div className="uit-compose-row" style={{ paddingLeft: (depth + 1) * 8 }}>
-          <input
-            autoFocus
-            className="uit-compose-input"
-            aria-label={`${translateUi('ui.template.12404a0b6381')}${label}${translateUi('ui.template.e7fc2f5df878')}`}
-            placeholder={translateUi('ui.copy.7a9a7ec1ee67')}
-            value={schemeDraft}
-            onChange={(event) => setSchemeDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                confirmScheme()
-              } else if (event.key === 'Escape') {
-                event.preventDefault()
-                setSchemeDraft('')
-                setComposingScheme(false)
-              }
-            }}
-            onBlur={() => {
-              setTimeout(() => {
-                setSchemeDraft('')
-                setComposingScheme(false)
-              }, 0)
-            }}
-          />
-        </div>
+      {isFolder && createOpen ? (
+        <UiTemplateCreateDialog
+          onClose={() => setCreateOpen(false)}
+          onConfirm={(name) => {
+            onAddScheme(node.id, name)
+            setCreateOpen(false)
+            setExpanded(true)
+          }}
+        />
       ) : null}
       {mode === 'delete' && deletePopPlacement && typeof document !== 'undefined'
         ? createPortal(
@@ -419,6 +397,7 @@ function UiTreeRow({
               selectedTreeNodeId={selectedTreeNodeId}
               onSelect={onSelect}
               onAddScheme={onAddScheme}
+              onRequestAddScheme={onRequestAddScheme}
               onRename={onRename}
               onDelete={onDelete}
               onDeleteProjectComponent={onDeleteProjectComponent}

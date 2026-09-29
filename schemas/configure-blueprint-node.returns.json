@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:configure-blueprint-node returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "ok": { "type": "boolean" },
+    "replayed": { "type": "boolean" },
+    "applied": { "type": "integer", "minimum": 0 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "errorCode": { "type": "string" },
+    "errors": { "type": "array", "items": { "type": "string" } },
+    "failedPath": { "type": "string" },
+    "mounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["overlayId", "mountId", "created"],
+        "properties": {
+          "overlayId": { "type": "string" },
+          "mountId": { "type": "string" },
+          "created": { "type": "boolean" }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "interfacesConfigured": { "type": "integer", "minimum": 0 },
+        "mountsCreated": { "type": "integer", "minimum": 0 },
+        "componentOverrides": { "type": "integer", "minimum": 0 },
+        "eventResponsesConfigured": { "type": "integer", "minimum": 0 },
+        "settlementsCreated": { "type": "integer", "minimum": 0 },
+        "settlementsUpdated": { "type": "integer", "minimum": 0 },
+        "edgesCreatedOrReused": { "type": "integer", "minimum": 0 },
+        "interfacesRemoved": { "type": "integer", "minimum": 0 },
+        "eventResponsesRemoved": { "type": "integer", "minimum": 0 },
+        "eventActionsRemoved": { "type": "integer", "minimum": 0 },
+        "settlementsRemoved": { "type": "integer", "minimum": 0 },
+        "settlementActionsRemoved": { "type": "integer", "minimum": 0 },
+        "edgesRemoved": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reusedPrimitives": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "data": { "type": "object" },
+    "artifactRef": { "type": "object" },
+    "validation": { "type": "object" },
+    "uiHint": { "type": "object" },
+    "versions": { "type": "array", "maxItems": 0, "items": false },
+    "gameSlug": { "type": ["string", "null"] }
+  }
+}

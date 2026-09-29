@@ -22,6 +22,9 @@ import {
   type DesignOptionsGate,
 } from './documents/design-options-gate'
 
+/** Distinguishes a canvas gesture from Agent/host driven navigation. */
+export type NodeSelectionSource = 'user' | 'programmatic'
+
 export type ExtensionInitOptions = {
   rewrite?: RewriteRule[]
   pane?: 'left' | 'center' | null
@@ -58,9 +61,12 @@ export type ExtensionInitOptions = {
   onPreviewOpenChange?: (open: boolean) => void
   /**
    * Fired when canvas node selection changes. Pass `null` when selection clears.
-   * Errors thrown by the callback are swallowed so selection still updates.
+   * `user` is emitted only for a direct canvas gesture; Agent/host navigation
+   * and generated blueprint updates emit `programmatic` so the host does not
+   * take over the user's currently selected tab. Errors are swallowed so
+   * selection still updates.
    */
-  onNodeSelect?: (nodeId: string | null) => void
+  onNodeSelect?: (nodeId: string | null, source: NodeSelectionSource) => void
   /**
    * Declares what the host's inspector tab shows. Every view that fills
    * `inspectorEl` owns its own label, so the tab beside Agent is a generic slot
@@ -86,9 +92,9 @@ export type ExtensionInitOptions = {
   /** Live actions for the design-options Slide (apply and regenerate). */
   designOptionsGate?: DesignOptionsGate | null
   /**
-   * When true, an `uninitialized` package is seeded silently (via the extension
-   * `createSeed` empty library) instead of showing the "从模板新建" guide. Hosts
-   * opt in per mount; the default preserves the manual confirmation.
+   * When true, an `uninitialized` package keeps the workflow shell mounted
+   * instead of showing the "从模板新建" guide. The workflow owns the first
+   * package artifact; the default preserves manual confirmation for standalone use.
    */
   autoInitialize?: boolean
   /**
@@ -128,10 +134,25 @@ let hostCount = 0
 /** Matches every applyHostInit (with or without host) for inspector option lifetime. */
 let initDepth = 0
 
+/**
+ * True while an in-process host owns this mount (`applyHostInit({ host })`).
+ *
+ * Standalone / player builds have no host and legitimately own the whole
+ * decision themselves. A hosted mount does not: the host is the only party that
+ * can wake the orchestrator after an author decision, so a hosted mount missing
+ * that channel is a broken state that must fail loudly rather than write
+ * irreversible artifacts and stall.
+ */
+export function hasInProcessHost(): boolean {
+  return hostCount > 0
+}
+
 let activeInspectorEl: HTMLElement | undefined
 let activeVideoGenerationEl: HTMLElement | undefined
 let activePreviewEl: HTMLElement | undefined
-let activeOnNodeSelect: ((nodeId: string | null) => void) | undefined
+let activeOnNodeSelect:
+  | ((nodeId: string | null, source: NodeSelectionSource) => void)
+  | undefined
 let activeOnPreviewOpenChange: ((open: boolean) => void) | undefined
 let activeOnInspectorTabChange:
   | ((tab: { label: string, selected: boolean }) => void)
@@ -145,7 +166,9 @@ export function getInspectorMountOptions(): {
   inspectorEl: HTMLElement | undefined
   videoGenerationEl: HTMLElement | undefined
   previewEl: HTMLElement | undefined
-  onNodeSelect: ((nodeId: string | null) => void) | undefined
+  onNodeSelect:
+    | ((nodeId: string | null, source: NodeSelectionSource) => void)
+    | undefined
   onPreviewOpenChange: ((open: boolean) => void) | undefined
   onInspectorTabChange:
     | ((tab: { label: string, selected: boolean }) => void)

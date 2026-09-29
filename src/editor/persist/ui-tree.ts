@@ -1,7 +1,6 @@
 import type { Overlay, UiTree, UiTreeFolderNode, UiTreeNode, UiTreeSchemeNode } from '@/runtime/core/schema/graph-schema'
 
 export const MAX_DEPTH = 12
-export const BASIC_UI_FOLDER_ID = 'ui-folder:basic'
 export const CUSTOM_UI_FOLDER_ID = 'ui-folder:custom'
 export const UNGROUPED_UI_FOLDER_ID = 'ui-folder:ungrouped'
 
@@ -211,25 +210,22 @@ function uniqueSchemeId(overlayId: string, used: Set<string>): string {
 }
 
 function makeDefaultTree(overlays: Record<string, Overlay>): UiTree {
-  const used = new Set<string>([BASIC_UI_FOLDER_ID, CUSTOM_UI_FOLDER_ID])
-  const basic: UiTreeSchemeNode[] = []
+  const used = new Set<string>([CUSTOM_UI_FOLDER_ID])
   const custom: UiTreeSchemeNode[] = []
   for (const overlayId of Object.keys(overlays)) {
-    const scheme = { kind: 'scheme' as const, id: uniqueSchemeId(overlayId, used), overlayId }
-    if (overlayId.startsWith('base:')) basic.push(scheme)
-    else custom.push(scheme)
+    if (overlayId.startsWith('base:')) continue
+    custom.push({ kind: 'scheme' as const, id: uniqueSchemeId(overlayId, used), overlayId })
   }
   return {
     root: [
-      { kind: 'folder', id: CUSTOM_UI_FOLDER_ID, name: '模板', children: custom },
-      { kind: 'folder', id: BASIC_UI_FOLDER_ID, name: '控件', children: basic },
+      { kind: 'folder', id: CUSTOM_UI_FOLDER_ID, name: '界面模板', children: custom },
     ],
   }
 }
 
 /**
- * 读时规范化。合法既有树保持顺序与嵌套；悬空 scheme 会删除，遗漏 base 归控件，
- * 遗漏普通 overlay 归未分组。无可用树时按基础/自定义生成默认目录。
+ * 读时规范化。基础 `base:*` overlay 留在项目数据中，但不再出现在界面树；
+ * 遗漏普通 overlay 归界面模板。无可用树时按模板生成默认目录。
  */
 export function ensureUiTree(raw: unknown, overlays: Record<string, Overlay> | undefined): UiTree {
   const catalog = overlays ?? {}
@@ -241,9 +237,13 @@ export function ensureUiTree(raw: unknown, overlays: Record<string, Overlay> | u
     let changed = false
     for (const node of nodes) {
       if (node.kind === 'scheme') {
-        if (available.has(node.overlayId)) kept.push(node)
+        if (available.has(node.overlayId) && !node.overlayId.startsWith('base:')) kept.push(node)
         else changed = true
       } else {
+        if (node.id === 'ui-folder:basic') {
+          changed = true
+          continue
+        }
         const children = prune(node.children)
         kept.push(children.changed ? { ...node, children: children.nodes } : node)
         changed ||= children.changed
@@ -254,7 +254,6 @@ export function ensureUiTree(raw: unknown, overlays: Record<string, Overlay> | u
   const pruned = prune(tree.root)
   let next: UiTree = pruned.changed ? { root: pruned.nodes } : tree
   const present = collectUiTreeOverlayIds(next)
-  const missingBase = Object.keys(catalog).filter((id) => id.startsWith('base:') && !present.has(id))
   // 模板：node:*（节点内容容器）+ 所有非 base: 的自定义 overlay（scheme-* 等）。
   // 两者都属于可复用/作者态的「模板」概念，不再走独立的「未分组」文件夹。
   const missingTemplates = Object.keys(catalog).filter((id) => !id.startsWith('base:') && !present.has(id))
@@ -266,7 +265,7 @@ export function ensureUiTree(raw: unknown, overlays: Record<string, Overlay> | u
     : []
   if (missingTemplates.length > 0 || templateSchemesInUngrouped.length > 0) {
     if (!findUiTreeNode(next, CUSTOM_UI_FOLDER_ID)) {
-      next = addUiTreeFolder(next, null, { id: CUSTOM_UI_FOLDER_ID, name: '模板' })
+      next = addUiTreeFolder(next, null, { id: CUSTOM_UI_FOLDER_ID, name: '界面模板' })
       used.add(CUSTOM_UI_FOLDER_ID)
     }
     for (const nodeId of templateSchemesInUngrouped) next = moveUiTreeNode(next, nodeId, CUSTOM_UI_FOLDER_ID)
@@ -275,21 +274,9 @@ export function ensureUiTree(raw: unknown, overlays: Record<string, Overlay> | u
     }
   }
 
-  if (missingBase.length > 0) {
-    if (!findUiTreeNode(next, BASIC_UI_FOLDER_ID)) {
-      next = addUiTreeFolder(next, null, { id: BASIC_UI_FOLDER_ID, name: '控件' })
-      used.add(BASIC_UI_FOLDER_ID)
-    }
-    for (const overlayId of missingBase) {
-      next = addUiTreeScheme(next, BASIC_UI_FOLDER_ID, { id: uniqueSchemeId(overlayId, used), overlayId })
-    }
-  }
-  // 「控件」是内置参考分组，钉到 root 末尾：用户区（模板 + 新建顶层组）都在它前面，
-  // 新建顶层文件夹插末尾时自然落在基础界面前。仅在它不在末尾时才重排，避免无谓新引用。
-  const basicIndex = next.root.findIndex((n) => n.id === BASIC_UI_FOLDER_ID)
-  if (basicIndex !== -1 && basicIndex !== next.root.length - 1) {
-    const basic = next.root[basicIndex]!
-    next = { root: [...next.root.slice(0, basicIndex), ...next.root.slice(basicIndex + 1), basic] }
+  const template = findUiTreeNode(next, CUSTOM_UI_FOLDER_ID)
+  if (template?.kind === 'folder' && template.name !== '界面模板') {
+    next = renameUiTreeFolder(next, CUSTOM_UI_FOLDER_ID, '界面模板')
   }
   return next
 }

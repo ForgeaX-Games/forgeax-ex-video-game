@@ -11,9 +11,6 @@ vi.mock('../persist-client', async (importOriginal) => {
     ...actual,
     saveProject: vi.fn(async () => ({ ok: true, revision: 'rev-1' })),
     checkpointTip: vi.fn(async () => ({ ok: true, commitHash: 'c1' })),
-    restoreVersionToTip: vi.fn(),
-    commitVersion: vi.fn(async () => ({ tag: 'v9', commitHash: 'abc', dirty: false })),
-    listVersions: vi.fn(async () => []),
   }
 })
 
@@ -23,8 +20,6 @@ import {
 } from '../graphScenarioStore'
 import {
   saveProject,
-  restoreVersionToTip,
-  commitVersion,
 } from '../persist-client'
 import type { BlueprintDoc } from '@/runtime/core/schema/graph-schema'
 
@@ -60,8 +55,6 @@ function seedCleanStore(): void {
 beforeEach(() => {
   vi.useFakeTimers()
   vi.mocked(saveProject).mockClear().mockResolvedValue({ ok: true, revision: 'rev-1' })
-  vi.mocked(restoreVersionToTip).mockClear()
-  vi.mocked(commitVersion).mockClear().mockResolvedValue({ tag: 'v9', commitHash: 'abc', dirty: false })
   resetCleanFingerprintForTests()
   seedCleanStore()
 })

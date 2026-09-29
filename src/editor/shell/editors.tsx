@@ -45,7 +45,7 @@ import {
   type ValueExprVariableCreateConfig,
 } from './ValueExprEditor'
 import { TextValueEditor, type TextOrRef } from './TextValueEditor'
-import { LooseNumberInput } from './TermChainEditor'
+import { LooseNumberInput } from './LooseNumberInput'
 import { NiSelect } from './ni-ui'
 import { EffectOpButtons } from './OpSymbolButtons'
 import {
@@ -899,7 +899,7 @@ function EffectRow({
   eff: GraphEffect
   allowedKinds: readonly EffectKind[]
   onChange: (e: GraphEffect) => void
-  onDelete: () => void
+  onDelete?: () => void
   createAttribute?: ValueExprAttributeCreateConfig
   createEntity?: ValueExprEntityCreateConfig
   createVariable?: ValueExprVariableCreateConfig
@@ -1016,13 +1016,15 @@ function EffectRow({
           >
             {translateUi('ui.copy.f16418c45919')}</button>
         )}
-        <button
-          type="button"
-          style={(eff.kind === 'attr' || eff.kind === 'var') && canUndoOp ? { ...del, marginLeft: 4 } : del}
-          onClick={onDelete}
-          title={`${translateUi('ui.template.a9bbc10e1c98')}${summary}`}
-        >
-          {translateUi('ui.copy.3755f56f2f83')}</button>
+        {onDelete ? (
+          <button
+            type="button"
+            style={(eff.kind === 'attr' || eff.kind === 'var') && canUndoOp ? { ...del, marginLeft: 4 } : del}
+            onClick={onDelete}
+            title={`${translateUi('ui.template.a9bbc10e1c98')}${summary}`}
+          >
+            {translateUi('ui.copy.3755f56f2f83')}</button>
+        ) : null}
       </div>
       {field('类型', (
         <NiSelect
@@ -1163,7 +1165,21 @@ function EffectRow({
               <option value="take">{translateUi('ui.copy.e832acd8cfbb')}</option>
             </NiSelect>
           ), labelWidth)}
-          {field('数量', <LooseNumberInput value={eff.count} emptyValue={0} onChange={(count) => onChange({ ...eff, count })} style={{ width: 90 }} />, labelWidth)}
+          {field('数量', (
+            <ValueInput
+              value={eff.count}
+              entities={entities}
+              variables={variables}
+              formulas={formulas}
+              createAttribute={createAttribute}
+              createEntity={createEntity}
+              createVariable={createVariable}
+              createFormula={createFormula}
+              onChange={(count) => onChange({ ...eff, count })}
+              fieldLabels={{ source: '数量来源', value: '数量' }}
+              fieldLabelWidth={labelWidth}
+            />
+          ), labelWidth)}
         </>
       )}
     </div>
@@ -1225,7 +1241,9 @@ export function EffectsEditor({
           labelWidth={labelWidth}
           propertyLayout={propertyLayout}
           onChange={(next) => onChange(list.map((e, idx) => (idx === i ? next : e)))}
-          onDelete={() => { opStacks.current.delete(i); onChange(list.filter((_, idx) => idx !== i)) }}
+          onDelete={allowAdd
+            ? () => { opStacks.current.delete(i); onChange(list.filter((_, idx) => idx !== i)) }
+            : undefined}
           canUndoOp={(opStacks.current.get(i)?.length ?? 0) > 0}
           onOpSnapshot={(snap) => {
             const stack = opStacks.current.get(i) ?? []

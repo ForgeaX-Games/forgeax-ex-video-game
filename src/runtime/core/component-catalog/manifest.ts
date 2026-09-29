@@ -2,7 +2,11 @@
  * 组件包本地契约形状 —— 不依赖平台 schema。
  * 宿主注册时再 `as ComponentManifest` / `as ComponentDef`。
  */
-import type { ComponentLayoutContract, ComponentTimingContract } from '../schema/node-config-schema'
+import type {
+  ComponentLayoutContract,
+  ComponentOutput,
+  ComponentTimingContract,
+} from '../schema/node-config-schema'
 
 export type LocalComponentInput = {
   key: string
@@ -19,6 +23,7 @@ export type LocalComponentInput = {
 export type LocalComponentEvent = {
   id: string
   label?: string
+  outputs?: ComponentOutput[]
 }
 
 export type LocalComponentManifest = {

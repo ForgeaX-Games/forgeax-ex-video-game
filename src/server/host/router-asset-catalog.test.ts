@@ -38,4 +38,25 @@ describe('asset-catalog route', () => {
       error: { code: 'asset_catalog_capability_unavailable' },
     })
   })
+
+  it('forwards control placements without requiring an asset catalog entity', async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true })
+    const context = { gameId: 'game-1', capabilities: { invoke } } as unknown as ExtensionContext
+    const router = createGameVideoRouter(context)
+
+    expect((await router.handle(request('POST', {
+      operation: 'place',
+      operationId: 'control-placement-1',
+      placementKey: 'control:Dialogue',
+      folderId: 'hidden:control',
+      sortKey: '摇杆',
+    }))).status).toBe(200)
+
+    expect(invoke).toHaveBeenCalledWith('game-video.asset-catalog.place', 2, {
+      operationId: 'control-placement-1',
+      placementKey: 'control:Dialogue',
+      folderId: 'hidden:control',
+      sortKey: '摇杆',
+    }, { requestId: 'control-placement-1' })
+  })
 })

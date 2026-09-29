@@ -68,3 +68,96 @@ export function workScaleBudgetFromContract(
 ): WorkScaleBudget | null {
   return workScaleBudgetFromValue(contract?.dimensions.work_scale?.value)
 }
+
+/** Pillar fields that decide how many outline chapters a design physically needs. */
+export interface OutlineNodeBudgetSource {
+  beats: readonly {
+    actions: readonly {
+      id: string
+      stateMutationOwner?: 'none' | 'settlement'
+      requiredRole?: string
+    }[]
+    settlements: readonly { sourceActionId?: string }[]
+  }[]
+}
+
+export interface MinimumOutlineNodeCount {
+  interactiveChapters: number
+  resultChapters: number
+  combatActions: number
+  minNodeCount: number
+}
+
+/**
+ * 每个有动作的节拍 1 个互动节点；该拍只要有已配对的 settlement 动作，再加 1 个同节拍结果节点。
+ * 同一拍的多个数值选项 / 战斗指令共用这一拍结果节点，否则短篇默认骨架
+ * （10 拍 + 两处分叉 + 一场战斗）会在加上终局后越过 15 的上限。
+ * 纯叙事节拍（无动作）不占最小预算——它们可以并进已有结果节点。
+ */
+export function minimumOutlineNodeCount(pillar: OutlineNodeBudgetSource): MinimumOutlineNodeCount {
+  let interactiveChapters = 0
+  let resultChapters = 0
+  let combatActions = 0
+  for (const beat of pillar.beats) {
+    combatActions += beat.actions.filter((action) => action.requiredRole === 'combat-command').length
+    if (beat.actions.length === 0) continue
+    interactiveChapters += 1
+    const settles = beat.actions.some((action) => (
+      action.stateMutationOwner === 'settlement'
+      && beat.settlements.some((settlement) => settlement.sourceActionId === action.id)
+    ))
+    if (settles) resultChapters += 1
+  }
+  return {
+    interactiveChapters,
+    resultChapters,
+    combatActions,
+    minNodeCount: interactiveChapters + resultChapters,
+  }
+}
+
+export function outlineScaleBudgetMessage(
+  budget: WorkScaleBudget,
+  outline: MinimumOutlineNodeCount,
+): string {
+  return (
+    `这份支柱最少需要 ${outline.minNodeCount} 个主图节点`
+    + `（${outline.interactiveChapters} 个互动节拍 + ${outline.resultChapters} 个同节拍结果节点），`
+    + `超过${budget.label}上限 ${budget.maxNodeCount}。`
+    + '请合并节拍、把部分动作改成 stateMutationOwner=none，或改篇幅规模后再让作者确认。'
+  )
+}
+
+export type OutlineScaleBudgetErrorCode =
+  | 'outline.pillar-budget-exceeded'
+  | 'outline.node-count-exceeds-scale'
+
+/**
+ * 骨架提交前的篇幅闸门。没有预算时放行——那是需求未齐，不该在这里猜上限。
+ */
+export function outlineScaleBudgetFailure(
+  pillar: OutlineNodeBudgetSource,
+  chapterCount: number,
+  budget: WorkScaleBudget | null | undefined,
+): { errorCode: OutlineScaleBudgetErrorCode; message: string } | null {
+  if (!budget) return null
+  const outline = minimumOutlineNodeCount(pillar)
+  if (outline.minNodeCount > budget.maxNodeCount) {
+    return {
+      errorCode: 'outline.pillar-budget-exceeded',
+      message: outlineScaleBudgetMessage(budget, outline),
+    }
+  }
+  if (chapterCount > budget.maxNodeCount) {
+    return {
+      errorCode: 'outline.node-count-exceeds-scale',
+      message: (
+        `${budget.label}主图最多 ${budget.maxNodeCount} 个节点，骨架提交了 ${chapterCount} 个。`
+        + `按支柱最少需要 ${outline.minNodeCount} 个`
+        + `（${outline.interactiveChapters} 个互动节拍 + ${outline.resultChapters} 个同节拍结果节点）。`
+        + '超上限不要建骨架，先压缩支柱或改篇幅。'
+      ),
+    }
+  }
+  return null
+}

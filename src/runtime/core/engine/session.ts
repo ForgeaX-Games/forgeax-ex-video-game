@@ -275,8 +275,8 @@ export class GraphSession {
     return this.apply(this.runtime.onPerformanceEnd())
   }
   /** 组件事件（点击 / 判定 / 超时 defaultEvent）→ 跑挂载 reactions，必要时按 handle 找边。 */
-  emitEvent(elementId: string, key: string): SessionSnapshot {
-    return this.apply(this.runtime.emitComponentEvent(elementId, key))
+  emitEvent(elementId: string, key: string, payload?: Record<string, unknown>): SessionSnapshot {
+    return this.apply(this.runtime.emitComponentEvent(elementId, key, payload))
   }
   /** 点击运行时蓝图节点 → 跳转执行。 */
   jump(

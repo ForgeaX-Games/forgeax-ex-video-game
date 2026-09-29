@@ -16,7 +16,6 @@ import {
   healMissingDocuments,
   readHostDocument,
 } from '../asset-registry'
-import { bundledMediaResponse, type BundledMediaResolver } from './media-routes'
 import { VideoPromptPolishError } from '../generation/prompt-polish'
 import {
   createGameVideoService,
@@ -608,7 +607,6 @@ async function handleHostMedia(
  */
 export function createGameVideoRouter(
   context: ExtensionContext,
-  options: { bundledMediaResolver?: BundledMediaResolver } = {},
 ): ExtensionRouter {
   const service = createGameVideoService(context)
 
@@ -699,7 +697,10 @@ export function createGameVideoRouter(
           return jsonResponse(200, await deleteAuthoredComponent(context, parts[1]!))
         }
         if (method === 'GET' && path === 'asset-catalog') {
-          exactQuery(request.query, [])
+          // workbench-host v0.2.6 forwards its required routing `gameId` query
+          // to v2 extension routers. The v2 host normally consumes it before
+          // dispatch, so accept (and ignore) this legacy transport parameter.
+          exactQuery(request.query, ['gameId'])
           return jsonResponse(200, await invokeAssetCatalogCapability(context, 'list', {}))
         }
         if (method === 'GET' && path === 'asset-catalog/history') {
@@ -833,40 +834,6 @@ export function createGameVideoRouter(
           exactQuery(request.query, [])
           const id = getAssetIdFromArgs({ id: parts[1]! })
           return jsonResponse(200, await service.getAsset(id))
-        }
-        if (
-          method === 'GET'
-          && parts.length === 3
-          && parts[0] === 'media'
-          && parts[1] === 'bundled'
-        ) {
-          exactQuery(request.query, [])
-          const response = await bundledMediaResponse(
-            parts[2]!,
-            header(request, 'range'),
-            { resolveAsset: options.bundledMediaResolver },
-          )
-          if (response.status === 404) return notFound()
-          if (response.status === 416) {
-            const normalized = jsonResponse(416, {
-              ok: false,
-              error: {
-                code: 'range_not_satisfiable',
-                target: 'game-video',
-                message: 'Range Not Satisfiable',
-                retryable: false,
-              },
-            })
-            return {
-              ...normalized,
-              headers: {
-                ...normalized.headers,
-                'accept-ranges': response.headers?.['accept-ranges'] ?? 'bytes',
-                'content-range': response.headers?.['content-range'] ?? 'bytes */0',
-              },
-            }
-          }
-          return response
         }
         if (method === 'GET' && path === 'style-axes') {
           exactQuery(request.query, [])

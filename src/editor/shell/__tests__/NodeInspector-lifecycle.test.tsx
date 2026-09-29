@@ -500,6 +500,42 @@ describe('NodeInspector · 结算选中联动', () => {
     expect(next.nodes[0]?.data.reactions).toHaveLength(1)
   })
 
+  it('删除整条结算时同步删除不再引用的结算专用边', () => {
+    const onChange = vi.fn()
+    const graph = graphWith([{
+      when: { type: 'at', ms: 800 },
+      do: [{ kind: 'advance', edgeId: 'settlement-edge' }],
+    }])
+    graph.nodes.push({
+      id: 'next',
+      type: 'perf',
+      position: { x: 200, y: 0 },
+      inputs: [],
+      outputs: [],
+      data: { name: '下一幕' },
+    })
+    graph.edges.push({
+      id: 'settlement-edge',
+      source: 'gate',
+      sourceHandle: 'settlement-advance:settlement-edge',
+      target: 'next',
+      targetHandle: 'in',
+    })
+    const { container } = render(
+      <NodeInspector graph={graph} nodeId="gate" onChange={onChange} />,
+    )
+
+    const settlement = container.querySelector<HTMLElement>('[data-settlement-index="0"]')!
+    fireEvent.click(
+      Array.from(settlement.querySelectorAll('button'))
+        .find((button) => button.textContent === '删除结算')!,
+    )
+
+    const next = onChange.mock.calls.at(-1)?.[0] as GameGraph
+    expect(next.nodes.find((node) => node.id === 'gate')?.data.reactions).toBeUndefined()
+    expect(next.edges).toEqual([])
+  })
+
   it('统一呈现定时与数值变化结算，两者都能绑定界面', () => {
     const onChange = vi.fn()
     const { container } = render(
@@ -888,7 +924,7 @@ describe('NodeInspector · 结算选中联动', () => {
 
     fireEvent.click(Array.from(settlement.querySelectorAll('button')).find((button) => button.textContent === '删除结算')!)
     expect(latest.nodes[0]?.data.reactions).toBeUndefined()
-    expect(screen.getByText('无结算')).toBeTruthy()
+    expect(screen.queryByText('无结算')).toBeNull()
   })
 
   it('条件结算复用出边 ConditionEditor，并支持完整比较运算符', () => {

@@ -53,4 +53,29 @@ describe('patch_graph budget', () => {
       failedDimension: 'requestBytes',
     })
   })
+
+  it('counts insert, duplicate, and reconnect targets', () => {
+    const result = assessPatchGraphBudget({
+      ops: [
+        { op: 'insert-node-before', beforeId: 'ending', node: { id: 'memory' } },
+        {
+          op: 'duplicate-nodes',
+          copies: [
+            { sourceId: 'choice-a', targetId: 'choice-a-copy' },
+            { sourceId: 'choice-b', targetId: 'choice-b-copy' },
+          ],
+        },
+        { op: 'reconnect', edgeId: 'edge-ending', target: 'hidden-ending' },
+      ],
+    }, {
+      ...FINALIZATION_PATCH_GRAPH_BUDGET,
+      maxNodesTouched: 20,
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.usage.nodesTouched).toBe(7)
+      expect(result.usage.edgesTouched).toBe(1)
+    }
+  })
 })

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:create-blueprint-outline-skeleton args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entry", "idempotencyKey", "chapters"],
+  "properties": {
+    "activityRevision": { "type": "integer", "minimum": 1 },
+    "blueprintId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "entry": { "type": "string", "minLength": 1 },
+    "expectedRevision": { "type": "integer", "minimum": 0 },
+    "snapshotToken": { "type": "string", "minLength": 1 },
+    "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "chapters": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "pillarBeatId", "beat"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "pillarBeatId": { "type": "string", "minLength": 1 },
+          "beat": { "enum": ["narrative", "choice", "combat", "check", "timed"] },
+          "lane": { "type": "integer", "minimum": -8, "maximum": 8 },
+          "cast": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["characterId"],
+              "properties": {
+                "characterId": { "type": "string", "minLength": 1 },
+                "role": { "enum": ["primary", "supporting", "background"] },
+                "onScreen": { "type": "boolean" }
+              }
+            }
+          },
+          "scenes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["sceneId"],
+              "properties": {
+                "sceneId": { "type": "string", "minLength": 1 },
+                "role": { "enum": ["primary", "secondary", "background"] },
+                "useAsVideoReference": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

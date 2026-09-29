@@ -93,7 +93,7 @@ describe('ScenarioInspector rules editing', () => {
 
     const headers = Array.from(document.querySelectorAll('.gc-rule-variable-head'))
     expect(headers).toHaveLength(2)
-    expect(headers[0]).toHaveTextContent('数值')
+    expect(headers[0]).toHaveTextContent('初始值')
     expect(headers[1]).toHaveTextContent('文本')
     expect(screen.getByLabelText('title 的文本')).toHaveValue('序章')
     expect(screen.queryByLabelText('title 的最小值')).toBeNull()

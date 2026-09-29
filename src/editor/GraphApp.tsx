@@ -48,6 +48,7 @@ import {
   subscribeGameComponents,
 } from '@/runtime/react/component-host'
 import { RenderErrorBoundary } from './diagnostics'
+import entityEmptyIcon from '@/editor/ui-assets/entity-empty.svg?url'
 
 /** Poll cadence for the standalone fallback (no sibling pane to seed the package). */
 const LEFT_PANE_STATUS_POLL_MS = 1500
@@ -60,7 +61,7 @@ export type GraphAppProps = {
   pane?: GraphAppPane
   /** Host-supplied game id (slug) for in-process mounts. */
   gameId?: string
-  /** When true, an uninitialized package is seeded silently (skips the guide). */
+  /** When true, keep the workflow shell mounted before the first blueprint exists. */
   autoInitialize?: boolean
 }
 
@@ -74,7 +75,7 @@ function readPane(): GraphAppPane {
 }
 
 /** 主区——当前 tab 对应的内容。center pane 的全部内容。 */
-function GraphMain(): JSX.Element {
+function GraphMain({ workflowMode = false }: { workflowMode?: boolean } = {}): JSX.Element {
   const view = useGraphView((state) => state.view)
   const setView = useGraphView((state) => state.setView)
   const projection = useProductionProjection((state) => state.projection)
@@ -88,8 +89,17 @@ function GraphMain(): JSX.Element {
     () => scenarioFromStore(),
     [loadEpoch, scenarioFromStore],
   )
-  if (!hasSelectableProductionContent(projection)) {
-    return <main className="ga-main" data-production-empty="true" />
+  const productionIsEmpty = projection === null
+    ? workflowMode
+    : !hasSelectableProductionContent(projection)
+  if (productionIsEmpty) {
+    return (
+      <main className="ga-main" data-production-empty="true">
+        <div className="ga-production-empty" data-testid="production-empty-state" aria-hidden="true">
+          <img src={entityEmptyIcon} alt="" />
+        </div>
+      </main>
+    )
   }
   return (
     <main className="ga-main">
@@ -185,7 +195,7 @@ function CombinedWorkspace({
         <NewSidebar />
       </RenderErrorBoundary>
       <GameBootstrap gameId={gameId} autoInitialize={autoInitialize} onBoot={(bootGameId) => ensureBoot(bootGameId)}>
-        <GraphMain />
+        <GraphMain workflowMode={autoInitialize === true} />
         <VideoGenerationPreviewPortal />
       </GameBootstrap>
     </div>
@@ -215,11 +225,8 @@ function LeftPane({ gameId }: { gameId?: string }): JSX.Element {
     let timer: ReturnType<typeof setTimeout> | undefined
     const host = getExtensionHost()
 
-    // Never read/write an uninitialized package: the host rejects `load`/`save`
-    // with `package_uninitialized` until it is seeded, and that rejection is
-    // the "工作台连接失败：Game package has not been initialized" banner. Boot
-    // only once the package is `initialized` — either already, or after the
-    // center pane (Arrival split) or a bounded poll (standalone) seeds it.
+    // Before the first blueprint exists, workflow-state and the empty shell are
+    // still useful. Boot the graph only after the package exposes a blueprint.
     const bootOnce = async (targetGameId: string): Promise<void> => {
       await ensureBoot(targetGameId)
       if (!disposed) setBootReady(true)
@@ -352,7 +359,7 @@ export function GraphApp({ pane: explicitPane, gameId, autoInitialize }: GraphAp
     return (
       <div className="ga-root is-pane-center">
         <GameBootstrap gameId={gameId} autoInitialize={autoInitialize} onBoot={(bootGameId) => ensureBoot(bootGameId)}>
-          <GraphMain />
+          <GraphMain workflowMode={autoInitialize === true} />
           <VideoGenerationPreviewPortal />
         </GameBootstrap>
       </div>
@@ -370,6 +377,9 @@ const CSS = `
 .ga-root.is-pane-center:has(.ga-main[data-production-empty]) { background:transparent; color:inherit; }
 
 .ga-main { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+.ga-main[data-production-empty] { display: grid; place-items: center; background: #232323; }
+.ga-production-empty { display: flex; width: 80px; flex-direction: column; align-items: center; }
+.ga-production-empty img { display: block; width: 72px; height: 80px; }
 .ga-bootstrap { flex: 1; display: grid; place-content: center; gap: 12px; padding: 32px; color: var(--color-text-primary, #f6f1e9); text-align: center; }
 .ga-bootstrap h1, .ga-bootstrap p { margin: 0; }
 .ga-bootstrap-actions { display: flex; justify-content: center; gap: 12px; margin-top: 8px; }

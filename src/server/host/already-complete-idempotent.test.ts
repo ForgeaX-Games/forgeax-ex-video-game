@@ -113,7 +113,7 @@ describe('已完成活动的幂等 complete / validate', () => {
     expect(after.activities['document.pillar']?.status).toBe('complete')
   })
 
-  it('validate_project 打到 Host 已完成的 pillar，返回 ok 而不是 stale', async () => {
+  it('validate_project 打到 Host 已完成的 pillar，仍保持幂等返回', async () => {
     const { context } = createContext(pillarAlreadyComplete())
     const service = createGameVideoService(context)
 
@@ -123,6 +123,29 @@ describe('已完成活动的幂等 complete / validate', () => {
 
     expect(result.ok).toBe(true)
     expect(result.alreadyComplete).toBe(true)
+  })
+
+  it('validate_project 在支柱活动仍 working 时被拒绝，避免 Agent 重复做文档校验', async () => {
+    const workflow = pillarAlreadyComplete()
+    workflow.activityStatus = 'working'
+    workflow.activities['document.pillar'] = {
+      ...workflow.activities['document.pillar']!,
+      status: 'working',
+      completedAt: undefined,
+    }
+    workflow.activeGroup = {
+      id: 'design',
+      activities: ['document.pillar'],
+      status: 'working',
+      revision: 12,
+    }
+    const { context } = createContext(workflow)
+    const service = createGameVideoService(context)
+
+    await expect(service.validateProject({ activity: 'document.pillar' })).rejects.toMatchObject({
+      code: 'workflow.capability.denied',
+      message: expect.stringContaining('upsert_document'),
+    })
   })
 
   it('当前活动已切到 outline 时，补打 pillar 的 complete 仍幂等成功', async () => {
@@ -165,5 +188,51 @@ describe('已完成活动的幂等 complete / validate', () => {
       artifactRefs: [],
       checkIds: [],
     })).rejects.toMatchObject({ code: 'workflow.activity.stale' } satisfies Partial<WorkflowStateError>)
+  })
+
+  it('支柱阶段把核心正文和 ASCII slug 交给 peer，避免它去调 Read 或发明中文 slug', async () => {
+    const workflow = pillarAlreadyComplete()
+    workflow.activityStatus = 'working'
+    workflow.activities['document.pillar'] = {
+      ...workflow.activities['document.pillar']!,
+      status: 'working',
+      completedAt: undefined,
+    }
+    workflow.activeGroup = {
+      id: 'design',
+      activities: ['document.pillar'],
+      status: 'working',
+      revision: 12,
+    }
+    const { context, files } = createContext(workflow)
+    files.set('docs/caochuan-jiejian_core.md', encoder.encode('# 核心\n    selected_option: A\n'))
+    files.set('assets/manifest.json', json({
+      version: 2,
+      assets: [{
+        id: 'doc-core',
+        kind: 'document',
+        name: '核心',
+        status: 'ready',
+        mimeType: 'text/markdown',
+        provider: { kind: 'local', ref: 'docs/caochuan-jiejian_core.md' },
+        createdAt: 1,
+        updatedAt: 2,
+        meta: { documentType: 'core' },
+      }],
+    }))
+    const service = createGameVideoService(context)
+    const result = await service.getWorkflowState({}) as {
+      pillarSkeleton?: {
+        beats: { kind: string }[]
+        writeGuide?: { resultHeadroom: number; nextBeatIds?: string[] }
+      }
+      pillarSource?: { documentSlug?: string; coreMarkdown: string | null }
+    }
+
+    expect(result.pillarSource?.documentSlug).toBe('caochuan-jiejian')
+    expect(result.pillarSource?.coreMarkdown).toContain('selected_option: A')
+    expect(result.pillarSkeleton?.beats.some((beat) => beat.kind === 'combat')).toBe(true)
+    expect(result.pillarSkeleton?.writeGuide?.resultHeadroom).toBeGreaterThan(0)
+    expect(result.pillarSkeleton?.writeGuide?.nextBeatIds).toEqual(['B01', 'B03', 'B04', 'B05', 'B06', 'B09'])
   })
 })

@@ -82,6 +82,9 @@ describe('GenerationDialog', () => {
       '.vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__composer',
     )
     expect(GENERATION_COMPONENTS_CSS).toContain(
+      '.vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__composer { grid-area: auto; grid-column: 1 / -1; grid-row: 2; min-height:0; overflow:hidden; padding:16px; border-radius:3px; }',
+    )
+    expect(GENERATION_COMPONENTS_CSS).toContain(
       '.vgen-generation-layout.is-page .vgen-design-workspace {\n  grid-template-columns: 225px minmax(0, 1fr);',
     )
     expect(GENERATION_COMPONENTS_CSS).toContain('.vgen-design-workspace.has-history { grid-template-columns: 225px minmax(0, 1fr) 67px; }')
@@ -89,7 +92,7 @@ describe('GenerationDialog', () => {
       '.vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__history',
     )
     expect(GENERATION_COMPONENTS_CSS).toContain(
-      'grid-template-rows: minmax(300px, 1fr) 330px;',
+      'grid-template-rows: minmax(300px, 1.9fr) minmax(320px, 1fr);',
     )
     expect(GENERATION_COMPONENTS_CSS).toContain(
       '.vgen-generation-layout.is-page .vgen-design-workspace > .generation-surface__history { grid-column: 3; grid-row: 1;',
@@ -101,11 +104,34 @@ describe('GenerationDialog', () => {
     expect(GENERATION_COMPONENTS_CSS).toContain(
       '.generation-page-layout.is-page { min-height: 0; flex: 1 1 auto; }',
     )
+    expect(GENERATION_COMPONENTS_CSS).toContain(
+      '.vgen-generation-layout.is-page .vgen-composer > .generation-prompt-composer { min-height:0; flex:1 1 auto; }',
+    )
+    expect(GENERATION_COMPONENTS_CSS).toContain(
+      '.vgen-generation-layout.is-page .vgen-composer .generation-prompt-body { min-height:0; flex:1 1 auto; padding:15px 19px; }',
+    )
     expect(GENERATION_COMPONENTS_CSS).toContain('.generation-prompt-body:focus-within')
+    expect(GENERATION_COMPONENTS_CSS).toContain(
+      '.generation-prompt-composer .vgen-mention-chip > button {',
+    )
+    expect(GENERATION_COMPONENTS_CSS).toContain(
+      '.generation-prompt-composer .vgen-mention-chip > button > img { display: block; width: 12px; height: 12px; }',
+    )
+    expect(GENERATION_COMPONENTS_CSS).toContain(
+      '.igen-settings .generation-select-trigger,',
+    )
+    expect(GENERATION_COMPONENTS_CSS).toContain(
+      'height: 40px; padding: 0 36px 0 12px; border-radius: 8px; background-position: right 12px center;',
+    )
     expect(GENERATION_COMPONENTS_CSS).toContain(
       '.vgen-generation-layout.is-page .vgen-composer .vgen-mode-tabs button.is-on:hover:not(:disabled) { background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2); color: #000; }',
     )
-    expect(GENERATION_COMPONENTS_CSS).toContain('transform: rotate(45deg) scaleX(-1);')
+    expect(GENERATION_COMPONENTS_CSS).toContain(
+      '.igen-composer .generation-prompt-submit img,\n.vgen-generation-layout.is-page .vgen-composer .generation-prompt-submit img { display: block; width: 32px; height: 32px; }',
+    )
+    expect(GENERATION_COMPONENTS_CSS).not.toContain(
+      '.vgen-generation-layout.is-page .vgen-composer .generation-prompt-submit img { width: 20px; height: 18px; transform: rotate(45deg) scaleX(-1); }',
+    )
     expect(GENERATION_COMPONENTS_CSS).not.toContain('translate(-1px,-1px)')
     expect(document.querySelectorAll('style[data-reel-style="game-video-generation-components"]')).toHaveLength(1)
     expect(GENERATION_COMPONENTS_CSS).toContain('.generation-dialog__backdrop')

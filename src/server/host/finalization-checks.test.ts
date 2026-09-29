@@ -238,6 +238,33 @@ describe('总脉络闸门', () => {
     }
   })
 
+  it('支柱声明的纯剧情分流合流时不算缺失状态后果', async () => {
+    const project = playableProject({
+      nodes: [
+        {
+          id: 'n1',
+          cast: ['c1'],
+          scenes: ['s1'],
+          interaction: {
+            beat: 'choice',
+            actions: [
+              { component: 'InkYingMo', event: 'route_left', intent: '安抚', stateMutationOwner: 'none' },
+              { component: 'InkYingMo', event: 'route_right', intent: '施压', stateMutationOwner: 'none' },
+            ],
+          },
+        },
+        { id: 'n2', cast: ['c1'] },
+        { id: 'n3', cast: ['c1'] },
+      ],
+      edges: [
+        { source: 'n1', target: 'n2', handle: 'route_left' },
+        { source: 'n1', target: 'n2', handle: 'route_right' },
+      ],
+    })
+    const { status, codes } = await checkStatus(project, 'blueprint.outline', 'outline.choice-consequence')
+    expect(status, codes.join(',')).toBe('pass')
+  })
+
   it('非 default 分支立即合流且没有后果时拦住', async () => {
     const project = playableProject({
       edges: [

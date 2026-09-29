@@ -65,10 +65,10 @@ import {
 import {
   addOverlayChild,
   addOverlayChildToMount,
-  dropOverlayIfUnreferenced,
   ensureNodeOverlay,
   findMountOwningChild,
   forkSchemeForEdit,
+  mountOverlay,
   overriddenChildIds,
   patchOverlayChild,
   patchOverlayChildInMount,
@@ -76,9 +76,10 @@ import {
   primaryOverlayMount,
   removeOverlayChild,
   resetOverride,
+  unmountOverlay,
 } from '@/authoring/graph/overlay-edit'
 import { clampSettlementSpawnTtlMs, nodePlayDurationMs } from '@/authoring/graph/timeline-geometry'
-import { createOverlayMount, overlayMountId } from '@/runtime/core/schema/node-config-schema'
+import { overlayMountId } from '@/runtime/core/schema/node-config-schema'
 import { expandNodeChildren, resolveMountChildren } from '@/runtime/core/schema/expand-overlay'
 import {
   STAGE_FILL_LAYOUT,
@@ -1155,19 +1156,11 @@ export function mountOverlayGraph(
   overlayId: string,
   preset?: Overlay,
 ): GameScenario {
-  const mounts = node.data.overlayNodes ?? []
   let ui = scenario.ui
   if (!ui?.overlays?.[overlayId] && preset) {
     ui = { ...ui, overlays: { ...(ui?.overlays ?? {}), [overlayId]: structuredClone(preset) } }
   }
-  const definition = ui?.overlays?.[overlayId]
-  const layout = resolveMountLayoutForChildren(
-    undefined,
-    definition?.children.map((child) => child.layout) ?? [],
-  )
-  const created = createOverlayMount(mounts, overlayId)
-  const next = [...mounts, { ...created, ...(layout ? { layout } : {}) }]
-  return { ...scenario, ui, graph: updateNodeData(scenario.graph, node.id, { overlayNodes: next }) }
+  return mountOverlay({ ...scenario, ui }, node.id, overlayId).scenario
 }
 
 /**
@@ -1224,17 +1217,12 @@ export function removeMountGraph(scenario: GameScenario, node: GameNode, mountId
   const mount = mounts.find((m) => overlayMountId(m) === mountId)
   if (!mount) return scenario
   const children = resolveMountChildren(scenario.ui?.overlays, mount)
-  let s = cascadeClearChildrenEvents(scenario, node, children)
-  const cur = s.graph.nodes.find((x) => x.id === node.id) ?? node
-  const curMounts = cur.data.overlayNodes ?? []
-  const removeIndex = curMounts.findIndex((m) => overlayMountId(m) === mountId)
-  const next = curMounts.filter((_, index) => index !== removeIndex)
-  s = {
-    ...s,
-    graph: updateNodeData(s.graph, node.id, { overlayNodes: next.length ? next : undefined }),
-  }
-  if (mount.overlay.startsWith('node:')) s = dropOverlayIfUnreferenced(s, mount.overlay)
-  return s
+  return unmountOverlay(
+    scenario,
+    node.id,
+    mountId,
+    children.flatMap(eventHandlesOfChild),
+  )
 }
 
 /**

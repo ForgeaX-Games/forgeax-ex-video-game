@@ -12,7 +12,7 @@ import { t as translateUi } from '../../../i18n'
  */
 import { Fragment, useState } from 'react'
 import type { Entity, GameGraph, GameNode, GraphCondition, Variable } from '@/runtime/core/schema/graph-schema'
-import { connect, disconnect, reconnect, updateEdgeData } from '@/authoring/graph/graph-edit'
+import { executeBlueprintGraphCommand } from '@/authoring/commands/blueprint-graph-command'
 import { ConditionEditor, type EditorPickerCtx } from '../editors'
 import { injectStyleOnce } from '@/editor/styles/injectStyle'
 import { NiAddButton, NiCard, NiChip, NiDivider, NiIconButton, NiInput, NiSection, NiSelect, niIconMaskCss } from '../ni-ui'
@@ -441,11 +441,15 @@ export function EdgeSection({
           entities={entities}
           variables={variables}
           onSelect={() => setSelectedEdgeId(e.id)}
-          onReconnect={(patch) => onChange(reconnect(graph, e.id, patch))}
-          onPatchData={(data) => onChange(updateEdgeData(graph, e.id, data))}
+          onReconnect={(patch) => onChange(executeBlueprintGraphCommand(graph, {
+            op: 'reconnect', edgeId: e.id, patch,
+          }))}
+          onPatchData={(data) => onChange(executeBlueprintGraphCommand(graph, {
+            op: 'update-edge-data', edgeId: e.id, data,
+          }))}
           onDelete={() => {
             if (selectedEdgeId === e.id) setSelectedEdgeId(null)
-            onChange(disconnect(graph, e.id))
+            onChange(executeBlueprintGraphCommand(graph, { op: 'disconnect', edgeId: e.id }))
           }}
         />
         </Fragment>
@@ -470,7 +474,9 @@ export function EdgeSection({
               <NiSelect
                 value=""
                 onChange={(target) => {
-                  const next = connect(graph, { source: node.id, sourceHandle: 'default', target })
+                  const next = executeBlueprintGraphCommand(graph, {
+                    op: 'connect', spec: { source: node.id, sourceHandle: 'default', target },
+                  })
                   // connect 只返回新图，新边靠差集认出来；同 handle 同目标已经有边时它去重不加边，
                   // 这时高亮那条既有的边，别让「选完什么都没发生」看着像点坏了。
                   const added = next.edges.find((edge) => !graph.edges.some((prev) => prev.id === edge.id))

@@ -53,6 +53,9 @@ describe('minimum-playable runtime simulation', () => {
     })
     expect(result.simulations[0]!.sampledEdgePaths.length).toBeGreaterThan(1)
     expect(result.simulations[0]!.runtimeTraversedEdgeIds.length).toBeGreaterThan(0)
+    expect(result.simulations[0]!.runtimeSeeds).toEqual([0, 1, 7])
+    expect(result.simulations[0]!.runtimeRunCount)
+      .toBe(result.simulations[0]!.sampledEdgePaths.length * 3)
   })
 
   it('simulates blueprint logic without requiring node media refs', async () => {
@@ -89,15 +92,15 @@ describe('minimum-playable runtime simulation', () => {
     expect(result.evidence.details).toMatchObject({ restPointCount: 3 })
   })
 
-  it('reports a choice edge that cannot receive a real runtime input as a non-blocking diagnostic', async () => {
+  it('fails a choice edge that cannot receive a real runtime input', async () => {
     const broken = playableProject()
     const pack = broken.manifest.packs['bp-main']
     const node = pack.graph.nodes.find((candidate) => candidate.id === 'choice')!
     node.data.overlayNodes = []
 
     const result = await simulatePassA(context(broken), 8)
-    expect(result.ok).toBe(true)
-    expect(result.evidence.status).toBe('pass')
+    expect(result.ok).toBe(false)
+    expect(result.evidence.status).toBe('fail')
     expect(result.evidence.issues).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'playtest.runtime.error' }),
     ]))

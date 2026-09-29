@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-video:compile-blueprint-outline args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entry", "idempotencyKey", "chapters", "routes"],
+  "$defs": {
+    "graphCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all"],
+      "properties": { "all": { "type": "array", "items": { "type": "object" } } }
+    },
+    "effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "op"],
+      "properties": {
+        "target": { "type": "string", "minLength": 1 },
+        "op": { "enum": ["add", "sub", "set"] },
+        "formulaId": { "type": "string", "minLength": 1 },
+        "value": { "type": "number" }
+      }
+    },
+    "feedbackSpec": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "component"],
+          "properties": { "kind": { "const": "transient-component" }, "component": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "component", "target"],
+          "properties": {
+            "kind": { "const": "state-binding" },
+            "component": { "type": "string", "minLength": 1 },
+            "target": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "hide-interface" } }
+        }
+      ]
+    },
+    "triggerSpec": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "ms"],
+          "properties": { "type": { "const": "at" }, "ms": { "type": "number", "minimum": 0 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "of"],
+          "properties": {
+            "type": { "const": "watch" },
+            "of": { "type": "string", "minLength": 1 },
+            "on": { "enum": ["change", "inc", "dec"] }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "condition"],
+          "properties": { "type": { "const": "state" }, "condition": { "$ref": "#/$defs/graphCondition" } }
+        }
+      ]
+    },
+    "compactAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pillarActionId", "component", "event", "feedbackSpec"],
+      "properties": {
+        "pillarActionId": { "type": "string", "minLength": 1 },
+        "component": { "type": "string", "minLength": 1 },
+        "event": { "type": "string", "minLength": 1 },
+        "effect": { "$ref": "#/$defs/effect" },
+        "feedbackSpec": { "$ref": "#/$defs/feedbackSpec" }
+      }
+    },
+    "compactSettlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pillarSettlementId", "triggerSpec", "feedbackSpec"],
+      "properties": {
+        "pillarSettlementId": { "type": "string", "minLength": 1 },
+        "triggerSpec": { "$ref": "#/$defs/triggerSpec" },
+        "feedbackSpec": { "$ref": "#/$defs/feedbackSpec" },
+        "pattern": { "type": "string", "minLength": 1 }
+      }
+    },
+    "compactResolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceNodeId", "pillarActionId", "triggerSpec"],
+      "properties": {
+        "sourceNodeId": { "type": "string", "minLength": 1 },
+        "pillarActionId": { "type": "string", "minLength": 1 },
+        "triggerSpec": { "$ref": "#/$defs/triggerSpec" },
+        "pattern": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "activityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional workflow generation check; normally derived from the active blueprint.outline activity."
+    },
+    "blueprintId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "entry": { "type": "string", "minLength": 1 },
+    "expectedRevision": { "type": "integer", "minimum": 0 },
+    "snapshotToken": { "type": "string", "minLength": 1 },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Stable identity for the complete desired outline. Same key and payload replay the accepted result."
+    },
+    "planId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Optional bounded-staging plan. Omit for a one-shot request; when present, batchIndex and batchCount are required by the Host."
+    },
+    "batchIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "description": "Zero-based batch index for a staged plan."
+    },
+    "batchCount": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 4,
+      "description": "Total staged batches. Bounded to avoid per-node MCP calls."
+    },
+    "commit": {
+      "type": "boolean",
+      "description": "When true, stage this batch and atomically compile only after every batch is present. Intermediate calls never mutate blueprint.json."
+    },
+    "chapters": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "description": "Each item is a UI-like chapter intent; the Host materializes full nodes, pillar prose, positions and outcome evidence.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "pillarBeatId", "beat"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "pillarBeatId": { "type": "string", "minLength": 1 },
+          "beat": { "enum": ["narrative", "choice", "combat", "check", "timed"] },
+          "lane": { "type": "integer", "minimum": -8, "maximum": 8 },
+          "cast": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["characterId"],
+              "properties": {
+                "characterId": { "type": "string", "minLength": 1 },
+                "role": { "enum": ["primary", "supporting", "background"] },
+                "onScreen": { "type": "boolean" }
+              }
+            }
+          },
+          "scenes": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["sceneId"],
+              "properties": {
+                "sceneId": { "type": "string", "minLength": 1 },
+                "role": { "enum": ["primary", "secondary", "background"] },
+                "useAsVideoReference": { "type": "boolean" }
+              }
+            }
+          },
+          "actions": { "type": "array", "items": { "$ref": "#/$defs/compactAction" } },
+          "settlements": { "type": "array", "items": { "$ref": "#/$defs/compactSettlement" } },
+          "resolvesActions": { "type": "array", "items": { "$ref": "#/$defs/compactResolution" } },
+          "loop": {
+            "type": "object", "additionalProperties": false, "required": ["backTo"],
+            "properties": { "backTo": { "type": "string", "minLength": 1 }, "note": { "type": "string" } }
+          },
+          "terminals": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["when"],
+              "properties": { "when": { "type": "string", "minLength": 1 }, "note": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "maxItems": 256,
+      "description": "producer.ref is a pillar action ID, pillar settlement ID, or lifecycle label. Host derives handles, edge design and target outcomeEvidence.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "target", "producer"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1 },
+          "target": { "type": "string", "minLength": 1 },
+          "producer": {
+            "type": "object", "additionalProperties": false, "required": ["kind", "ref"],
+            "properties": {
+              "kind": { "enum": ["action", "settlement", "lifecycle"] },
+              "ref": { "type": "string", "minLength": 1 }
+            }
+          },
+          "sourceHandle": { "type": "string", "minLength": 1 },
+          "targetHandle": { "type": "string", "minLength": 1 },
+          "condition": { "$ref": "#/$defs/graphCondition" },
+          "transition": { "enum": ["immediate", "onSettlement"] },
+          "narrativePayoff": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

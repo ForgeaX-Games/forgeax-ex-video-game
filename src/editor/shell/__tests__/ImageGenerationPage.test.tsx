@@ -73,6 +73,20 @@ describe('ImageGenerationPage', () => {
     expect(testState.workspaceProps?.initialAssetId).toBe('asset-not-in-first-catalog-response')
   })
 
+  it.each([
+    ['character', '角色', '角色生成'],
+    ['scene', '场景', '场景生成'],
+    ['image', '图片', '图片生成'],
+    ['icon', '图标', '图标生成'],
+  ] as const)('uses %s-specific text in the catalog generation breadcrumb', async (targetRoot, parent, title) => {
+    testState.target = { gameId: 'demo', targetRoot, returnView: 'assets' }
+
+    await act(async () => { render(<ImageGenerationPage onBack={vi.fn()} />) })
+
+    expect(screen.getByRole('button', { name: parent })).toBeTruthy()
+    expect(screen.getByText(title)).toBeTruthy()
+  })
+
   it('applies a selected image history asset to its catalog entity', async () => {
     testState.target = {
       gameId: 'demo',

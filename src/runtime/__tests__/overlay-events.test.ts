@@ -40,6 +40,27 @@ describe('overlay events / reactions', () => {
     expect(refs[0]?.componentId).toBe('test.qte')
   })
 
+  it('preserves outputs declared by dynamic inputs.events', () => {
+    const dynamic: Overlay = {
+      id: 'dynamic',
+      children: [{
+        id: 'choice',
+        component: 'test.qte',
+        inputs: {
+          events: [{
+            id: 'buy',
+            label: '购买',
+            outputs: [{ key: 'count', label: '数量', valueType: 'number' }],
+          }],
+        },
+      }],
+    }
+
+    expect(aggregateOverlayEvents(dynamic, getComponentManifest)[0]?.outputs).toEqual([
+      { key: 'count', label: '数量', valueType: 'number' },
+    ])
+  })
+
   it('namespaces when multiple emitters', () => {
     const multi: Overlay = {
       id: 'm',

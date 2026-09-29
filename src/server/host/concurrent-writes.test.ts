@@ -244,9 +244,9 @@ describe('asset manifest 并发写', () => {
     const workflow = JSON.parse(decoder.decode(files.get(VIDEO_GAME_WORKFLOW_FILE)!))
     const staleRevision = workflow.revision - 1
 
-    // rules.binding 属于下一组：拿过期修订号推进必须被拒。
+    // 用支柱而不是编译阶段来验：编译阶段现在会先被授权门拒掉，测不到修订号这一层。
     await expect(beginWorkflowActivity(context, {
-      activity: 'rules.binding',
+      activity: 'document.pillar',
       expectedWorkflowRevision: staleRevision,
     })).rejects.toMatchObject({ code: 'workflow.revision.conflict' })
   })

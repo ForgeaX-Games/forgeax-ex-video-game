@@ -129,6 +129,29 @@ describe('ComponentEventsEditor', () => {
     ])
   })
 
+  it('delegates mounted action deletion to the graph-level removal primitive callback', () => {
+    const onMountActionsChange = vi.fn()
+    const onRemoveMountAction = vi.fn()
+    render(
+      <ComponentEventsEditor
+        mode="mount"
+        events={[event]}
+        mountReactions={[{
+          when: { type: 'event', id: 'pass' },
+          do: [{ kind: 'advance', edgeId: 'edge-1' }],
+        }]}
+        spawnOptions={[]}
+        renderRoute={() => <div>目标节点</div>}
+        onMountActionsChange={onMountActionsChange}
+        onRemoveMountAction={onRemoveMountAction}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '移除推进' }))
+    expect(onRemoveMountAction).toHaveBeenCalledWith(event, 0)
+    expect(onMountActionsChange).not.toHaveBeenCalled()
+  })
+
   it('enables applying formulas inside catalog event effects when the formula library is provided', () => {
     const formula: Formula = {
       id: 'formula-damage',
@@ -367,7 +390,6 @@ describe('OverlaySchemeEditor selected child', () => {
         usageCount={0}
         onRename={vi.fn()}
         onRemove={vi.fn()}
-        onPromptChange={vi.fn()}
         onAddChild={vi.fn()}
         onRemoveChild={onRemoveChild}
         onPatchChild={vi.fn()}
@@ -396,7 +418,6 @@ describe('OverlaySchemeEditor selected child', () => {
         usageCount={0}
         onRename={vi.fn()}
         onRemove={vi.fn()}
-        onPromptChange={vi.fn()}
         onAddChild={vi.fn()}
         onRemoveChild={vi.fn()}
         onPatchChild={vi.fn()}
@@ -419,7 +440,6 @@ describe('OverlaySchemeEditor selected child', () => {
         usageCount={2}
         onRename={vi.fn()}
         onRemove={onRemove}
-        onPromptChange={vi.fn()}
         onAddChild={vi.fn()}
         onRemoveChild={vi.fn()}
         onPatchChild={vi.fn()}
@@ -447,7 +467,6 @@ describe('OverlaySchemeEditor selected child', () => {
         usageCount={0}
         onRename={vi.fn()}
         onRemove={vi.fn()}
-        onPromptChange={vi.fn()}
         onAddChild={vi.fn()}
         onRemoveChild={vi.fn()}
         onPatchChild={vi.fn()}
@@ -505,7 +524,6 @@ describe('OverlaySchemeEditor selected child', () => {
         usageCount={0}
         onRename={vi.fn()}
         onRemove={vi.fn()}
-        onPromptChange={vi.fn()}
         onAddChild={vi.fn()}
         onRemoveChild={vi.fn()}
         onPatchChild={vi.fn()}
@@ -544,7 +562,6 @@ describe('OverlaySchemeEditor selected child', () => {
         usageCount={0}
         onRename={vi.fn()}
         onRemove={vi.fn()}
-        onPromptChange={vi.fn()}
         onAddChild={vi.fn()}
         onRemoveChild={vi.fn()}
         onPatchChild={vi.fn()}
@@ -570,7 +587,6 @@ describe('OverlaySchemeEditor selected child', () => {
         locked
         onRename={vi.fn()}
         onRemove={vi.fn()}
-        onPromptChange={vi.fn()}
         onAddChild={vi.fn()}
         onRemoveChild={vi.fn()}
         onPatchChild={vi.fn()}
@@ -605,7 +621,6 @@ describe('OverlaySchemeEditor selected child', () => {
         usageCount={0}
         onRename={vi.fn()}
         onRemove={vi.fn()}
-        onPromptChange={vi.fn()}
         onAddChild={vi.fn()}
         onRemoveChild={vi.fn()}
         onPatchChild={vi.fn()}

@@ -19,14 +19,25 @@ import { getSubFlowPack, getSubProcess } from '@/runtime/core/schema/graph-schem
 import { deriveOutputs } from '@/runtime/core/registry/component-registry'
 import { flowHandleDisplay, mergeFlowHandles } from '@/authoring/graph/flow-handle-labels'
 
+/** 节点各出口 handle 的稳定 id → 组件 label 映射（边 label / 引脚展示共用）。 */
+function nodeEventLabels(node: GameNode, overlays?: Record<string, Overlay>): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const h of deriveOutputs(node, overlays)) {
+    if (h.label) map.set(h.id, h.label)
+  }
+  return map
+}
+
 function nodeOutputHandles(
   graph: GameGraph,
   node: GameNode,
   overlays?: Record<string, Overlay>,
+  labels?: Map<string, string>,
 ): Array<{ value: string; label: string }> {
+  const lookup = labels ?? nodeEventLabels(node, overlays)
   const extra = graph.edges
     .filter((e) => e.source === node.id && e.sourceHandle)
-    .map((e) => e.sourceHandle!)
+    .map((e) => ({ id: e.sourceHandle!, label: lookup.get(e.sourceHandle!) }))
   return mergeFlowHandles(deriveOutputs(node, overlays), extra)
 }
 
@@ -91,13 +102,17 @@ function resolveNodePositions(graph: GameGraph): Record<string, Position> {
 
 export function toFXView(graph: GameGraph, overlays?: Record<string, Overlay>): FXGraph {
   const layout = resolveNodePositions(graph)
+  const labelsByNode = new Map<string, Map<string, string>>()
+  for (const n of graph.nodes) labelsByNode.set(n.id, nodeEventLabels(n, overlays))
   return {
     nodes: graph.nodes.map((node): FXNode => ({
       id: node.id,
       type: 'default',
       position: layout[node.id] ?? readNodePosition(node) ?? DEFAULT_GRAPH_NODE_POSITION,
       inputs: [toHandle('in', '入口', 'target')],
-      outputs: nodeOutputHandles(graph, node, overlays).map((h) => toHandle(h.value, h.label, 'source')),
+      outputs: nodeOutputHandles(graph, node, overlays, labelsByNode.get(node.id)).map((h) =>
+        toHandle(h.value, h.label, 'source'),
+      ),
       data: {
         label: node.data.name,
         badge: badgeOf(node),
@@ -109,7 +124,10 @@ export function toFXView(graph: GameGraph, overlays?: Record<string, Overlay>): 
       target: e.target,
       sourceHandle: `source:${e.sourceHandle ?? 'default'}`,
       targetHandle: 'target:in',
-      label: flowHandleDisplay(e.sourceHandle ?? 'default'),
+      label: flowHandleDisplay(
+        e.sourceHandle ?? 'default',
+        labelsByNode.get(e.source)?.get(e.sourceHandle ?? 'default'),
+      ),
     })),
   }
 }
